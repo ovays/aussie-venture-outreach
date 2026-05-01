@@ -18,7 +18,7 @@ let outscraperCallCount = 0
 let outscraperCallWindowStart = Date.now()
 const OUTSCRAPER_RATE_LIMIT = 10
 
-async function rateLimitedFetch(url: string): Promise<Response> {
+async function rateLimitedFetch(url: string, headers: Record<string, string>): Promise<Response> {
   const now = Date.now()
   if (now - outscraperCallWindowStart > 60_000) {
     outscraperCallCount = 0
@@ -31,7 +31,7 @@ async function rateLimitedFetch(url: string): Promise<Response> {
     outscraperCallWindowStart = Date.now()
   }
   outscraperCallCount++
-  return fetch(url)
+  return fetch(url, { headers })
 }
 
 export async function searchBusinesses(query: string, limit = 20): Promise<OutscraperResult[]> {
@@ -44,9 +44,10 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
   })
 
   const url = `https://api.app.outscraper.com/maps/search-v3?${params}`
+  const headers = { 'X-API-KEY': apiKey }
 
   try {
-    const response = await rateLimitedFetch(url)
+    const response = await rateLimitedFetch(url, headers)
     if (!response.ok) {
       throw new Error(`Outscraper API error: ${response.status}`)
     }
