@@ -2,7 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { writeOutreachEmail, writeOutreachDM } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
 
-export async function runWriterAgent(): Promise<number> {
+export async function runWriterAgent(): Promise<void> {
   const supabase = createServiceClient()
 
   const { data: systemSetting } = await supabase
@@ -23,7 +23,7 @@ export async function runWriterAgent(): Promise<number> {
 
   if (!leads?.length) {
     console.log('No researched leads to write for')
-    return 0
+    return
   }
 
   let processed = 0
@@ -125,5 +125,4 @@ export async function runWriterAgent(): Promise<number> {
   })
 
   console.log(`Writer agent done: ${processed} emails written`)
-  return processed
 }
