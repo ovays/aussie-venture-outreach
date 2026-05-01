@@ -7,10 +7,17 @@ import { runSenderAgent } from '../../../../../agents/sender'
 export const maxDuration = 300
 
 export async function POST() {
+  let step = 'finder'
   try {
     const leadsFound = await runFinderAgent()
+
+    step = 'researcher'
     const leadsEnriched = await runResearcherAgent()
+
+    step = 'writer'
     await runWriterAgent()
+
+    step = 'sender'
     const { sent: emailsSent, failed: emailsFailed } = await runSenderAgent()
 
     return NextResponse.json({
@@ -20,6 +27,8 @@ export async function POST() {
       emails_failed: emailsFailed,
     })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`[pipeline] step="${step}" error:`, err)
+    return NextResponse.json({ error: message, step }, { status: 500 })
   }
 }
