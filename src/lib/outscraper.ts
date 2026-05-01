@@ -43,8 +43,12 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
     region: 'AU',
   })
 
-  const url = `https://api.app.outscraper.com/maps/search-v3?${params}`
+  const url = `https://api.app.outscraper.com/maps/search-v3?${params}&apiKey=${apiKey}`
   const headers = { 'X-API-KEY': apiKey }
+
+  console.log('OUTSCRAPER_API_KEY exists:', !!process.env.OUTSCRAPER_API_KEY)
+  console.log('Key prefix:', process.env.OUTSCRAPER_API_KEY?.substring(0, 10))
+  console.log('Outscraper URL (no key):', `https://api.app.outscraper.com/maps/search-v3?${params}`)
 
   try {
     const response = await rateLimitedFetch(url, headers)
