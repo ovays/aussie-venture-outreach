@@ -10,8 +10,10 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .eq('key', 'system_active')
     .single()
 
+  console.log(`[sender] system_active = "${systemSetting?.value}"`)
+
   if (systemSetting?.value !== 'true') {
-    console.log('System is paused - Sender agent skipped')
+    console.log('[sender] System is paused - Sender agent skipped')
     return { sent: 0, failed: 0 }
   }
 
@@ -22,6 +24,29 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .single()
 
   const dailyLimit = parseInt(limitSetting?.value ?? '50', 10)
+  console.log(`[sender] daily_email_limit = ${dailyLimit}`)
+
+  // Diagnostic: count total pending_send emails before applying limit
+  const { count: pendingCount } = await supabase
+    .from('emails')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'pending_send')
+  console.log(`[sender] emails with status=pending_send: ${pendingCount ?? 0}`)
+
+  // Diagnostic: count leads with email_ready status
+  const { count: emailReadyCount } = await supabase
+    .from('leads')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'email_ready')
+  console.log(`[sender] leads with status=email_ready: ${emailReadyCount ?? 0}`)
+
+  // Diagnostic: count email_ready leads that actually have an email address
+  const { count: emailReadyWithEmail } = await supabase
+    .from('leads')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'email_ready')
+    .not('email', 'is', null)
+  console.log(`[sender] email_ready leads with a real email address: ${emailReadyWithEmail ?? 0}`)
 
   const { data: pendingEmails } = await supabase
     .from('emails')
@@ -29,8 +54,10 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .eq('status', 'pending_send')
     .limit(dailyLimit)
 
+  console.log(`[sender] fetched ${pendingEmails?.length ?? 0} pending emails to process`)
+
   if (!pendingEmails?.length) {
-    console.log('No pending emails to send')
+    console.log('[sender] No pending emails to send — emails table has no pending_send rows')
     return { sent: 0, failed: 0 }
   }
 

@@ -63,6 +63,8 @@ export async function runWriterAgent(): Promise<void> {
           body_text: emailResult.body,
           status: 'pending_send',
         })
+      } else {
+        console.log(`[writer] No email address for lead ${lead.business_name} — skipping email insert`)
       }
 
       // Write DM
