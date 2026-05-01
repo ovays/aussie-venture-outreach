@@ -23,6 +23,12 @@ export function SystemSettings({ initialSettings }: SystemSettingsProps) {
   const [saving, setSaving] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
 
+  // Danger Zone state
+  const [showResetModal, setShowResetModal] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [resetDone, setResetDone] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
+
   // Pipeline state
   const [pipelineRunning, setPipelineRunning] = useState(false)
   const [pipelineTriggered, setPipelineTriggered] = useState(false)
@@ -139,6 +145,22 @@ export function SystemSettings({ initialSettings }: SystemSettingsProps) {
     }
   }
 
+  async function resetAllData() {
+    setResetting(true)
+    setResetError(null)
+    try {
+      const res = await fetch('/api/reset', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Reset failed')
+      setResetDone(true)
+      setShowResetModal(false)
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setResetting(false)
+    }
+  }
+
   function SaveIndicator({ k }: { k: string }) {
     if (saving === k) return <span className="text-xs text-sky-400 ml-2">Saving…</span>
     if (saved === k) return <span className="text-xs text-green-400 ml-2">Saved ✓</span>
@@ -204,6 +226,27 @@ export function SystemSettings({ initialSettings }: SystemSettingsProps) {
                 style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
               />
               <SaveIndicator k="daily_email_limit" />
+            </div>
+          </div>
+
+          {/* DM limit */}
+          <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+            <div>
+              <p className="text-sm text-white">Daily DM Limit</p>
+              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Max DMs to queue per day (Instagram + Facebook)</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={getNum('daily_dm_limit')}
+                onChange={(e) => setSettings((p) => ({ ...p, daily_dm_limit: e.target.value }))}
+                onBlur={(e) => updateSetting('daily_dm_limit', e.target.value)}
+                min={1}
+                max={200}
+                className="w-24 px-3 py-1.5 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
+                style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+              />
+              <SaveIndicator k="daily_dm_limit" />
             </div>
           </div>
 
@@ -479,6 +522,81 @@ export function SystemSettings({ initialSettings }: SystemSettingsProps) {
           API keys are stored in .env.local and are never exposed in the UI.
         </p>
       </section>
+
+      {/* Danger Zone */}
+      <section>
+        <h3 className="text-base font-semibold mb-1" style={{ color: '#f87171' }}>Danger Zone</h3>
+        <p className="text-xs mb-4" style={{ color: '#64748b' }}>
+          Irreversible actions. Use with caution.
+        </p>
+
+        <div className="rounded-lg p-4" style={{ border: '1px solid #7f1d1d', background: '#1a0a0a' }}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-white">Reset All Data</p>
+              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>
+                Delete all leads, emails, DMs, deals, and activity logs
+              </p>
+            </div>
+            <button
+              onClick={() => { setShowResetModal(true); setResetDone(false); setResetError(null) }}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              style={{ background: '#7f1d1d', color: '#fca5a5', border: '1px solid #991b1b' }}
+            >
+              Reset All Data
+            </button>
+          </div>
+
+          {resetDone && (
+            <p className="mt-3 text-sm" style={{ color: '#4ade80' }}>All data cleared successfully.</p>
+          )}
+          {resetError && (
+            <p className="mt-3 text-sm text-red-400">{resetError}</p>
+          )}
+        </div>
+      </section>
+
+      {/* Reset confirmation modal */}
+      {showResetModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.7)' }}
+          onClick={() => !resetting && setShowResetModal(false)}
+        >
+          <div
+            className="rounded-xl p-6 max-w-sm w-full mx-4"
+            style={{ background: '#1a1d2e', border: '1px solid #2a2d3e' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold text-white mb-2">Are you sure?</h3>
+            <p className="text-sm mb-6" style={{ color: '#94a3b8' }}>
+              This will permanently delete all leads, emails, DMs, deals, and activity logs.
+              This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={resetAllData}
+                disabled={resetting}
+                className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors"
+                style={{ background: '#dc2626', color: 'white' }}
+              >
+                {resetting ? 'Deleting…' : 'Yes, delete everything'}
+              </button>
+              <button
+                onClick={() => setShowResetModal(false)}
+                disabled={resetting}
+                className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors"
+                style={{ background: '#2a2d3e', color: '#94a3b8' }}
+              >
+                Cancel
+              </button>
+            </div>
+            {resetError && (
+              <p className="mt-3 text-sm text-red-400">{resetError}</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

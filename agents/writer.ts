@@ -16,6 +16,49 @@ export async function runWriterAgent(): Promise<void> {
     return
   }
 
+  // Read daily DM limit
+  const { data: dmLimitSetting } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'daily_dm_limit')
+    .single()
+
+  const dailyDmLimit = parseInt(dmLimitSetting?.value ?? '10', 10)
+
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+  const { count: todayDmCount } = await supabase
+    .from('dm_queue')
+    .select('*', { count: 'exact', head: true })
+    .gte('created_at', todayStart.toISOString())
+
+  let dmsAddedToday = todayDmCount ?? 0
+  console.log(`[writer] DM limit: ${dailyDmLimit}, already queued today: ${dmsAddedToday}`)
+
+  // Reset stale email_ready leads (no pending_send email) back to researched so they reprocess
+  const { data: emailReadyLeads } = await supabase
+    .from('leads')
+    .select('id')
+    .eq('status', 'email_ready')
+
+  if (emailReadyLeads?.length) {
+    const emailReadyIds = emailReadyLeads.map((l: { id: string }) => l.id)
+    const { data: emailsWithPending } = await supabase
+      .from('emails')
+      .select('lead_id')
+      .in('lead_id', emailReadyIds)
+      .eq('status', 'pending_send')
+
+    const withPendingSet = new Set(emailsWithPending?.map((e: { lead_id: string }) => e.lead_id) ?? [])
+    const toReset = emailReadyIds.filter((id: string) => !withPendingSet.has(id))
+
+    if (toReset.length) {
+      console.log(`[writer] Resetting ${toReset.length} stale email_ready leads to researched`)
+      await supabase.from('leads').update({ status: 'researched' }).in('id', toReset)
+    }
+  }
+
+  // Fetch all researched leads (includes any just reset above)
   const { data: leads } = await supabase
     .from('leads')
     .select('*, categories(*)')
@@ -53,6 +96,9 @@ export async function runWriterAgent(): Promise<void> {
 
       const bodyHtml = emailBodyToHtml(emailResult.body)
 
+      let emailInserted = false
+      let dmInserted = false
+
       // Save email
       if (lead.email) {
         await supabase.from('emails').insert({
@@ -63,6 +109,7 @@ export async function runWriterAgent(): Promise<void> {
           body_text: emailResult.body,
           status: 'pending_send',
         })
+        emailInserted = true
       } else {
         console.log(`[writer] No email address for lead ${lead.business_name} — skipping email insert`)
       }
@@ -75,8 +122,8 @@ export async function runWriterAgent(): Promise<void> {
         category: lead.category_name,
       })
 
-      // Save DM if Instagram handle found
-      if (lead.instagram_handle) {
+      // Save DM if Instagram handle found and under daily limit
+      if (lead.instagram_handle && dmsAddedToday < dailyDmLimit) {
         await supabase.from('dm_queue').insert({
           lead_id: lead.id,
           platform: 'instagram',
@@ -84,9 +131,11 @@ export async function runWriterAgent(): Promise<void> {
           message_text: dmText,
           status: 'pending',
         })
+        dmInserted = true
+        dmsAddedToday++
       }
 
-      if (lead.facebook_url) {
+      if (lead.facebook_url && dmsAddedToday < dailyDmLimit) {
         await supabase.from('dm_queue').insert({
           lead_id: lead.id,
           platform: 'facebook',
@@ -95,18 +144,22 @@ export async function runWriterAgent(): Promise<void> {
           message_text: dmText,
           status: 'pending',
         })
+        dmInserted = true
+        dmsAddedToday++
       }
+
+      const newStatus = emailInserted ? 'email_ready' : dmInserted ? 'dm_only' : 'no_contact'
 
       await supabase
         .from('leads')
-        .update({ status: 'email_ready' })
+        .update({ status: newStatus })
         .eq('id', lead.id)
 
       await supabase.from('activity_log').insert({
         event_type: 'email_written',
         lead_id: lead.id,
-        description: `Email written for: ${lead.business_name}`,
-        metadata: { has_email: !!lead.email, has_instagram: !!lead.instagram_handle },
+        description: `Outreach written for: ${lead.business_name} (${newStatus})`,
+        metadata: { has_email: emailInserted, has_instagram: !!lead.instagram_handle, status: newStatus },
       })
 
       processed++

@@ -62,6 +62,10 @@ export async function runFinderAgent(): Promise<number> {
     return 0
   }
 
+  // Distribute limit evenly across categories so each day has a mix
+  const leadsPerCategory = Math.ceil(dailyLimit / categories.length)
+  console.log(`[finder] ${categories.length} categories, ~${leadsPerCategory} leads each (limit ${dailyLimit})`)
+
   let totalFound = 0
 
   for (const category of categories) {
@@ -76,16 +80,15 @@ export async function runFinderAgent(): Promise<number> {
 
     const keywords: string[] = category.search_keywords ?? []
 
-    for (const city of targetCities) {
-      if (totalFound >= dailyLimit) break
+    let foundForCategory = 0
 
+    outer:
+    for (const city of targetCities) {
       const suburbs = CITY_SUBURBS[city] ?? ['CBD']
 
       for (const suburb of suburbs) {
-        if (totalFound >= dailyLimit) break
-
         for (const keyword of keywords) {
-          if (totalFound >= dailyLimit) break
+          if (foundForCategory >= leadsPerCategory || totalFound >= dailyLimit) break outer
 
           const query = buildSearchQuery(keyword, suburb, city)
 
@@ -93,9 +96,8 @@ export async function runFinderAgent(): Promise<number> {
             const results = await searchBusinesses(query, 20)
 
             for (const result of results) {
-              if (totalFound >= dailyLimit) break
+              if (foundForCategory >= leadsPerCategory || totalFound >= dailyLimit) break
 
-              // Duplicate check
               const name = result.name
               const phone = result.phone
               const email = result.email
@@ -110,7 +112,6 @@ export async function runFinderAgent(): Promise<number> {
 
               if (existing?.length) continue
 
-              // Save new lead
               await supabase.from('leads').insert({
                 business_name: name,
                 category_id: category.id,
@@ -134,6 +135,7 @@ export async function runFinderAgent(): Promise<number> {
                 metadata: { category: category.name, city, suburb },
               })
 
+              foundForCategory++
               totalFound++
             }
           } catch (error) {
@@ -146,6 +148,8 @@ export async function runFinderAgent(): Promise<number> {
         }
       }
     }
+
+    console.log(`[finder] ${category.name}: ${foundForCategory} leads found`)
   }
 
   await supabase.from('activity_log').insert({
