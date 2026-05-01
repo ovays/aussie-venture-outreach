@@ -28,6 +28,28 @@ let outscraperCallCount = 0
 let outscraperCallWindowStart = Date.now()
 const OUTSCRAPER_RATE_LIMIT = 10
 
+// ✅ NEW: normalize phone (better dedupe)
+function normalizePhone(p?: string) {
+  return p?.replace(/\D/g, '')
+}
+
+// ✅ NEW: dedupe function
+function dedupeResults(results: OutscraperResult[]): OutscraperResult[] {
+  const seen = new Set<string>()
+
+  return results.filter((r) => {
+    const key =
+      normalizePhone(r.phone) ||
+      `${r.name?.toLowerCase()}-${r.full_address?.toLowerCase()}`
+
+    if (!key) return true
+
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 async function rateLimitedFetch(url: string, headers: Record<string, string>): Promise<Response> {
   const now = Date.now()
   if (now - outscraperCallWindowStart > 60_000) {
@@ -46,9 +68,9 @@ async function rateLimitedFetch(url: string, headers: Record<string, string>): P
 
 async function pollResults(resultsUrl: string, headers: Record<string, string>): Promise<OutscraperResult[]> {
   for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+    const wait = attempt < 3 ? 2000 : 4000
+    await new Promise((r) => setTimeout(r, wait))
 
-    // ✅ FIXED: use rateLimitedFetch instead of fetch
     const res = await rateLimitedFetch(resultsUrl, headers)
 
     if (!res.ok) throw new Error(`Outscraper poll error: ${res.status}`)
@@ -75,10 +97,7 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
     region: 'AU',
   })
 
-  // ✅ Correct endpoint + API key in query param
   const url = `https://api.app.outscraper.com/maps/search-v3?${params}&apiKey=${encodeURIComponent(cleanKey)}`
-
-  // ✅ Explicit empty headers
   const headers: Record<string, string> = {}
 
   console.log(`Outscraper search: "${query}"`)
@@ -93,18 +112,30 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
     const job = await response.json() as OutscraperJobResponse
     console.log(`Outscraper job queued: id=${job.id} status=${job.status}`)
 
-    // Synchronous response (unlikely for v3 but handle it)
+    let results: OutscraperResult[] = []
+
+    // Synchronous response
     if (job.status !== 'Pending' && job.data) {
-      return job.data.flat()
+      results = job.data.flat()
     }
 
-    // Async response — poll results_location
-    if (job.results_location) {
-      return await pollResults(job.results_location, headers)
+    // Async response
+    else if (job.results_location) {
+      results = await pollResults(job.results_location, headers)
     }
 
-    console.warn('Outscraper: no results_location in response')
-    return []
+    else {
+      console.warn('Outscraper: no results_location in response')
+      return []
+    }
+
+    // ✅ NEW: dedupe before returning
+    const uniqueResults = dedupeResults(results)
+
+    console.log(`Deduped results: ${results.length} → ${uniqueResults.length}`)
+
+    return uniqueResults
+
   } catch (error) {
     console.error('Outscraper error:', error)
     return []
