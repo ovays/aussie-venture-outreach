@@ -64,7 +64,7 @@ async function pollResults(resultsUrl: string, headers: Record<string, string>):
 }
 
 export async function searchBusinesses(query: string, limit = 20): Promise<OutscraperResult[]> {
-  const apiKey = (process.env.OUTSCRAPER_API_KEY ?? '').trim()
+  const cleanKey = (process.env.OUTSCRAPER_API_KEY ?? '').replace(/[^\x20-\x7E]/g, '').trim()
   const params = new URLSearchParams({
     query,
     limit: String(limit),
@@ -72,8 +72,8 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
     region: 'AU',
   })
 
-  const url = `https://api.app.outscraper.com/maps/search-v3?${params}&apiKey=${encodeURIComponent(apiKey)}`
-  const headers = { 'X-API-KEY': apiKey }
+  const url = `https://api.app.outscraper.com/maps/search-v3?${params}&apiKey=${encodeURIComponent(cleanKey)}`
+  const headers = { 'X-API-KEY': cleanKey }
 
   console.log(`Outscraper search: "${query}"`)
 
