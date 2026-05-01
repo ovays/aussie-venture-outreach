@@ -3,16 +3,20 @@ import { writeOutreachEmail, writeOutreachDM } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
 
 export async function runWriterAgent(): Promise<void> {
+  console.log('[writer] Writer agent starting...')
+
   const supabase = createServiceClient()
 
-  const { data: systemSetting } = await supabase
+  const { data: systemSetting, error: settingErr } = await supabase
     .from('settings')
     .select('value')
     .eq('key', 'system_active')
     .single()
 
+  console.log(`[writer] system_active = "${systemSetting?.value}" (err: ${settingErr?.message ?? 'none'})`)
+
   if (systemSetting?.value !== 'true') {
-    console.log('System is paused. Writer agent skipped.')
+    console.log('[writer] System is paused — writer skipped')
     return
   }
 
@@ -53,32 +57,37 @@ export async function runWriterAgent(): Promise<void> {
     const toReset = emailReadyIds.filter((id: string) => !withPendingSet.has(id))
 
     if (toReset.length) {
-      console.log(`[writer] Resetting ${toReset.length} stale email_ready leads to researched`)
-      await supabase.from('leads').update({ status: 'researched' }).in('id', toReset)
+      console.log(`[writer] Resetting ${toReset.length} stale email_ready leads back to researched`)
+      const { error: resetErr } = await supabase.from('leads').update({ status: 'researched' }).in('id', toReset)
+      if (resetErr) console.error('[writer] Reset error:', resetErr.message)
     }
   }
 
   // Fetch all researched leads (includes any just reset above)
-  const { data: leads } = await supabase
+  const { data: leads, error: leadsErr } = await supabase
     .from('leads')
     .select('*, categories(*)')
     .eq('status', 'researched')
 
+  if (leadsErr) console.error('[writer] Error fetching researched leads:', leadsErr.message)
+
   if (!leads?.length) {
-    console.log('No researched leads to write for')
+    console.log('[writer] No researched leads found — nothing to process')
     return
   }
+
+  console.log(`[writer] Found ${leads.length} researched leads to process`)
+  console.log(`[writer] Leads with email: ${leads.filter(l => l.email).length} / ${leads.length}`)
 
   let processed = 0
   let emailsQueued = 0
   let emailsSkipped = 0
   let dmsQueued = 0
 
-  console.log(`[writer] Processing ${leads.length} researched leads`)
-
   for (const lead of leads) {
+    console.log(`[writer] Processing: "${lead.business_name}" | email: ${lead.email ?? 'NONE'} | id: ${lead.id}`)
+
     try {
-      // Visit only when business is in Sydney AND category supports in-person content
       const VISIT_ELIGIBLE = [
         'Halal Restaurants', 'Halal Cafes', 'Halal Bakeries / Dessert Shops',
         'Nail Salons', 'Hair Salons', 'Beauty / Lash Studios',
@@ -87,7 +96,7 @@ export async function runWriterAgent(): Promise<void> {
       const isSydney = lead.city?.toLowerCase() === 'sydney'
       const contentType = (isSydney && VISIT_ELIGIBLE.includes(lead.category_name)) ? 'visit' : 'remote'
 
-      // Write email
+      // Write email content
       const emailResult = await writeOutreachEmail({
         business_name: lead.business_name,
         category: lead.category_name,
@@ -99,14 +108,16 @@ export async function runWriterAgent(): Promise<void> {
         content_type: contentType,
       })
 
+      console.log(`[writer] Email generated for "${lead.business_name}" — subject: "${emailResult.subject}" | body length: ${emailResult.body?.length ?? 0}`)
+
       const bodyHtml = emailBodyToHtml(emailResult.body)
 
       let emailInserted = false
       let dmInserted = false
 
-      // Save email
+      // Insert email row if lead has an address
       if (lead.email) {
-        await supabase.from('emails').insert({
+        const { error: insertErr } = await supabase.from('emails').insert({
           lead_id: lead.id,
           type: 'initial_pitch',
           subject: emailResult.subject,
@@ -114,14 +125,20 @@ export async function runWriterAgent(): Promise<void> {
           body_text: emailResult.body,
           status: 'pending_send',
         })
-        emailInserted = true
-        emailsQueued++
+
+        if (insertErr) {
+          console.error(`[writer] EMAIL INSERT FAILED for "${lead.business_name}" (${lead.email}): ${insertErr.message} | code: ${insertErr.code}`)
+        } else {
+          console.log(`[writer] Email inserted OK for "${lead.business_name}" (${lead.email})`)
+          emailInserted = true
+          emailsQueued++
+        }
       } else {
-        console.log(`[writer] SKIP email — no address for: ${lead.business_name}`)
+        console.log(`[writer] SKIP email — no address for: "${lead.business_name}"`)
         emailsSkipped++
       }
 
-      // Write DM
+      // Write DM content
       const dmText = await writeOutreachDM({
         business_name: lead.business_name,
         suburb: lead.suburb ?? '',
@@ -129,22 +146,27 @@ export async function runWriterAgent(): Promise<void> {
         category: lead.category_name,
       })
 
-      // Save DM if Instagram handle found and under daily limit
+      // Queue Instagram DM if within daily limit
       if (lead.instagram_handle && dmsAddedToday < dailyDmLimit) {
-        await supabase.from('dm_queue').insert({
+        const { error: igErr } = await supabase.from('dm_queue').insert({
           lead_id: lead.id,
           platform: 'instagram',
           handle: lead.instagram_handle,
           message_text: dmText,
           status: 'pending',
         })
-        dmInserted = true
-        dmsAddedToday++
-        dmsQueued++
+        if (igErr) {
+          console.error(`[writer] DM insert (instagram) failed for "${lead.business_name}": ${igErr.message}`)
+        } else {
+          dmInserted = true
+          dmsAddedToday++
+          dmsQueued++
+        }
       }
 
+      // Queue Facebook DM if within daily limit
       if (lead.facebook_url && dmsAddedToday < dailyDmLimit) {
-        await supabase.from('dm_queue').insert({
+        const { error: fbErr } = await supabase.from('dm_queue').insert({
           lead_id: lead.id,
           platform: 'facebook',
           handle: lead.facebook_url,
@@ -152,27 +174,41 @@ export async function runWriterAgent(): Promise<void> {
           message_text: dmText,
           status: 'pending',
         })
-        dmInserted = true
-        dmsAddedToday++
-        dmsQueued++
+        if (fbErr) {
+          console.error(`[writer] DM insert (facebook) failed for "${lead.business_name}": ${fbErr.message}`)
+        } else {
+          dmInserted = true
+          dmsAddedToday++
+          dmsQueued++
+        }
       }
 
-      const newStatus = emailInserted ? 'email_ready' : dmInserted ? 'dm_only' : 'no_contact'
+      // Use only statuses the leads table CHECK constraint allows
+      // 'email_ready' = email queued | 'researched' = only DM queued or nothing (stays for retry)
+      const newStatus = emailInserted ? 'email_ready' : 'researched'
 
-      await supabase
+      const { error: statusErr } = await supabase
         .from('leads')
         .update({ status: newStatus })
         .eq('id', lead.id)
 
-      await supabase.from('activity_log').insert({
+      if (statusErr) {
+        console.error(`[writer] Status update failed for "${lead.business_name}": ${statusErr.message}`)
+      } else {
+        console.log(`[writer] Lead "${lead.business_name}" → status: ${newStatus}`)
+      }
+
+      const { error: logErr } = await supabase.from('activity_log').insert({
         event_type: 'email_written',
         lead_id: lead.id,
         description: `Outreach written for: ${lead.business_name} (${newStatus})`,
         metadata: { has_email: emailInserted, has_instagram: !!lead.instagram_handle, status: newStatus },
       })
+      if (logErr) console.error(`[writer] activity_log insert failed: ${logErr.message}`)
 
       processed++
     } catch (error) {
+      console.error(`[writer] EXCEPTION for "${lead.business_name}":`, error)
       await supabase.from('activity_log').insert({
         event_type: 'writer_error',
         lead_id: lead.id,
@@ -190,5 +226,5 @@ export async function runWriterAgent(): Promise<void> {
     metadata: { total_processed: processed, emails_queued: emailsQueued, emails_skipped: emailsSkipped, dms_queued: dmsQueued },
   })
 
-  console.log(`Writer agent done: ${processed} leads processed`)
+  console.log(`[writer] Done: ${processed} leads processed`)
 }
