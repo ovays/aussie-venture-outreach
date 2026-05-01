@@ -14,7 +14,8 @@
       "Bash(npx trigger.dev@4.4.4 deploy)",
       "Bash(npx trigger.dev@4.4.4 deploy --help)",
       "Bash(TRIGGER_ACCESS_TOKEN=tr_dev_WAMnMWgjNwfOYl5UcXJg npx trigger.dev@4.4.4 deploy --env-file .env.local)",
-      "Bash(TRIGGER_ACCESS_TOKEN=tr_pat_1kpa68crc1krw8qm2oxwcpxpwk4t86ccpyg71ocw npx trigger.dev@4.4.4 deploy --env-file .env.local)"
+      "Bash(TRIGGER_ACCESS_TOKEN=tr_pat_1kpa68crc1krw8qm2oxwcpxpwk4t86ccpyg71ocw npx trigger.dev@4.4.4 deploy --env-file .env.local)",
+      "Bash(TRIGGER_ACCESS_TOKEN=tr_pat_1kpa68crc1krw8qm2oxwcpxpwk4t86ccpyg71ocw npx trigger.dev@4.4.4 deploy)"
     ]
   }
 }
