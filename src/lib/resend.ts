@@ -13,13 +13,9 @@ export async function sendEmail(params: {
   text: string
   leadId: string
 }): Promise<{ id: string } | null> {
-  if (params.leadId === 'digest' || !params.to || params.to === 'digest') {
-    // Allow digest sends even without a real lead ID
-  }
-
   try {
     const resend = getResend()
-    const result = await resend.emails.send({
+    const { data, error } = await resend.emails.send({
       from: 'Owais | Aussie Venture <hello@aussieventure.com>',
       to: params.to,
       subject: params.subject,
@@ -27,9 +23,15 @@ export async function sendEmail(params: {
       text: params.text,
       tags: params.leadId !== 'digest' ? [{ name: 'lead_id', value: params.leadId }] : [],
     })
-    return result.data
+
+    if (error) {
+      console.error('[resend] API returned error:', JSON.stringify(error, null, 2))
+      return null
+    }
+
+    return data
   } catch (error) {
-    console.error('Resend error:', error)
+    console.error('[resend] Exception thrown:', error)
     return null
   }
 }

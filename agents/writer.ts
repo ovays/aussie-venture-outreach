@@ -70,6 +70,11 @@ export async function runWriterAgent(): Promise<void> {
   }
 
   let processed = 0
+  let emailsQueued = 0
+  let emailsSkipped = 0
+  let dmsQueued = 0
+
+  console.log(`[writer] Processing ${leads.length} researched leads`)
 
   for (const lead of leads) {
     try {
@@ -110,8 +115,10 @@ export async function runWriterAgent(): Promise<void> {
           status: 'pending_send',
         })
         emailInserted = true
+        emailsQueued++
       } else {
-        console.log(`[writer] No email address for lead ${lead.business_name} — skipping email insert`)
+        console.log(`[writer] SKIP email — no address for: ${lead.business_name}`)
+        emailsSkipped++
       }
 
       // Write DM
@@ -133,6 +140,7 @@ export async function runWriterAgent(): Promise<void> {
         })
         dmInserted = true
         dmsAddedToday++
+        dmsQueued++
       }
 
       if (lead.facebook_url && dmsAddedToday < dailyDmLimit) {
@@ -146,6 +154,7 @@ export async function runWriterAgent(): Promise<void> {
         })
         dmInserted = true
         dmsAddedToday++
+        dmsQueued++
       }
 
       const newStatus = emailInserted ? 'email_ready' : dmInserted ? 'dm_only' : 'no_contact'
@@ -173,11 +182,13 @@ export async function runWriterAgent(): Promise<void> {
     }
   }
 
+  console.log(`[writer] Summary: ${emailsQueued} emails queued, ${emailsSkipped} skipped (no address), ${dmsQueued} DMs queued`)
+
   await supabase.from('activity_log').insert({
     event_type: 'writer_complete',
-    description: `Writer agent completed: ${processed} emails written`,
-    metadata: { total_processed: processed },
+    description: `Writer agent completed: ${emailsQueued} emails queued, ${emailsSkipped} skipped, ${dmsQueued} DMs queued`,
+    metadata: { total_processed: processed, emails_queued: emailsQueued, emails_skipped: emailsSkipped, dms_queued: dmsQueued },
   })
 
-  console.log(`Writer agent done: ${processed} emails written`)
+  console.log(`Writer agent done: ${processed} leads processed`)
 }

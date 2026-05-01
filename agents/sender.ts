@@ -63,15 +63,20 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
 
   let sent = 0
   let failed = 0
+  const total = pendingEmails.length
 
-  for (const emailRecord of pendingEmails) {
+  for (let i = 0; i < pendingEmails.length; i++) {
+    const emailRecord = pendingEmails[i]
     const lead = emailRecord.leads as { email: string | null; business_name: string } | null
 
     if (!lead?.email) {
+      console.log(`[sender] #${i + 1}/${total} SKIP — no email address for lead_id=${emailRecord.lead_id}`)
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
       failed++
       continue
     }
+
+    console.log(`[sender] #${i + 1}/${total} Sending to: ${lead.email} (${lead.business_name}) subject: "${emailRecord.subject}"`)
 
     try {
       const result = await sendEmail({
@@ -83,6 +88,8 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
       })
 
       if (result) {
+        console.log(`[sender] #${i + 1}/${total} SUCCESS — resend_id=${result.id}`)
+
         await supabase.from('emails').update({
           status: 'sent',
           resend_id: result.id,
@@ -100,24 +107,27 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
 
         sent++
       } else {
+        console.error(`[sender] #${i + 1}/${total} FAILED — sendEmail returned null for ${lead.email} (Resend error logged above)`)
+
         await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
 
         await supabase.from('activity_log').insert({
           event_type: 'email_failed',
           lead_id: emailRecord.lead_id,
-          description: `Failed to send email to ${lead.business_name}`,
-          metadata: {},
+          description: `Failed to send email to ${lead.business_name} (${lead.email})`,
+          metadata: { to: lead.email, subject: emailRecord.subject },
         })
 
         failed++
       }
     } catch (error) {
+      console.error(`[sender] #${i + 1}/${total} EXCEPTION for ${lead.email}:`, error)
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
       await supabase.from('activity_log').insert({
         event_type: 'sender_error',
         lead_id: emailRecord.lead_id,
-        description: `Error sending to ${lead.business_name}`,
-        metadata: { error: String(error) },
+        description: `Exception sending to ${lead.business_name} (${lead.email})`,
+        metadata: { error: String(error), to: lead.email },
       })
       failed++
     }
