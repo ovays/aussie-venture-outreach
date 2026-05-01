@@ -1,38 +1,13 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { extractWebsiteData } from '@/lib/claude'
+import { extractWebsiteData, agenticEmailSearch } from '@/lib/claude'
 
 async function fetchRawHtml(url: string): Promise<string> {
   const normalised = url.startsWith('http') ? url : `https://${url}`
-  const response = await fetch(normalised, {
+  const res = await fetch(normalised, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AussieVentureBot/1.0)' },
     signal: AbortSignal.timeout(10_000),
   })
-  return response.text()
-}
-
-function extractEmailFromHtml(html: string): string | null {
-  // mailto: links are most reliable
-  const mailtoMatch = html.match(/href=["']mailto:([^"'?\s]+)/i)
-  if (mailtoMatch?.[1]?.includes('@')) return mailtoMatch[1]
-
-  // Scan for all email-like tokens
-  const emailPattern = /\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b/g
-  const matches = html.match(emailPattern) ?? []
-
-  const valid = matches.filter(e =>
-    e.length < 80 &&
-    !e.includes('example.') &&
-    !e.includes('sentry.') &&
-    !e.includes('wixpress.') &&
-    !e.includes('@2x') &&
-    !/\.(png|jpg|gif|svg|webp|css|js)$/.test(e)
-  )
-
-  // Prefer common contact-style prefixes
-  const preferred = valid.find(e =>
-    /^(info|contact|hello|enquir|admin|support|booking|reservation|mail)@/i.test(e)
-  )
-  return preferred ?? valid[0] ?? null
+  return res.text()
 }
 
 export async function runResearcherAgent(): Promise<number> {
@@ -59,39 +34,62 @@ export async function runResearcherAgent(): Promise<number> {
     return 0
   }
 
+  console.log(`[researcher] Processing ${leads.length} new leads`)
+
   let processed = 0
+  let emailsFound = 0
+  const methodCounts: Record<string, number> = {}
 
   for (const lead of leads) {
+    console.log(`[researcher] Lead: "${lead.business_name}" | existing email: ${lead.email ?? 'NONE'} | website: ${lead.website ?? 'NONE'}`)
+
     try {
-      let websiteContent = ''
-      let foundEmail: string | null = null
+      let websiteText = ''
+      let rawHtml = ''
+      let foundEmail: string | null = lead.email ?? null
+      let emailMethod = 'outscraper'
+      let emailRounds = 0
 
       if (lead.website) {
         try {
-          const html = await fetchRawHtml(lead.website)
-
-          // Extract email from raw HTML before stripping tags
-          if (!lead.email) {
-            foundEmail = extractEmailFromHtml(html)
-
-            // If not on main page, try /contact
-            if (!foundEmail) {
-              try {
-                const base = new URL(lead.website.startsWith('http') ? lead.website : `https://${lead.website}`)
-                const contactHtml = await fetchRawHtml(`${base.origin}/contact`)
-                foundEmail = extractEmailFromHtml(contactHtml)
-              } catch {
-                // contact page may not exist
-              }
-            }
-          }
-
-          websiteContent = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 5000)
+          rawHtml = await fetchRawHtml(lead.website)
+          websiteText = rawHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 5000)
         } catch {
-          // site unreachable
+          console.log(`[researcher] Could not fetch website for "${lead.business_name}"`)
         }
       }
 
+      // Agentic email search — only if no email from Outscraper and we have a website
+      if (!foundEmail && lead.website && websiteText) {
+        console.log(`[researcher] Starting agentic email search for "${lead.business_name}"`)
+
+        const result = await agenticEmailSearch({
+          business_name: lead.business_name,
+          website_url: lead.website,
+          category: lead.category_name ?? '',
+          homepage_content: websiteText,
+        })
+
+        if (result.email) {
+          foundEmail = result.email
+          emailsFound++
+          console.log(`[researcher] Found email via ${result.method} in ${result.rounds} round(s): ${result.email}`)
+        } else {
+          console.log(`[researcher] No email found for "${lead.business_name}" after ${result.rounds} round(s)`)
+        }
+
+        emailMethod = result.method
+        emailRounds = result.rounds
+        methodCounts[result.method] = (methodCounts[result.method] ?? 0) + 1
+      } else if (foundEmail) {
+        emailMethod = 'outscraper'
+        methodCounts['outscraper'] = (methodCounts['outscraper'] ?? 0) + 1
+      } else {
+        emailMethod = 'no_website'
+        methodCounts['no_website'] = (methodCounts['no_website'] ?? 0) + 1
+      }
+
+      // Enrich description, services, social from website
       let enriched = {
         description: '',
         services: '',
@@ -100,17 +98,17 @@ export async function runResearcherAgent(): Promise<number> {
         other_social: null as string | null,
       }
 
-      if (websiteContent) {
-        enriched = await extractWebsiteData(websiteContent)
+      if (websiteText) {
+        enriched = await extractWebsiteData(websiteText)
       }
 
-      // If Instagram not found on website, generate a best-guess handle
+      // Fallback: generate best-guess Instagram handle if not found
       if (!enriched.instagram_handle && lead.business_name) {
         const cleanName = lead.business_name.toLowerCase().replace(/[^a-z0-9]/g, '')
         enriched.instagram_handle = `@${cleanName}`
       }
 
-      await supabase
+      const { error: updateErr } = await supabase
         .from('leads')
         .update({
           ...(foundEmail && !lead.email ? { email: foundEmail } : {}),
@@ -122,15 +120,28 @@ export async function runResearcherAgent(): Promise<number> {
         })
         .eq('id', lead.id)
 
+      if (updateErr) {
+        console.error(`[researcher] Lead update failed for "${lead.business_name}": ${updateErr.message}`)
+      }
+
+      // Learning log — record method, rounds, outcome for future analysis
       await supabase.from('activity_log').insert({
         event_type: 'lead_researched',
         lead_id: lead.id,
-        description: `Researched: ${lead.business_name}`,
-        metadata: { has_instagram: !!enriched.instagram_handle, email_found: !!foundEmail },
+        description: `Researched: ${lead.business_name} | email: ${foundEmail ? 'found' : 'not found'} via ${emailMethod}`,
+        metadata: {
+          email_found: !!foundEmail,
+          email_method: emailMethod,
+          email_rounds: emailRounds,
+          has_instagram: !!enriched.instagram_handle,
+          has_website: !!lead.website,
+        },
       })
 
       processed++
     } catch (error) {
+      console.error(`[researcher] Exception for "${lead.business_name}":`, error)
+
       await supabase.from('activity_log').insert({
         event_type: 'researcher_error',
         lead_id: lead.id,
@@ -138,20 +149,19 @@ export async function runResearcherAgent(): Promise<number> {
         metadata: { error: String(error) },
       })
 
-      // Still mark as researched so pipeline continues
-      await supabase
-        .from('leads')
-        .update({ status: 'researched' })
-        .eq('id', lead.id)
+      // Mark researched anyway so the pipeline can continue
+      await supabase.from('leads').update({ status: 'researched' }).eq('id', lead.id)
     }
   }
 
+  console.log(`[researcher] Done: ${processed} leads processed, ${emailsFound} emails found`)
+  console.log(`[researcher] Email method breakdown:`, methodCounts)
+
   await supabase.from('activity_log').insert({
     event_type: 'researcher_complete',
-    description: `Researcher agent completed - ${processed} leads enriched`,
-    metadata: { total_processed: processed },
+    description: `Researcher agent completed — ${processed} leads, ${emailsFound} emails found`,
+    metadata: { total_processed: processed, emails_found: emailsFound, method_counts: methodCounts },
   })
 
-  console.log(`Researcher agent done - ${processed} leads enriched`)
   return processed
 }
