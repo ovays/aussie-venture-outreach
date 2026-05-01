@@ -72,7 +72,10 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
     region: 'AU',
   })
 
-  const url = `https://api.app.outscraper.com/maps/search-v3?${params}&apiKey=${encodeURIComponent(cleanKey)}`
+  // ✅ FIXED: updated endpoint + removed apiKey from URL
+  const url = `https://api.datapipelineplatform.cloud/maps/search-v3?${params}`
+
+  // ✅ keep header auth only (correct)
   const headers = { 'X-API-KEY': cleanKey }
 
   console.log(`Outscraper search: "${query}"`)
