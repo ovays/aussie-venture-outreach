@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp /tmp/CLAUDE.md.bak C:/agents/aussie-venture-outreach/CLAUDE.md)",
+      "Bash(npm install *)",
+      "Bash(mkdir *)",
+      "Bash(npm run *2)",
+      "Bash(npm run *)",
+      "Bash(npx tsx *)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
