@@ -20,7 +20,10 @@
       "Bash(git add *)",
       "Bash(git commit -m 'Fix Outscraper async polling *)",
       "Bash(git push *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(New-Item -ItemType Directory -Force \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\\\\app\\\\api\\\\reset\")",
+      "Bash(Out-Null)",
+      "Bash(Write-Host \"done\")"
     ]
   }
 }
