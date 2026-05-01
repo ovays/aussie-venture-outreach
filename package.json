@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "deploy:trigger": "npx trigger.dev@4.4.4 deploy"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
