@@ -43,11 +43,13 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
     region: 'AU',
   })
 
-  const url = `https://api.app.outscraper.com/maps/search-v3?${params}&apiKey=${apiKey}`
-  const headers = { 'X-API-KEY': apiKey }
+  const url = `https://api.app.outscraper.com/maps/search-v3?${params}&apiKey=${encodeURIComponent(apiKey.trim())}`
+  const headers = { 'X-API-KEY': apiKey.trim() }
 
   console.log('OUTSCRAPER_API_KEY exists:', !!process.env.OUTSCRAPER_API_KEY)
   console.log('Key prefix:', process.env.OUTSCRAPER_API_KEY?.substring(0, 10))
+  console.log('Key length:', process.env.OUTSCRAPER_API_KEY?.length)
+  console.log('Key has special chars:', /[^\x00-\x7F]/.test(process.env.OUTSCRAPER_API_KEY ?? ''))
   console.log('Outscraper URL (no key):', `https://api.app.outscraper.com/maps/search-v3?${params}`)
 
   try {
