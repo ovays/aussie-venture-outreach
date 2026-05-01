@@ -102,8 +102,8 @@ async function pollResults(
   console.warn('Outscraper: max poll attempts reached, giving up')
   return []
 }
-
-export async function searchBusinesses(query: string, limit = 20): Promise<OutscraperResult[]> {
+// change default
+export async function searchBusinesses(query: string, limit = 50): Promise<OutscraperResult[]> {
 
   const cleanKey = (process.env.OUTSCRAPER_API_KEY ?? '')
     .replace(/[^\x20-\x7E]/g, '')

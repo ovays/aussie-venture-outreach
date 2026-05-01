@@ -1,25 +1,10 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { searchBusinesses, buildSearchQuery } from '@/lib/outscraper'
-
-const SYDNEY_SUBURBS = [
-  'Lakemba', 'Bankstown', 'Auburn', 'Parramatta', 'Blacktown',
-  'Liverpool', 'Fairfield', 'Cabramatta', 'Strathfield', 'Burwood',
-  'Newtown', 'Surry Hills', 'Glebe', 'Leichhardt', 'Marrickville',
-  'Bondi', 'Coogee', 'Manly', 'Chatswood', 'Hurstville',
-]
-
-const CITY_SUBURBS: Record<string, string[]> = {
-  Sydney: SYDNEY_SUBURBS,
-  Melbourne: ['CBD', 'Fitzroy', 'Collingwood', 'Richmond', 'St Kilda', 'Prahran', 'South Yarra', 'Brunswick', 'Northcote', 'Carlton'],
-  Brisbane: ['CBD', 'Fortitude Valley', 'South Brisbane', 'West End', 'Newstead', 'New Farm', 'Paddington', 'Toowong'],
-  Perth: ['CBD', 'Fremantle', 'Subiaco', 'Mount Lawley', 'Leederville', 'Northbridge', 'Victoria Park'],
-  Adelaide: ['CBD', 'Norwood', 'Unley', 'Glenelg', 'Prospect', 'Burnside'],
-}
+import { searchBusinesses } from '@/lib/outscraper'
 
 export async function runFinderAgent(): Promise<number> {
   const supabase = createServiceClient()
 
-  // Check master switch
+  // 🔹 Check system active
   const { data: systemSetting } = await supabase
     .from('settings')
     .select('value')
@@ -27,137 +12,163 @@ export async function runFinderAgent(): Promise<number> {
     .single()
 
   if (systemSetting?.value !== 'true') {
-    console.log('System is paused - Finder agent skipped')
+    console.log('System paused')
     return 0
   }
 
-  // Read daily limit
-  const { data: limitSetting } = await supabase
+  // 🔹 Read limits from settings
+  const { data: leadSetting } = await supabase
     .from('settings')
     .select('value')
     .eq('key', 'daily_lead_limit')
     .single()
 
-  const dailyLimit = parseInt(limitSetting?.value ?? '50', 10)
-
-  // Read active cities
-  const { data: citiesSetting } = await supabase
+  const { data: emailSetting } = await supabase
     .from('settings')
     .select('value')
-    .eq('key', 'active_cities')
+    .eq('key', 'daily_email_limit')
     .single()
 
-  const activeCities = (citiesSetting?.value ?? 'Sydney')
-    .split(',')
-    .map((c: string) => c.trim())
+  const { data: dmSetting } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'daily_dm_limit')
+    .single()
 
-  // Read active categories
+  const TOTAL_TARGET = parseInt(leadSetting?.value ?? '5', 10)
+  const EMAIL_TARGET = parseInt(emailSetting?.value ?? '4', 10)
+  const INSTA_TARGET = parseInt(dmSetting?.value ?? '1', 10)
+
+  console.log("Targets:", { TOTAL_TARGET, EMAIL_TARGET, INSTA_TARGET })
+
+  // 🔹 Get active categories
   const { data: categories } = await supabase
     .from('categories')
     .select('*')
     .eq('status', 'active')
 
   if (!categories?.length) {
-    console.log('No active categories found')
+    console.log('No active categories')
     return 0
   }
-
-  // Distribute limit evenly across categories so each day has a mix
-  const leadsPerCategory = Math.ceil(dailyLimit / categories.length)
-  console.log(`[finder] ${categories.length} categories, ~${leadsPerCategory} leads each (limit ${dailyLimit})`)
 
   let totalFound = 0
 
   for (const category of categories) {
-    if (totalFound >= dailyLimit) break
-
-    const targetCities =
-      category.cities === 'sydney_only'
-        ? ['Sydney']
-        : category.cities === 'custom'
-        ? (category.custom_cities ?? [])
-        : activeCities
+    if (totalFound >= TOTAL_TARGET) break
 
     const keywords: string[] = category.search_keywords ?? []
 
-    let foundForCategory = 0
+    for (const keyword of keywords) {
+      if (totalFound >= TOTAL_TARGET) break
 
-    outer:
-    for (const city of targetCities) {
-      const suburbs = CITY_SUBURBS[city] ?? ['CBD']
+      // 🔥 Single broad query (cheap & effective)
+      const query = `${keyword} Sydney NSW`
 
-      for (const suburb of suburbs) {
-        for (const keyword of keywords) {
-          if (foundForCategory >= leadsPerCategory || totalFound >= dailyLimit) break outer
+      let emailCount = 0
+      let instaCount = 0
 
-          const query = buildSearchQuery(keyword, suburb, city)
+      let batch = 0
+      const MAX_BATCHES = 3   // 🔥 limits cost
+      const BATCH_SIZE = 10   // 🔥 small = cheaper
 
-          try {
-            const results = await searchBusinesses(query, 20)
+      while (
+        (emailCount < EMAIL_TARGET || instaCount < INSTA_TARGET) &&
+        batch < MAX_BATCHES
+      ) {
+        console.log(`Batch ${batch + 1}: ${query}`)
 
-            for (const result of results) {
-              if (foundForCategory >= leadsPerCategory || totalFound >= dailyLimit) break
+        const results = await searchBusinesses(query, BATCH_SIZE)
 
-              const name = result.name
-              const phone = result.phone
-              const email = result.email
+        if (!results.length) break
 
-              const { data: existing } = await supabase
-                .from('leads')
-                .select('id')
-                .or(
-                  `and(business_name.eq.${name},suburb.eq.${suburb}),phone.eq.${phone},email.eq.${email}`
-                )
-                .limit(1)
+        for (const result of results) {
+          if (totalFound >= TOTAL_TARGET) break
 
-              if (existing?.length) continue
+          let email = result.email
 
-              await supabase.from('leads').insert({
-                business_name: name,
-                category_id: category.id,
-                category_name: category.name,
-                halal: category.halal_filter,
-                address: result.full_address,
-                suburb,
-                city,
-                state: 'NSW',
-                phone: result.phone || null,
-                email: result.email || null,
-                website: result.site || null,
-                google_rating: result.rating || null,
-                google_reviews_count: result.reviews || null,
-                status: 'new',
-              })
+          // 🔥 HUMAN BEHAVIOUR: try website for email
+          if (!email && result.site) {
+            try {
+              const res = await fetch(result.site)
+              const html = await res.text()
 
-              await supabase.from('activity_log').insert({
-                event_type: 'lead_found',
-                description: `New lead found: ${name} in ${suburb}, ${city}`,
-                metadata: { category: category.name, city, suburb },
-              })
-
-              foundForCategory++
-              totalFound++
-            }
-          } catch (error) {
-            await supabase.from('activity_log').insert({
-              event_type: 'finder_error',
-              description: `Error searching: ${query}`,
-              metadata: { error: String(error) },
-            })
+              const match = html.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)
+              if (match) email = match[0]
+            } catch {}
           }
-        }
-      }
-    }
 
-    console.log(`[finder] ${category.name}: ${foundForCategory} leads found`)
+          // ✅ EMAIL FIRST
+          if (email && emailCount < EMAIL_TARGET) {
+            const { data: existing } = await supabase
+              .from('leads')
+              .select('id')
+              .eq('business_name', result.name)
+              .limit(1)
+
+            if (existing?.length) continue
+
+            await supabase.from('leads').insert({
+              business_name: result.name,
+              category_id: category.id,
+              category_name: category.name,
+              halal: category.halal_filter,
+              address: result.full_address,
+              city: 'Sydney',
+              phone: result.phone || null,
+              email,
+              website: result.site || null,
+              google_rating: result.rating || null,
+              google_reviews_count: result.reviews || null,
+              status: 'new',
+            })
+
+            emailCount++
+            totalFound++
+
+            console.log("✅ EMAIL:", result.name)
+            continue
+          }
+
+          // ✅ INSTAGRAM ONLY AFTER EMAIL DONE
+          if (!email && emailCount >= EMAIL_TARGET && instaCount < INSTA_TARGET) {
+            await supabase.from('leads').insert({
+              business_name: result.name,
+              category_id: category.id,
+              category_name: category.name,
+              halal: category.halal_filter,
+              address: result.full_address,
+              city: 'Sydney',
+              phone: result.phone || null,
+              email: null,
+              website: result.site || null,
+              google_rating: result.rating || null,
+              google_reviews_count: result.reviews || null,
+              status: 'new',
+            })
+
+            instaCount++
+            totalFound++
+
+            console.log("📱 INSTA:", result.name)
+          }
+
+          if (emailCount >= EMAIL_TARGET && instaCount >= INSTA_TARGET) break
+        }
+
+        batch++
+      }
+
+      console.log(`Finished keyword → Emails: ${emailCount}, Insta: ${instaCount}`)
+    }
   }
 
   await supabase.from('activity_log').insert({
     event_type: 'finder_complete',
-    description: `Finder agent completed - ${totalFound} new leads found`,
-    metadata: { total_found: totalFound },
+    description: `Finder completed - ${totalFound} leads`,
+    metadata: { totalFound }
   })
 
-  console.log(`Finder agent done - ${totalFound} leads found`)
+  console.log("TOTAL FOUND:", totalFound)
   return totalFound
 }
