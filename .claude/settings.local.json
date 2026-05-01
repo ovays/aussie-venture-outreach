@@ -7,7 +7,14 @@
       "Bash(npm run *2)",
       "Bash(npm run *)",
       "Bash(npx tsx *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(npx trigger.dev@latest init -p proj_pkyxowcjibwfokooeqaw)",
+      "Bash(npx trigger.dev@4.4.4 init --help)",
+      "Bash(npx trigger.dev@4.4.4 init -p proj_pkyxowcjibwfokooeqaw -y)",
+      "Bash(npx trigger.dev@4.4.4 deploy)",
+      "Bash(npx trigger.dev@4.4.4 deploy --help)",
+      "Bash(TRIGGER_ACCESS_TOKEN=tr_dev_WAMnMWgjNwfOYl5UcXJg npx trigger.dev@4.4.4 deploy --env-file .env.local)",
+      "Bash(TRIGGER_ACCESS_TOKEN=tr_pat_1kpa68crc1krw8qm2oxwcpxpwk4t86ccpyg71ocw npx trigger.dev@4.4.4 deploy --env-file .env.local)"
     ]
   }
 }
