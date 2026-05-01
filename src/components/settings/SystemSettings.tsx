@@ -25,7 +25,7 @@ export function SystemSettings({ initialSettings }: SystemSettingsProps) {
 
   // Pipeline state
   const [pipelineRunning, setPipelineRunning] = useState(false)
-  const [pipelineResult, setPipelineResult] = useState<{ leads_found: number; leads_enriched: number; emails_sent: number; emails_failed: number } | null>(null)
+  const [pipelineTriggered, setPipelineTriggered] = useState(false)
   const [pipelineError, setPipelineError] = useState<string | null>(null)
 
   // Test email state
@@ -66,7 +66,7 @@ export function SystemSettings({ initialSettings }: SystemSettingsProps) {
 
   async function runPipeline() {
     setPipelineRunning(true)
-    setPipelineResult(null)
+    setPipelineTriggered(false)
     setPipelineError(null)
     try {
       const res = await fetch('/api/pipeline/run', { method: 'POST' })
@@ -78,10 +78,9 @@ export function SystemSettings({ initialSettings }: SystemSettingsProps) {
       }
       if (!res.ok) {
         const msg = typeof data.error === 'string' ? data.error : `Pipeline failed (HTTP ${res.status})`
-        const step = typeof data.step === 'string' ? ` at step: ${data.step}` : ''
-        throw new Error(msg + step)
+        throw new Error(msg)
       }
-      setPipelineResult(data as { leads_found: number; leads_enriched: number; emails_sent: number; emails_failed: number })
+      setPipelineTriggered(true)
     } catch (err) {
       setPipelineError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -311,10 +310,9 @@ export function SystemSettings({ initialSettings }: SystemSettingsProps) {
             ) : 'Run Pipeline Now'}
           </Button>
 
-          {pipelineResult && (
+          {pipelineTriggered && (
             <span className="text-sm text-green-400">
-              Found {pipelineResult.leads_found} leads · Enriched {pipelineResult.leads_enriched} · Sent {pipelineResult.emails_sent}
-              {pipelineResult.emails_failed > 0 && <span className="text-yellow-400"> · {pipelineResult.emails_failed} failed</span>}
+              Pipeline triggered! Check your Leads and Email Log pages in 15-20 minutes.
             </span>
           )}
 

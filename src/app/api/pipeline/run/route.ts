@@ -1,34 +1,16 @@
 import { NextResponse } from 'next/server'
-import { runFinderAgent } from '../../../../../agents/finder'
-import { runResearcherAgent } from '../../../../../agents/researcher'
-import { runWriterAgent } from '../../../../../agents/writer'
-import { runSenderAgent } from '../../../../../agents/sender'
+import { tasks } from '@trigger.dev/sdk/v3'
+import type { dailyPipeline } from '../../../../../trigger/daily-pipeline'
 
-export const maxDuration = 300
+export const maxDuration = 30
 
 export async function POST() {
-  let step = 'finder'
   try {
-    const leadsFound = await runFinderAgent()
-
-    step = 'researcher'
-    const leadsEnriched = await runResearcherAgent()
-
-    step = 'writer'
-    await runWriterAgent()
-
-    step = 'sender'
-    const { sent: emailsSent, failed: emailsFailed } = await runSenderAgent()
-
-    return NextResponse.json({
-      leads_found: leadsFound,
-      leads_enriched: leadsEnriched,
-      emails_sent: emailsSent,
-      emails_failed: emailsFailed,
-    })
+    const handle = await tasks.trigger<typeof dailyPipeline>('daily-pipeline', undefined)
+    return NextResponse.json({ status: 'triggered', run_id: handle.id })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error(`[pipeline] step="${step}" error:`, err)
-    return NextResponse.json({ error: message, step }, { status: 500 })
+    console.error('[pipeline] failed to trigger task:', err)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
