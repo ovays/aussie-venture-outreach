@@ -28,12 +28,12 @@ let outscraperCallCount = 0
 let outscraperCallWindowStart = Date.now()
 const OUTSCRAPER_RATE_LIMIT = 10
 
-// ✅ NEW: normalize phone (better dedupe)
+// ✅ normalize phone (better dedupe)
 function normalizePhone(p?: string) {
   return p?.replace(/\D/g, '')
 }
 
-// ✅ NEW: dedupe function
+// ✅ dedupe function
 function dedupeResults(results: OutscraperResult[]): OutscraperResult[] {
   const seen = new Set<string>()
 
@@ -52,26 +52,36 @@ function dedupeResults(results: OutscraperResult[]): OutscraperResult[] {
 
 async function rateLimitedFetch(url: string, headers: Record<string, string>): Promise<Response> {
   const now = Date.now()
+
   if (now - outscraperCallWindowStart > 60_000) {
     outscraperCallCount = 0
     outscraperCallWindowStart = now
   }
+
   if (outscraperCallCount >= OUTSCRAPER_RATE_LIMIT) {
     const wait = 60_000 - (now - outscraperCallWindowStart)
     await new Promise((r) => setTimeout(r, wait))
     outscraperCallCount = 0
     outscraperCallWindowStart = Date.now()
   }
+
   outscraperCallCount++
   return fetch(url, { headers })
 }
 
-async function pollResults(resultsUrl: string, headers: Record<string, string>): Promise<OutscraperResult[]> {
+async function pollResults(
+  resultsUrl: string,
+  headers: Record<string, string>,
+  apiKey: string
+): Promise<OutscraperResult[]> {
   for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
     const wait = attempt < 3 ? 2000 : 4000
     await new Promise((r) => setTimeout(r, wait))
 
-    const res = await rateLimitedFetch(resultsUrl, headers)
+    // ✅ FIX: append apiKey for polling
+    const pollUrl = `${resultsUrl}?apiKey=${encodeURIComponent(apiKey)}`
+
+    const res = await rateLimitedFetch(pollUrl, headers)
 
     if (!res.ok) throw new Error(`Outscraper poll error: ${res.status}`)
 
@@ -88,7 +98,9 @@ async function pollResults(resultsUrl: string, headers: Record<string, string>):
 }
 
 export async function searchBusinesses(query: string, limit = 20): Promise<OutscraperResult[]> {
-  const cleanKey = (process.env.OUTSCRAPER_API_KEY ?? '').replace(/[^\x20-\x7E]/g, '').trim()
+  const cleanKey = (process.env.OUTSCRAPER_API_KEY ?? '')
+    .replace(/[^\x20-\x7E]/g, '')
+    .trim()
 
   const params = new URLSearchParams({
     query,
@@ -97,11 +109,10 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
     region: 'AU',
   })
 
-  const url = `https://api.datapipelineplatform.cloud/maps/search-v3?${params}`
+  // ✅ Correct endpoint + apiKey
+  const url = `https://api.app.outscraper.com/maps/search-v3?${params}&apiKey=${encodeURIComponent(cleanKey)}`
 
-  const headers: Record<string, string> = {
-    'X-API-KEY': cleanKey,
-  }
+  const headers: Record<string, string> = {}
 
   console.log(`Outscraper search: "${query}"`)
 
@@ -124,7 +135,7 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
 
     // Async response
     else if (job.results_location) {
-      results = await pollResults(job.results_location, headers)
+      results = await pollResults(job.results_location, headers, cleanKey)
     }
 
     else {
@@ -132,7 +143,7 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
       return []
     }
 
-    // ✅ NEW: dedupe before returning
+    // ✅ dedupe results
     const uniqueResults = dedupeResults(results)
 
     console.log(`Deduped results: ${results.length} → ${uniqueResults.length}`)
