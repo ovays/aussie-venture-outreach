@@ -48,7 +48,9 @@ async function pollResults(resultsUrl: string, headers: Record<string, string>):
   for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
 
-    const res = await fetch(resultsUrl, { headers })
+    // ✅ FIXED: use rateLimitedFetch instead of fetch
+    const res = await rateLimitedFetch(resultsUrl, headers)
+
     if (!res.ok) throw new Error(`Outscraper poll error: ${res.status}`)
 
     const job = await res.json() as OutscraperJobResponse
@@ -65,6 +67,7 @@ async function pollResults(resultsUrl: string, headers: Record<string, string>):
 
 export async function searchBusinesses(query: string, limit = 20): Promise<OutscraperResult[]> {
   const cleanKey = (process.env.OUTSCRAPER_API_KEY ?? '').replace(/[^\x20-\x7E]/g, '').trim()
+
   const params = new URLSearchParams({
     query,
     limit: String(limit),
@@ -72,11 +75,11 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
     region: 'AU',
   })
 
-  // ✅ FIXED: updated endpoint + removed apiKey from URL
-  const url = `https://api.datapipelineplatform.cloud/maps/search-v3?${params}`
+  // ✅ Correct endpoint + API key in query param
+  const url = `https://api.app.outscraper.com/maps/search-v3?${params}&apiKey=${encodeURIComponent(cleanKey)}`
 
-  // ✅ keep header auth only (correct)
-  const headers = { 'X-API-KEY': cleanKey }
+  // ✅ Explicit empty headers
+  const headers: Record<string, string> = {}
 
   console.log(`Outscraper search: "${query}"`)
 
