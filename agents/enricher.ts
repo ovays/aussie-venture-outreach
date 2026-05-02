@@ -4,15 +4,20 @@ import { extractWebsiteData, extractEmailWithHaiku } from '@/lib/claude'
 const EMAIL_REGEX = /[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/gi
 
 async function fetchText(url: string): Promise<string> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5000)
   try {
     const normalised = url.startsWith('http') ? url : `https://${url}`
     const res = await fetch(normalised, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AussieVentureBot/1.0)' },
-      signal: AbortSignal.timeout(10_000),
+      signal: controller.signal,
     })
+    clearTimeout(timeoutId)
     const html = await res.text()
     return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 5000)
-  } catch {
+  } catch (err) {
+    clearTimeout(timeoutId)
+    console.log(`[enricher] Fetch skipped (${url}): ${err instanceof Error ? err.message : String(err)}`)
     return ''
   }
 }
