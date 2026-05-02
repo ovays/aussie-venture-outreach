@@ -24,7 +24,8 @@
       "Bash(New-Item -ItemType Directory -Force \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\\\\app\\\\api\\\\reset\")",
       "Bash(Out-Null)",
       "Bash(Write-Host \"done\")",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(xargs grep *)"
     ]
   }
 }
