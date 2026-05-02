@@ -1,5 +1,6 @@
 import { task, schedules } from '@trigger.dev/sdk/v3'
 import { runFinderAgent } from '../agents/finder'
+import { runResearcherAgent } from '../agents/researcher'
 import { runWriterAgent } from '../agents/writer'
 import { runSenderAgent } from '../agents/sender'
 
@@ -9,13 +10,16 @@ export const dailyPipeline = task({
   run: async () => {
     console.log('Starting daily pipeline...')
 
-    console.log('Step 1: Finder agent (find + enrich inline, quota-filling)')
-    await runFinderAgent()
+    console.log('Step 1: Finder agent')
+    const leadsFound = await runFinderAgent()
 
-    console.log('Step 2: Writer agent (writes outreach content)')
+    console.log(`Step 2: Researcher agent (${leadsFound} leads to process)`)
+    const leadsEnriched = await runResearcherAgent()
+
+    console.log(`Step 3: Writer agent (${leadsEnriched} leads enriched)`)
     await runWriterAgent()
 
-    console.log('Step 3: Sender agent (sends emails)')
+    console.log('Step 4: Sender agent')
     await runSenderAgent()
 
     console.log('Daily pipeline complete')

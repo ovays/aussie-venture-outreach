@@ -67,6 +67,18 @@ function extractInstagramHandle(text: string): string | null {
   return `@${match[1]}`
 }
 
+const IRRELEVANT_KEYWORDS = [
+  'migration', 'migrant', 'visa', 'immigration', 'education', 'university',
+  'college', 'school', 'tafe', 'accounting', 'tax', 'legal', 'lawyer',
+  'solicitor', 'dentist', 'doctor', 'medical', 'pharmacy', 'clinic',
+  'real estate', 'mortgage', 'insurance', 'finance', 'funeral',
+]
+
+function isIrrelevant(name: string): boolean {
+  const lower = name.toLowerCase()
+  return IRRELEVANT_KEYWORDS.some((kw) => lower.includes(kw))
+}
+
 async function isAlreadyInDB(
   supabase: ReturnType<typeof createServiceClient>,
   name: string,
@@ -110,7 +122,8 @@ export async function runFinderAgent(): Promise<number> {
   const DM_TARGET = parseInt(dmLimitRow.data?.value ?? '10', 10)
   const TOTAL_TARGET = parseInt(totalLimitRow.data?.value ?? '40', 10)
 
-  console.log(`[finder] Targets: ${EMAIL_TARGET} email, ${DM_TARGET} DM, ${TOTAL_TARGET} total`)
+  const perCategoryLimit = Math.ceil(EMAIL_TARGET / EMAIL_CATEGORIES.length)
+  console.log(`[finder] Targets: ${EMAIL_TARGET} email, ${DM_TARGET} DM, ${TOTAL_TARGET} total (max ${perCategoryLimit}/category)`)
 
   let emailCount = 0
   let dmCount = 0
@@ -128,7 +141,8 @@ export async function runFinderAgent(): Promise<number> {
     if (emailCount >= EMAIL_TARGET) break
     if (emailCount + dmCount >= TOTAL_TARGET) break
 
-    console.log(`\n[finder] Category: ${category.name}`)
+    let categoryEmailCount = 0
+    console.log(`\n[finder] Category: ${category.name} (limit: ${perCategoryLimit})`)
 
     let results
     try {
@@ -142,9 +156,16 @@ export async function runFinderAgent(): Promise<number> {
     for (const result of results) {
       if (emailCount >= EMAIL_TARGET) break
       if (emailCount + dmCount >= TOTAL_TARGET) break
+      if (categoryEmailCount >= perCategoryLimit) break
 
       const name = result.name
       const website = result.website || null
+
+      // Filter irrelevant business types
+      if (isIrrelevant(name)) {
+        console.log(`❌ Skip: ${name} — irrelevant business type`)
+        continue
+      }
 
       // Dedup check
       if (await isAlreadyInDB(supabase, name, 'Sydney', result.phone)) {
@@ -194,7 +215,7 @@ export async function runFinderAgent(): Promise<number> {
           phone: result.phone || null,
           email: foundEmail,
           website: website,
-          address: result.full_address || null,
+          address: result.address || null,
           google_rating: result.rating || null,
           google_reviews_count: result.reviews || null,
           status: 'new',
@@ -207,6 +228,7 @@ export async function runFinderAgent(): Promise<number> {
         }
 
         emailCount++
+        categoryEmailCount++
         phase1Names.add(name)
         console.log(`✅ Email: ${name} → ${foundEmail} (source: ${emailSource})`)
 
@@ -286,7 +308,7 @@ export async function runFinderAgent(): Promise<number> {
           phone: result.phone || null,
           email: null,
           website: website,
-          address: result.full_address || null,
+          address: result.address || null,
           instagram_handle: instagramHandle,
           google_rating: result.rating || null,
           google_reviews_count: result.reviews || null,

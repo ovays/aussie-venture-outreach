@@ -29,12 +29,12 @@ export async function runResearcherAgent(): Promise<number> {
     .select('*')
     .eq('status', 'new')
 
+  console.log(`[researcher] Found ${leads?.length ?? 0} leads with status=new`)
+
   if (!leads?.length) {
-    console.log('No new leads to research')
+    console.log('[researcher] Nothing to process')
     return 0
   }
-
-  console.log(`[researcher] Processing ${leads.length} new leads`)
 
   let processed = 0
   let emailsFound = 0
@@ -154,6 +154,7 @@ export async function runResearcherAgent(): Promise<number> {
     }
   }
 
+  console.log(`[researcher] Updated ${processed} leads to status=researched`)
   console.log(`[researcher] Done: ${processed} leads processed, ${emailsFound} emails found`)
   console.log(`[researcher] Email method breakdown:`, methodCounts)
 

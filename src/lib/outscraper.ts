@@ -1,6 +1,6 @@
 export interface OutscraperResult {
   name: string
-  full_address: string
+  address: string
   borough: string
   city: string
   postal_code: string
@@ -40,7 +40,7 @@ function dedupeResults(results: OutscraperResult[]): OutscraperResult[] {
   return results.filter((r) => {
     const key =
       normalizePhone(r.phone) ||
-      `${r.name?.toLowerCase()}-${r.full_address?.toLowerCase()}`
+      `${r.name?.toLowerCase()}-${r.address?.toLowerCase()}`
 
     if (!key) return true
 
