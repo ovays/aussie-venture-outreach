@@ -1,26 +1,31 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { searchBusinesses, buildSearchQuery } from '@/lib/outscraper'
-
-const SYDNEY_SUBURBS = [
-  'Lakemba', 'Bankstown', 'Auburn', 'Parramatta', 'Blacktown',
-  'Liverpool', 'Fairfield', 'Cabramatta', 'Strathfield', 'Burwood',
-  'Newtown', 'Surry Hills', 'Glebe', 'Leichhardt', 'Marrickville',
-  'Bondi', 'Coogee', 'Manly', 'Chatswood', 'Hurstville',
-]
-
-const CITY_SUBURBS: Record<string, string[]> = {
-  Sydney: SYDNEY_SUBURBS,
-  Melbourne: ['CBD', 'Fitzroy', 'Collingwood', 'Richmond', 'St Kilda', 'Prahran', 'South Yarra', 'Brunswick', 'Northcote', 'Carlton'],
-  Brisbane: ['CBD', 'Fortitude Valley', 'South Brisbane', 'West End', 'Newstead', 'New Farm', 'Paddington', 'Toowong'],
-  Perth: ['CBD', 'Fremantle', 'Subiaco', 'Mount Lawley', 'Leederville', 'Northbridge', 'Victoria Park'],
-  Adelaide: ['CBD', 'Norwood', 'Unley', 'Glenelg', 'Prospect', 'Burnside'],
-}
+import { searchBusinesses } from '@/lib/outscraper'
 
 const EMAIL_REGEX = /[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/gi
 const INSTAGRAM_REGEX = /instagram\.com\/([a-zA-Z0-9_.]{3,30})/i
-const FACEBOOK_REGEX = /facebook\.com\/(pages\/[^/\s"']+\/\d+|[a-zA-Z0-9.]{5,50})/i
 const INSTAGRAM_SKIP = new Set(['p', 'reel', 'reels', 'stories', 'explore', 'accounts', 'share', 'sharer'])
-const FACEBOOK_SKIP = new Set(['share', 'sharer', 'dialog', 'login', 'pages', 'groups', 'events', 'watch', 'photo', 'photo.php'])
+
+// Phase 1 categories in order (highest email rate first)
+const EMAIL_CATEGORIES = [
+  { name: 'Travel Agents',         query: 'travel agent Sydney' },
+  { name: 'Hotels / Resorts',      query: 'hotel Sydney' },
+  { name: 'Tour Operators',        query: 'tour operator Sydney' },
+  { name: 'Spas / Massage Studios',query: 'day spa Sydney' },
+  { name: 'Beauty / Lash Studios', query: 'beauty studio Sydney' },
+  { name: 'Hair Salons',           query: 'hair salon Sydney' },
+  { name: 'Halal Restaurants',     query: 'halal restaurant Sydney' },
+  { name: 'Halal Cafes',           query: 'halal cafe Sydney' },
+  { name: 'Halal Bakeries',        query: 'halal bakery Sydney' },
+  { name: 'Nail Salons',           query: 'nail salon Sydney' },
+]
+
+// Phase 2 categories
+const DM_CATEGORIES = [
+  { name: 'Halal Restaurants', query: 'halal restaurant Sydney' },
+  { name: 'Halal Cafes',       query: 'halal cafe Sydney' },
+  { name: 'Halal Bakeries',    query: 'halal bakery Sydney' },
+  { name: 'Nail Salons',       query: 'nail salon Sydney' },
+]
 
 async function fetchWebsiteText(url: string): Promise<string> {
   const controller = new AbortController()
@@ -34,9 +39,8 @@ async function fetchWebsiteText(url: string): Promise<string> {
     clearTimeout(timeoutId)
     const html = await res.text()
     return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 6000)
-  } catch (err) {
+  } catch {
     clearTimeout(timeoutId)
-    console.log(`[finder] Fetch skipped (${url}): ${err instanceof Error ? err.message : String(err)}`)
     return ''
   }
 }
@@ -55,7 +59,7 @@ function extractEmail(text: string): string | null {
   return valid[0] ?? null
 }
 
-function extractInstagram(text: string): string | null {
+function extractInstagramHandle(text: string): string | null {
   const match = text.match(INSTAGRAM_REGEX)
   if (!match) return null
   const handle = match[1].toLowerCase()
@@ -63,12 +67,22 @@ function extractInstagram(text: string): string | null {
   return `@${match[1]}`
 }
 
-function extractFacebook(text: string): string | null {
-  const match = text.match(FACEBOOK_REGEX)
-  if (!match) return null
-  const path = match[1].split('/')[0].toLowerCase()
-  if (FACEBOOK_SKIP.has(path)) return null
-  return `https://facebook.com/${match[1]}`
+async function isAlreadyInDB(
+  supabase: ReturnType<typeof createServiceClient>,
+  name: string,
+  city: string,
+  phone?: string
+): Promise<boolean> {
+  const conditions: string[] = [`and(business_name.eq.${name},city.eq.${city})`]
+  if (phone) conditions.push(`phone.eq.${phone}`)
+
+  const { data } = await supabase
+    .from('leads')
+    .select('id')
+    .or(conditions.join(','))
+    .limit(1)
+
+  return !!data?.length
 }
 
 export async function runFinderAgent(): Promise<number> {
@@ -85,193 +99,242 @@ export async function runFinderAgent(): Promise<number> {
     return 0
   }
 
-  // Read quota targets
-  const [emailLimitRow, dmLimitRow] = await Promise.all([
+  // Read quota targets from settings
+  const [emailLimitRow, dmLimitRow, totalLimitRow] = await Promise.all([
     supabase.from('settings').select('value').eq('key', 'daily_email_limit').single(),
     supabase.from('settings').select('value').eq('key', 'daily_dm_limit').single(),
+    supabase.from('settings').select('value').eq('key', 'daily_lead_limit').single(),
   ])
 
   const EMAIL_TARGET = parseInt(emailLimitRow.data?.value ?? '30', 10)
   const DM_TARGET = parseInt(dmLimitRow.data?.value ?? '10', 10)
+  const TOTAL_TARGET = parseInt(totalLimitRow.data?.value ?? '40', 10)
 
-  const { data: citiesSetting } = await supabase
-    .from('settings')
-    .select('value')
-    .eq('key', 'active_cities')
-    .single()
-
-  const activeCities = (citiesSetting?.value ?? 'Sydney').split(',').map((c: string) => c.trim())
-
-  const { data: categories } = await supabase
-    .from('categories')
-    .select('*')
-    .eq('status', 'active')
-
-  if (!categories?.length) {
-    console.log('No active categories found')
-    return 0
-  }
-
-  console.log(`[finder] Targets: ${EMAIL_TARGET} email leads, ${DM_TARGET} DM leads`)
+  console.log(`[finder] Targets: ${EMAIL_TARGET} email, ${DM_TARGET} DM, ${TOTAL_TARGET} total`)
 
   let emailCount = 0
   let dmCount = 0
-  let outscraperCalls = 0
+  let callCount = 0
 
-  outer:
-  for (const category of categories) {
-    const targetCities =
-      category.cities === 'sydney_only' ? ['Sydney']
-      : category.cities === 'custom' ? (category.custom_cities ?? [])
-      : activeCities
+  // Track businesses saved in Phase 1 to skip in Phase 2
+  const phase1Names = new Set<string>()
 
-    const keywords: string[] = category.search_keywords ?? []
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // PHASE 1 — EMAIL LEADS
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  console.log('\n[finder] ═══ PHASE 1: Email Leads ═══')
 
-    for (const city of targetCities) {
-      const suburbs = CITY_SUBURBS[city] ?? ['CBD']
+  for (const category of EMAIL_CATEGORIES) {
+    if (emailCount >= EMAIL_TARGET) break
+    if (emailCount + dmCount >= TOTAL_TARGET) break
 
-      for (const suburb of suburbs) {
-        for (const keyword of keywords) {
-          if (emailCount >= EMAIL_TARGET && dmCount >= DM_TARGET) break outer
+    console.log(`\n[finder] Category: ${category.name}`)
 
-          const query = buildSearchQuery(keyword, suburb, city)
-          console.log(`[finder] Search #${++outscraperCalls}: "${query}"`)
+    let results
+    try {
+      callCount++
+      results = await searchBusinesses(category.query, 50)
+    } catch (error) {
+      console.error(`[finder] Search error for "${category.query}":`, error)
+      continue
+    }
 
-          let results
-          try {
-            results = await searchBusinesses(query, 20)
-          } catch (error) {
-            console.error(`[finder] Search error for "${query}":`, error)
-            continue
-          }
+    for (const result of results) {
+      if (emailCount >= EMAIL_TARGET) break
+      if (emailCount + dmCount >= TOTAL_TARGET) break
 
-          for (const result of results) {
-            if (emailCount >= EMAIL_TARGET && dmCount >= DM_TARGET) break
+      const name = result.name
+      const website = result.website || null
 
-            const name = result.name
+      // Dedup check
+      if (await isAlreadyInDB(supabase, name, 'Sydney', result.phone)) {
+        console.log(`❌ Skip: ${name} — already in DB`)
+        continue
+      }
 
-            // Dedup check against existing DB leads
-            const { data: existing } = await supabase
-              .from('leads')
-              .select('id')
-              .or(
-                [
-                  `and(business_name.eq.${name},suburb.eq.${suburb})`,
-                  result.phone ? `phone.eq.${result.phone}` : null,
-                  result.email ? `email.eq.${result.email}` : null,
-                ]
-                  .filter(Boolean)
-                  .join(',')
-              )
-              .limit(1)
+      // Check Outscraper email field first (free)
+      let foundEmail: string | null = result.email || null
+      let emailSource = 'outscraper'
 
-            if (existing?.length) {
-              console.log(`[finder] Already in DB: "${name}"`)
-              continue
-            }
+      // If website is Instagram URL, note for Phase 2 and skip
+      if (!foundEmail && website && INSTAGRAM_REGEX.test(website)) {
+        const handle = extractInstagramHandle(website)
+        if (handle) {
+          console.log(`📌 Noted for Phase 2: ${name} → ${handle} (instagram from website URL)`)
+        }
+        continue
+      }
 
-            // Step 1: Check Outscraper email field (free)
-            let foundEmail: string | null = result.email || null
-            let websiteText = ''
-            let instagramHandle: string | null = null
-            let facebookUrl: string | null = null
+      // Fetch website for email only if quota not yet filled
+      if (!foundEmail && website && emailCount < EMAIL_TARGET) {
+        const homeText = await fetchWebsiteText(website)
+        if (homeText) {
+          foundEmail = extractEmail(homeText)
+          if (foundEmail) emailSource = 'homepage'
+        }
 
-            // Step 2: Fetch website if no email yet (or always, to get social links)
-            if (result.site) {
-              websiteText = await fetchWebsiteText(result.site)
-              if (websiteText) {
-                if (!foundEmail) foundEmail = extractEmail(websiteText)
-                instagramHandle = extractInstagram(websiteText)
-                facebookUrl = extractFacebook(websiteText)
-              }
-            }
-
-            if (foundEmail && emailCount < EMAIL_TARGET) {
-              // ── Email lead ──────────────────────────────────────────────
-              const { error } = await supabase.from('leads').insert({
-                business_name: name,
-                category_id: category.id,
-                category_name: category.name,
-                halal: category.halal_filter,
-                address: result.full_address,
-                suburb,
-                city,
-                state: 'NSW',
-                phone: result.phone || null,
-                email: foundEmail,
-                website: result.site || null,
-                instagram_handle: instagramHandle,
-                facebook_url: facebookUrl,
-                google_rating: result.rating || null,
-                google_reviews_count: result.reviews || null,
-                status: 'researched',
-                outreach_channel: 'email',
-              })
-
-              if (error) {
-                console.error(`[finder] Insert failed for "${name}": ${error.message}`)
-                continue
-              }
-
-              emailCount++
-              console.log(`✅ Email lead #${emailCount}: "${name}" — ${foundEmail}`)
-
-              await supabase.from('activity_log').insert({
-                event_type: 'lead_found',
-                description: `Email lead: ${name}, ${suburb} — ${foundEmail}`,
-                metadata: { category: category.name, city, suburb, email: foundEmail, type: 'email' },
-              })
-            } else if (!foundEmail && (instagramHandle || facebookUrl) && dmCount < DM_TARGET) {
-              // ── DM lead ─────────────────────────────────────────────────
-              const { error } = await supabase.from('leads').insert({
-                business_name: name,
-                category_id: category.id,
-                category_name: category.name,
-                halal: category.halal_filter,
-                address: result.full_address,
-                suburb,
-                city,
-                state: 'NSW',
-                phone: result.phone || null,
-                email: null,
-                website: result.site || null,
-                instagram_handle: instagramHandle,
-                facebook_url: facebookUrl,
-                google_rating: result.rating || null,
-                google_reviews_count: result.reviews || null,
-                status: 'researched',
-                outreach_channel: 'instagram',
-              })
-
-              if (error) {
-                console.error(`[finder] Insert failed for "${name}": ${error.message}`)
-                continue
-              }
-
-              dmCount++
-              console.log(`📱 DM lead #${dmCount}: "${name}" — ${instagramHandle ?? facebookUrl}`)
-
-              await supabase.from('activity_log').insert({
-                event_type: 'lead_found',
-                description: `DM lead: ${name}, ${suburb} — ${instagramHandle ?? facebookUrl}`,
-                metadata: { category: category.name, city, suburb, instagram: instagramHandle, type: 'dm' },
-              })
-            } else {
-              console.log(`❌ Skipped: "${name}" (no email, no Instagram)`)
-            }
+        // Try /contact page once if still no email
+        if (!foundEmail) {
+          const base = website.startsWith('http') ? website : `https://${website}`
+          const contactUrl = base.replace(/\/$/, '') + '/contact'
+          const contactText = await fetchWebsiteText(contactUrl)
+          if (contactText) {
+            foundEmail = extractEmail(contactText)
+            if (foundEmail) emailSource = 'contact'
           }
         }
+      }
+
+      if (foundEmail) {
+        const { error } = await supabase.from('leads').insert({
+          business_name: name,
+          category_name: category.name,
+          city: 'Sydney',
+          state: 'NSW',
+          phone: result.phone || null,
+          email: foundEmail,
+          website: website,
+          address: result.full_address || null,
+          google_rating: result.rating || null,
+          google_reviews_count: result.reviews || null,
+          status: 'new',
+          outreach_channel: 'email',
+        })
+
+        if (error) {
+          console.error(`[finder] Insert failed for "${name}": ${error.message}`)
+          continue
+        }
+
+        emailCount++
+        phase1Names.add(name)
+        console.log(`✅ Email: ${name} → ${foundEmail} (source: ${emailSource})`)
+
+        await supabase.from('activity_log').insert({
+          event_type: 'lead_found',
+          description: `Email lead: ${name} — ${foundEmail}`,
+          metadata: { category: category.name, city: 'Sydney', email: foundEmail, source: emailSource, type: 'email' },
+        })
+      } else {
+        console.log(`❌ Skip: ${name} — no email found`)
       }
     }
   }
 
+  console.log(`\n[finder] Phase 1 complete: ${emailCount}/${EMAIL_TARGET} email leads`)
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // PHASE 2 — INSTAGRAM LEADS
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  console.log('\n[finder] ═══ PHASE 2: Instagram Leads ═══')
+
+  for (const category of DM_CATEGORIES) {
+    if (dmCount >= DM_TARGET) break
+    if (emailCount + dmCount >= TOTAL_TARGET) break
+
+    console.log(`\n[finder] Category: ${category.name}`)
+
+    let results
+    try {
+      callCount++
+      results = await searchBusinesses(category.query, 50)
+    } catch (error) {
+      console.error(`[finder] Search error for "${category.query}":`, error)
+      continue
+    }
+
+    for (const result of results) {
+      if (dmCount >= DM_TARGET) break
+      if (emailCount + dmCount >= TOTAL_TARGET) break
+
+      const name = result.name
+      const website = result.website || null
+
+      // Skip if saved in Phase 1
+      if (phase1Names.has(name)) continue
+
+      // Dedup check against DB
+      if (await isAlreadyInDB(supabase, name, 'Sydney', result.phone)) {
+        console.log(`❌ Skip: ${name} — already in DB`)
+        continue
+      }
+
+      // Find Instagram: check Outscraper fields then website field
+      let instagramHandle: string | null = null
+
+      // Check any instagram-like field in result
+      const resultAny = result as unknown as Record<string, unknown>
+      for (const key of ['instagram', 'instagram_handle', 'social_media']) {
+        const val = resultAny[key]
+        if (typeof val === 'string' && val) {
+          instagramHandle = extractInstagramHandle(val) ?? (val.startsWith('@') ? val : `@${val}`)
+          break
+        }
+      }
+
+      // Check website field for instagram.com
+      if (!instagramHandle && website && INSTAGRAM_REGEX.test(website)) {
+        instagramHandle = extractInstagramHandle(website)
+      }
+
+      if (instagramHandle) {
+        const { error } = await supabase.from('leads').insert({
+          business_name: name,
+          category_name: category.name,
+          city: 'Sydney',
+          state: 'NSW',
+          phone: result.phone || null,
+          email: null,
+          website: website,
+          address: result.full_address || null,
+          instagram_handle: instagramHandle,
+          google_rating: result.rating || null,
+          google_reviews_count: result.reviews || null,
+          status: 'new',
+          outreach_channel: 'instagram',
+        })
+
+        if (error) {
+          console.error(`[finder] Insert failed for "${name}": ${error.message}`)
+          continue
+        }
+
+        dmCount++
+        console.log(`📱 DM: ${name} → ${instagramHandle}`)
+
+        await supabase.from('activity_log').insert({
+          event_type: 'lead_found',
+          description: `DM lead: ${name} — ${instagramHandle}`,
+          metadata: { category: category.name, city: 'Sydney', instagram: instagramHandle, type: 'dm' },
+        })
+      } else {
+        console.log(`❌ Skip: ${name} — no Instagram found`)
+      }
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // SUMMARY
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  console.log(`\nPhase 1: ${emailCount}/${EMAIL_TARGET} email leads`)
+  console.log(`Phase 2: ${dmCount}/${DM_TARGET} DM leads`)
+  console.log(`Outscraper calls made: ${callCount}`)
+  console.log(`Estimated cost: $${(callCount * 0.002).toFixed(4)}`)
+
   const total = emailCount + dmCount
-  console.log(`[finder] Done — ${emailCount}/${EMAIL_TARGET} email leads, ${dmCount}/${DM_TARGET} DM leads, ${outscraperCalls} Outscraper calls`)
 
   await supabase.from('activity_log').insert({
     event_type: 'finder_complete',
-    description: `Finder complete: ${emailCount} email leads, ${dmCount} DM leads (${outscraperCalls} searches)`,
-    metadata: { email_leads: emailCount, dm_leads: dmCount, email_target: EMAIL_TARGET, dm_target: DM_TARGET, outscraper_calls: outscraperCalls },
+    description: `Finder complete: ${emailCount} email leads, ${dmCount} DM leads (${callCount} searches)`,
+    metadata: {
+      email_leads: emailCount,
+      dm_leads: dmCount,
+      email_target: EMAIL_TARGET,
+      dm_target: DM_TARGET,
+      total_target: TOTAL_TARGET,
+      outscraper_calls: callCount,
+      estimated_cost: (callCount * 0.002).toFixed(4),
+    },
   })
 
   return total
