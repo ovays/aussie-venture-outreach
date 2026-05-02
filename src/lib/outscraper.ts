@@ -97,7 +97,7 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
     region: 'AU',
   })
 
-  const url = `https://api.datapipelineplatform.cloud/maps/search-v3?${params}`
+  const url = `https://api.app.outscraper.com/maps/search-v3?${params}`
 
 const headers: Record<string, string> = {
   'X-API-KEY': cleanKey,
@@ -124,7 +124,11 @@ const headers: Record<string, string> = {
 
     // Async response
     else if (job.results_location) {
-      results = await pollResults(job.results_location, headers)
+      const pollUrl = job.results_location.replace(
+        /https?:\/\/[^/]*datapipelineplatform\.cloud/,
+        'https://api.app.outscraper.com'
+      )
+      results = await pollResults(pollUrl, headers)
     }
 
     else {
