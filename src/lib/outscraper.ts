@@ -6,7 +6,7 @@ export interface OutscraperResult {
   postal_code: string
   country_code: string
   phone: string
-  site: string
+  website: string
   email: string
   rating: number
   reviews: number
