@@ -177,7 +177,30 @@ Respond in JSON: { "subject": "...", "body": "..." }`,
   }
 }
 
-// ─── Agentic email search ────────────────────────────────────────────────────
+// ─── Haiku email extractor ───────────────────────────────────────────────────
+
+export async function extractEmailWithHaiku(content: string, businessName: string): Promise<string | null> {
+  const response = await rateLimitedCall(() =>
+    anthropic.messages.create({
+      model: HAIKU_MODEL,
+      max_tokens: 64,
+      messages: [
+        {
+          role: 'user',
+          content: `Find a contact email address for "${businessName}" in this text. Return ONLY the email address, nothing else. If no email is found, return "none".\n\n${content.slice(0, 3000)}`,
+        },
+      ],
+    })
+  )
+
+  const text = response.content[0].type === 'text' ? response.content[0].text.trim() : ''
+  if (text && text.toLowerCase() !== 'none' && text.includes('@') && !text.includes(' ') && text.length < 100) {
+    return text
+  }
+  return null
+}
+
+// ─── Agentic email search (legacy) ───────────────────────────────────────────
 
 interface AgentDecision {
   action: 'found' | 'fetch_url' | 'search_google' | 'not_found'

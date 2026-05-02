@@ -16,10 +16,12 @@ const CITY_SUBURBS: Record<string, string[]> = {
   Adelaide: ['CBD', 'Norwood', 'Unley', 'Glenelg', 'Prospect', 'Burnside'],
 }
 
+// Pool size per category — enricher cherry-picks the best from this pool
+const POOL_PER_CATEGORY = 100
+
 export async function runFinderAgent(): Promise<number> {
   const supabase = createServiceClient()
 
-  // Check master switch
   const { data: systemSetting } = await supabase
     .from('settings')
     .select('value')
@@ -31,16 +33,6 @@ export async function runFinderAgent(): Promise<number> {
     return 0
   }
 
-  // Read daily limit
-  const { data: limitSetting } = await supabase
-    .from('settings')
-    .select('value')
-    .eq('key', 'daily_lead_limit')
-    .single()
-
-  const dailyLimit = parseInt(limitSetting?.value ?? '50', 10)
-
-  // Read active cities
   const { data: citiesSetting } = await supabase
     .from('settings')
     .select('value')
@@ -51,7 +43,6 @@ export async function runFinderAgent(): Promise<number> {
     .split(',')
     .map((c: string) => c.trim())
 
-  // Read active categories
   const { data: categories } = await supabase
     .from('categories')
     .select('*')
@@ -62,15 +53,11 @@ export async function runFinderAgent(): Promise<number> {
     return 0
   }
 
-  // Distribute limit evenly across categories so each day has a mix
-  const leadsPerCategory = Math.ceil(dailyLimit / categories.length)
-  console.log(`[finder] ${categories.length} categories, ~${leadsPerCategory} leads each (limit ${dailyLimit})`)
+  console.log(`[finder] Building pool: up to ${POOL_PER_CATEGORY} candidates per category across ${categories.length} categories`)
 
-  let totalFound = 0
+  let totalPool = 0
 
   for (const category of categories) {
-    if (totalFound >= dailyLimit) break
-
     const targetCities =
       category.cities === 'sydney_only'
         ? ['Sydney']
@@ -79,8 +66,7 @@ export async function runFinderAgent(): Promise<number> {
         : activeCities
 
     const keywords: string[] = category.search_keywords ?? []
-
-    let foundForCategory = 0
+    let poolForCategory = 0
 
     outer:
     for (const city of targetCities) {
@@ -88,7 +74,7 @@ export async function runFinderAgent(): Promise<number> {
 
       for (const suburb of suburbs) {
         for (const keyword of keywords) {
-          if (foundForCategory >= leadsPerCategory || totalFound >= dailyLimit) break outer
+          if (poolForCategory >= POOL_PER_CATEGORY) break outer
 
           const query = buildSearchQuery(keyword, suburb, city)
 
@@ -96,7 +82,7 @@ export async function runFinderAgent(): Promise<number> {
             const results = await searchBusinesses(query, 20)
 
             for (const result of results) {
-              if (foundForCategory >= leadsPerCategory || totalFound >= dailyLimit) break
+              if (poolForCategory >= POOL_PER_CATEGORY) break
 
               const name = result.name
               const phone = result.phone
@@ -112,7 +98,7 @@ export async function runFinderAgent(): Promise<number> {
 
               if (existing?.length) continue
 
-              await supabase.from('leads').insert({
+              const { error: insertErr } = await supabase.from('leads').insert({
                 business_name: name,
                 category_id: category.id,
                 category_name: category.name,
@@ -129,16 +115,16 @@ export async function runFinderAgent(): Promise<number> {
                 status: 'new',
               })
 
-              await supabase.from('activity_log').insert({
-                event_type: 'lead_found',
-                description: `New lead found: ${name} in ${suburb}, ${city}`,
-                metadata: { category: category.name, city, suburb },
-              })
+              if (insertErr) {
+                console.error(`[finder] Insert failed for "${name}": ${insertErr.message}`)
+                continue
+              }
 
-              foundForCategory++
-              totalFound++
+              poolForCategory++
+              totalPool++
             }
           } catch (error) {
+            console.error(`[finder] Search error for "${query}":`, error)
             await supabase.from('activity_log').insert({
               event_type: 'finder_error',
               description: `Error searching: ${query}`,
@@ -149,15 +135,16 @@ export async function runFinderAgent(): Promise<number> {
       }
     }
 
-    console.log(`[finder] ${category.name}: ${foundForCategory} leads found`)
+    console.log(`[finder] ${category.name}: ${poolForCategory} candidates in pool`)
   }
+
+  console.log(`[finder] Pool built — ${totalPool} total candidates across all categories`)
 
   await supabase.from('activity_log').insert({
     event_type: 'finder_complete',
-    description: `Finder agent completed - ${totalFound} new leads found`,
-    metadata: { total_found: totalFound },
+    description: `Finder built pool of ${totalPool} candidates`,
+    metadata: { total_pool: totalPool, categories: categories.length },
   })
 
-  console.log(`Finder agent done - ${totalFound} leads found`)
-  return totalFound
+  return totalPool
 }
