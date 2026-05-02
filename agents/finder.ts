@@ -38,7 +38,7 @@ async function fetchWebsiteText(url: string): Promise<string> {
     })
     clearTimeout(timeoutId)
     const html = await res.text()
-    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 6000)
+    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 50000)
   } catch {
     clearTimeout(timeoutId)
     return ''
