@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { tasks, auth } from '@trigger.dev/sdk/v3'
-import type { dailyPipeline } from '../../../../../trigger/daily-pipeline'
+import type { dailyPipelineJob } from '../../../../../trigger/daily-pipeline'
 
 export const maxDuration = 30
 
@@ -12,7 +12,13 @@ export async function POST() {
 
     const handle = await auth.withAuth(
       { accessToken: secretKey },
-      () => tasks.trigger<typeof dailyPipeline>('daily-pipeline', undefined),
+      () => tasks.trigger<typeof dailyPipelineJob>('daily-pipeline', {
+        type: 'IMPERATIVE',
+        timestamp: new Date(),
+        timezone: 'Australia/Sydney',
+        scheduleId: 'manual',
+        upcoming: [],
+      }),
     )
 
     return NextResponse.json({ status: 'triggered', run_id: handle.id })
