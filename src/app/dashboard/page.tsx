@@ -4,6 +4,7 @@ import { StatsCard } from '@/components/dashboard/StatsCard'
 import { PipelineSummary } from '@/components/dashboard/PipelineSummary'
 import { RevenueChart } from '@/components/dashboard/RevenueChart'
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed'
+import { DailyActivity } from '@/components/dashboard/DailyActivity'
 import { Card } from '@/components/ui/Card'
 import { formatCurrency } from '@/lib/utils'
 
@@ -27,6 +28,9 @@ export default async function DashboardPage() {
     { data: pendingDMs },
     { data: dealsThisMonth },
     { data: weeklyDeals },
+    { data: recentLeads },
+    { data: recentEmails },
+    { data: recentDMs },
   ] = await Promise.all([
     supabase.from('leads').select('*', { count: 'exact', head: true }),
     supabase.from('emails').select('id').eq('status', 'sent').gte('sent_at', oneWeekAgo),
@@ -39,6 +43,9 @@ export default async function DashboardPage() {
     supabase.from('dm_queue').select('id').eq('status', 'pending'),
     supabase.from('deals').select('deal_value').gte('closed_at', new Date(Date.now() - 30 * 86_400_000).toISOString()),
     supabase.from('deals').select('deal_value, closed_at').gte('closed_at', twelveWeeksAgo).order('closed_at'),
+    supabase.from('leads').select('created_at').gte('created_at', oneWeekAgo),
+    supabase.from('emails').select('sent_at').eq('status', 'sent').gte('sent_at', oneWeekAgo),
+    supabase.from('dm_queue').select('created_at').gte('created_at', oneWeekAgo),
   ])
 
   const totalRevenue = (allDeals ?? []).reduce((s, d) => s + (d.deal_value ?? 0), 0)
@@ -71,6 +78,24 @@ export default async function DashboardPage() {
   }
 
   const followUpsPending = 0 // simplified — would query follow_ups table
+
+  // Build last-7-days activity rows (Sydney AEST = UTC+10/11, approximate with local grouping)
+  const dailyRows = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(Date.now() - i * 86_400_000)
+    const dateStr = d.toISOString().slice(0, 10) // YYYY-MM-DD in UTC
+
+    const leadsFound = (recentLeads ?? []).filter((r) => r.created_at.slice(0, 10) === dateStr).length
+    const emailsSent = (recentEmails ?? []).filter((r) => r.sent_at && r.sent_at.slice(0, 10) === dateStr).length
+    const dmsQueued = (recentDMs ?? []).filter((r) => r.created_at.slice(0, 10) === dateStr).length
+
+    const label = i === 0
+      ? `Today (${d.getDate()} ${d.toLocaleString('en', { month: 'short' })})`
+      : i === 1
+        ? `Yesterday (${d.getDate()} ${d.toLocaleString('en', { month: 'short' })})`
+        : `${d.getDate()} ${d.toLocaleString('en', { month: 'short' })}`
+
+    return { date: dateStr, label, leadsFound, emailsSent, dmsQueued }
+  })
 
   return (
     <div>
@@ -109,6 +134,12 @@ export default async function DashboardPage() {
         <Card>
           <h3 className="text-sm font-semibold mb-4 text-white">Weekly Revenue (Last 12 Weeks)</h3>
           <RevenueChart data={weeklyRevenue} />
+        </Card>
+
+        {/* Daily Activity */}
+        <Card>
+          <h3 className="text-sm font-semibold mb-3 text-white">Daily Activity (Last 7 Days)</h3>
+          <DailyActivity rows={dailyRows} />
         </Card>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

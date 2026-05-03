@@ -7,7 +7,7 @@ import { runSenderAgent } from "../agents/sender"
 export const dailyPipelineJob = schedules.task({
   id: "daily-pipeline",
   cron: {
-    pattern: "30 11 * * *",
+    pattern: "0 8 * * *",
     timezone: "Australia/Sydney",
   },
   maxDuration: 3600,
