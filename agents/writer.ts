@@ -85,7 +85,7 @@ export async function runWriterAgent(): Promise<void> {
 
   for (const lead of leads) {
     const hasEmail = !!lead.email
-    const hasInstagram = !!(lead.instagram_handle || lead.facebook_url)
+    const hasInstagram = !!lead.instagram_handle  // Instagram only — no Facebook
 
     console.log(`[writer] "${lead.business_name}" | email: ${lead.email ?? 'NONE'} | instagram: ${lead.instagram_handle ?? 'NONE'}`)
 
@@ -159,39 +159,31 @@ export async function runWriterAgent(): Promise<void> {
         let dmInserted = false
 
         if (lead.instagram_handle && dmsAddedToday < dailyDmLimit) {
-          const { error: igErr } = await supabase.from('dm_queue').insert({
-            lead_id: lead.id,
-            platform: 'instagram',
-            handle: lead.instagram_handle,
-            message_text: dmText,
-            status: 'pending',
-          })
-          if (igErr) {
-            console.error(`[writer] Instagram DM insert failed for "${lead.business_name}": ${igErr.message}`)
-          } else {
-            dmInserted = true
-            dmsAddedToday++
-            dmsQueued++
-            console.log(`[writer] Instagram DM queued for "${lead.business_name}" (${lead.instagram_handle})`)
-          }
-        }
+          // Dedup: skip if this lead or handle already has a pending DM
+          const { data: existing } = await supabase
+            .from('dm_queue')
+            .select('id')
+            .or(`lead_id.eq.${lead.id},handle.eq.${lead.instagram_handle}`)
+            .limit(1)
 
-        if (lead.facebook_url && dmsAddedToday < dailyDmLimit) {
-          const { error: fbErr } = await supabase.from('dm_queue').insert({
-            lead_id: lead.id,
-            platform: 'facebook',
-            handle: lead.facebook_url,
-            profile_url: lead.facebook_url,
-            message_text: dmText,
-            status: 'pending',
-          })
-          if (fbErr) {
-            console.error(`[writer] Facebook DM insert failed for "${lead.business_name}": ${fbErr.message}`)
+          if (existing?.length) {
+            console.log(`[writer] Skip DM for "${lead.business_name}" — already in dm_queue`)
           } else {
-            dmInserted = true
-            dmsAddedToday++
-            dmsQueued++
-            console.log(`[writer] Facebook DM queued for "${lead.business_name}"`)
+            const { error: igErr } = await supabase.from('dm_queue').insert({
+              lead_id: lead.id,
+              platform: 'instagram',
+              handle: lead.instagram_handle,
+              message_text: dmText,
+              status: 'pending',
+            })
+            if (igErr) {
+              console.error(`[writer] Instagram DM insert failed for "${lead.business_name}": ${igErr.message}`)
+            } else {
+              dmInserted = true
+              dmsAddedToday++
+              dmsQueued++
+              console.log(`[writer] Instagram DM queued for "${lead.business_name}" (${lead.instagram_handle})`)
+            }
           }
         }
 

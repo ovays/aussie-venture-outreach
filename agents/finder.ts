@@ -38,23 +38,21 @@ function isValidEmail(email: string): boolean {
   if (local.length < 4) return false
   if (/\.(png|jpg|jpeg|gif|svg|webp|css|js|woff|ttf)$/i.test(email)) return false
   if (email.toLowerCase().includes('@2x')) return false
-  // No vowels + no separators = random tracking ID (bg0i, ey6i, da7i)
   const hasVowel = /[aeiou]/.test(local)
   const hasSeparator = /[._]/.test(local)
   if (!hasVowel && !hasSeparator) return false
-  // Short alphanumeric with a digit = generated tracking ID
   if (/^[a-z0-9]{2,6}$/.test(local) && /\d/.test(local)) return false
   return true
 }
 
 function findEmailInHtml(html: string): string | null {
-  // Check mailto: links first — higher confidence than plain regex
+  // Always check mailto: links FIRST — highest confidence
   const mailtoRe = new RegExp(MAILTO_REGEX.source, 'gi')
   let m: RegExpExecArray | null
   while ((m = mailtoRe.exec(html)) !== null) {
     if (isValidEmail(m[1])) return m[1]
   }
-  // Fall back to full-HTML regex scan (do NOT strip tags — emails live in <script> JSON-LD etc.)
+  // Only fall back to full-HTML regex if no mailto found
   const matches = html.match(EMAIL_REGEX) ?? []
   return matches.find(isValidEmail) ?? null
 }
@@ -121,6 +119,22 @@ function isIrrelevant(name: string): boolean {
   return IRRELEVANT_KEYWORDS.some((kw) => lower.includes(kw))
 }
 
+// ── Instagram handle validation ──────────────────────────────────────────────
+
+// Invalid placeholder values returned by some Outscraper fields
+const INVALID_HANDLE_VALUES = new Set([
+  'not found', 'not mentioned', 'n/a', 'none', 'null', '', 'unknown',
+])
+
+function isValidInstagramHandle(handle: string): boolean {
+  const cleaned = handle.replace(/^@/, '').toLowerCase()
+  if (!cleaned) return false
+  if (INVALID_HANDLE_VALUES.has(cleaned)) return false
+  // Must be a real handle: letters/numbers/underscores/dots only, 3–30 chars
+  if (!/^[a-zA-Z0-9_.]{3,30}$/.test(cleaned)) return false
+  return true
+}
+
 // ── DB dedup ─────────────────────────────────────────────────────────────────
 
 async function isAlreadyInDB(
@@ -137,6 +151,76 @@ async function isAlreadyInDB(
     .or(conditions.join(','))
     .limit(1)
   return !!data?.length
+}
+
+async function isInstagramHandleInDB(
+  supabase: ReturnType<typeof createServiceClient>,
+  handle: string
+): Promise<boolean> {
+  const normalised = handle.startsWith('@') ? handle : `@${handle}`
+  const { data } = await supabase
+    .from('leads')
+    .select('id')
+    .eq('instagram_handle', normalised)
+    .limit(1)
+  return !!data?.length
+}
+
+// ── DM Queue cleanup ─────────────────────────────────────────────────────────
+
+async function cleanupDmQueue(supabase: ReturnType<typeof createServiceClient>): Promise<void> {
+  console.log('[finder] Cleaning up invalid DM queue entries...')
+
+  // 1. Delete Facebook platform entries
+  const { error: fbErr } = await supabase.from('dm_queue').delete().eq('platform', 'facebook')
+  if (fbErr) console.error('[finder] Cleanup Facebook delete error:', fbErr.message)
+
+  // 2. Delete null handles
+  await supabase.from('dm_queue').delete().is('handle', null)
+
+  // 3. Delete known invalid handle values
+  const invalidValues = ['Not found', 'Not mentioned', '', 'N/A', 'None', 'null', 'Unknown']
+  for (const val of invalidValues) {
+    await supabase.from('dm_queue').delete().eq('handle', val)
+  }
+
+  // 4. Remove duplicate lead entries — keep oldest per lead_id
+  const { data: allDms } = await supabase
+    .from('dm_queue')
+    .select('id, lead_id, handle, created_at')
+    .order('created_at', { ascending: true })
+
+  if (allDms?.length) {
+    const seenLeadIds = new Map<string, string>()  // lead_id → first dm id
+    const seenHandles = new Map<string, string>()  // handle → first dm id
+    const toDelete: string[] = []
+
+    for (const dm of allDms) {
+      let isDup = false
+
+      if (seenLeadIds.has(dm.lead_id)) {
+        isDup = true
+      } else {
+        seenLeadIds.set(dm.lead_id, dm.id)
+      }
+
+      const normHandle = dm.handle?.toLowerCase?.() ?? ''
+      if (normHandle && seenHandles.has(normHandle)) {
+        isDup = true
+      } else if (normHandle) {
+        seenHandles.set(normHandle, dm.id)
+      }
+
+      if (isDup) toDelete.push(dm.id)
+    }
+
+    if (toDelete.length) {
+      console.log(`[finder] Removing ${toDelete.length} duplicate/invalid DM queue entries`)
+      await supabase.from('dm_queue').delete().in('id', toDelete)
+    } else {
+      console.log('[finder] DM queue is clean — no duplicates found')
+    }
+  }
 }
 
 // ── Main agent ───────────────────────────────────────────────────────────────
@@ -229,7 +313,7 @@ export async function runFinderAgent(): Promise<number> {
         emailSource = 'outscraper'
       }
 
-      // Fetch website pages if no email yet
+      // Fetch website pages if no email yet — mailto: checked first inside findEmailForBusiness
       if (!foundEmail && rawWebsite) {
         const found = await findEmailForBusiness(rawWebsite)
         if (found) {
@@ -278,9 +362,12 @@ export async function runFinderAgent(): Promise<number> {
   console.log(`\n[finder] Phase 1 complete: ${emailCount}/${EMAIL_TARGET} email leads`)
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // PHASE 2 — INSTAGRAM LEADS
+  // PHASE 2 — INSTAGRAM LEADS ONLY
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   console.log('\n[finder] ═══ PHASE 2: Instagram Leads ═══')
+
+  // Clean up stale/invalid DM queue entries before adding new ones
+  await cleanupDmQueue(supabase)
 
   for (const category of DM_CATEGORIES) {
     if (dmCount >= DM_TARGET) break
@@ -313,54 +400,85 @@ export async function runFinderAgent(): Promise<number> {
 
       let instagramHandle: string | null = null
 
-      // Check Outscraper social fields
+      // Check Outscraper Instagram-specific fields only
       const resultAny = result as unknown as Record<string, unknown>
-      for (const key of ['instagram', 'instagram_handle', 'social_media']) {
+      for (const key of ['instagram', 'instagram_handle']) {
         const val = resultAny[key]
-        if (typeof val === 'string' && val) {
-          instagramHandle = extractInstagramHandle(val) ?? (val.startsWith('@') ? val : `@${val}`)
-          break
+        if (typeof val === 'string' && val.trim()) {
+          const extracted = extractInstagramHandle(val)
+          if (extracted && isValidInstagramHandle(extracted)) {
+            instagramHandle = extracted
+            break
+          }
+          // Accept bare @handle or plain username if it looks like a real handle
+          const bare = val.trim()
+          const candidate = bare.startsWith('@') ? bare : `@${bare}`
+          if (isValidInstagramHandle(candidate)) {
+            instagramHandle = candidate
+            break
+          }
+        }
+      }
+
+      // Check social_media field only if it's an Instagram URL
+      if (!instagramHandle) {
+        const socialVal = resultAny['social_media']
+        if (typeof socialVal === 'string' && INSTAGRAM_REGEX.test(socialVal)) {
+          const extracted = extractInstagramHandle(socialVal)
+          if (extracted && isValidInstagramHandle(extracted)) {
+            instagramHandle = extracted
+          }
         }
       }
 
       // Check if website field is an Instagram URL
       if (!instagramHandle && rawWebsite && INSTAGRAM_REGEX.test(rawWebsite)) {
-        instagramHandle = extractInstagramHandle(rawWebsite)
-      }
-
-      if (instagramHandle) {
-        const { error } = await supabase.from('leads').insert({
-          business_name:        name,
-          category_name:        category.name,
-          city:                 'Sydney',
-          state:                'NSW',
-          phone:                result.phone  || null,
-          email:                null,
-          website:              rawWebsite,
-          address:              result.address || null,
-          instagram_handle:     instagramHandle,
-          google_rating:        result.rating  || null,
-          google_reviews_count: result.reviews || null,
-          status:               'new',
-          outreach_channel:     'instagram',
-        })
-
-        if (error) {
-          console.error(`[finder] Insert failed for "${name}": ${error.message}`)
-          continue
+        const extracted = extractInstagramHandle(rawWebsite)
+        if (extracted && isValidInstagramHandle(extracted)) {
+          instagramHandle = extracted
         }
-
-        dmCount++
-        console.log(`📱 DM: ${name} → ${instagramHandle}`)
-
-        await supabase.from('activity_log').insert({
-          event_type:  'lead_found',
-          description: `DM lead: ${name} — ${instagramHandle}`,
-          metadata:    { category: category.name, city: 'Sydney', instagram: instagramHandle, type: 'dm' },
-        })
-      } else {
-        console.log(`❌ Skip: ${name} — no Instagram found`)
       }
+
+      if (!instagramHandle) {
+        console.log(`❌ Skip: ${name} — no valid Instagram handle found`)
+        continue
+      }
+
+      // Dedup: skip if this Instagram handle already exists
+      if (await isInstagramHandleInDB(supabase, instagramHandle)) {
+        console.log(`❌ Skip: ${name} — Instagram handle ${instagramHandle} already in DB`)
+        continue
+      }
+
+      const { error } = await supabase.from('leads').insert({
+        business_name:        name,
+        category_name:        category.name,
+        city:                 'Sydney',
+        state:                'NSW',
+        phone:                result.phone  || null,
+        email:                null,
+        website:              rawWebsite,
+        address:              result.address || null,
+        instagram_handle:     instagramHandle,
+        google_rating:        result.rating  || null,
+        google_reviews_count: result.reviews || null,
+        status:               'new',
+        outreach_channel:     'instagram',
+      })
+
+      if (error) {
+        console.error(`[finder] Insert failed for "${name}": ${error.message}`)
+        continue
+      }
+
+      dmCount++
+      console.log(`📱 DM: ${name} → ${instagramHandle}`)
+
+      await supabase.from('activity_log').insert({
+        event_type:  'lead_found',
+        description: `DM lead: ${name} — ${instagramHandle}`,
+        metadata:    { category: category.name, city: 'Sydney', instagram: instagramHandle, type: 'dm' },
+      })
     }
   }
 

@@ -1,6 +1,42 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { extractWebsiteData, agenticEmailSearch } from '@/lib/claude'
 
+// ── Mailto-first email extraction (same logic as finder.ts) ─────────────────
+
+const MAILTO_RE = /href=["']mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi
+const EMAIL_RE  = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+const BLOCKED_LOCALS = new Set([
+  'noreply', 'donotreply', 'no-reply', 'wordpress',
+  'postmaster', 'webmaster', 'bounce', 'mailer',
+])
+
+function isCleanEmail(email: string): boolean {
+  const local = email.toLowerCase().split('@')[0]
+  if (BLOCKED_LOCALS.has(local)) return false
+  if (local.length < 4) return false
+  if (/\.(png|jpg|jpeg|gif|svg|webp|css|js|woff|ttf)$/i.test(email)) return false
+  if (email.toLowerCase().includes('@2x')) return false
+  const hasVowel = /[aeiou]/.test(local)
+  const hasSeparator = /[._]/.test(local)
+  if (!hasVowel && !hasSeparator) return false
+  if (/^[a-z0-9]{2,6}$/.test(local) && /\d/.test(local)) return false
+  return true
+}
+
+function extractMailtoEmail(html: string): string | null {
+  // Always check mailto: links FIRST — avoids false positives from link text like "thello@..."
+  const re = new RegExp(MAILTO_RE.source, 'gi')
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html)) !== null) {
+    if (isCleanEmail(m[1])) return m[1]
+  }
+  // Fall back to full-HTML regex only if no mailto found
+  const matches = html.match(EMAIL_RE) ?? []
+  return matches.find(isCleanEmail) ?? null
+}
+
+// ── Website fetcher ──────────────────────────────────────────────────────────
+
 async function fetchRawHtml(url: string): Promise<string> {
   const normalised = url.startsWith('http') ? url : `https://${url}`
   const res = await fetch(normalised, {
@@ -8,6 +44,55 @@ async function fetchRawHtml(url: string): Promise<string> {
     signal: AbortSignal.timeout(10_000),
   })
   return res.text()
+}
+
+// ── Bounced email fixer ──────────────────────────────────────────────────────
+
+async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>): Promise<void> {
+  const { data: bouncedEmails } = await supabase
+    .from('emails')
+    .select('id, lead_id, leads(id, email, website, business_name)')
+    .eq('status', 'bounced')
+
+  if (!bouncedEmails?.length) {
+    console.log('[researcher] No bounced emails to fix')
+    return
+  }
+
+  console.log(`[researcher] Found ${bouncedEmails.length} bounced email(s) — attempting to re-extract`)
+
+  for (const emailRecord of bouncedEmails) {
+    const lead = emailRecord.leads as unknown as { id: string; email: string | null; website: string | null; business_name: string } | null
+    if (!lead?.website) continue
+
+    try {
+      let html = await fetchRawHtml(lead.website)
+      let newEmail = extractMailtoEmail(html)
+
+      // Try /contact page if homepage didn't yield anything
+      if (!newEmail) {
+        const base = lead.website.replace(/\/$/, '')
+        html = await fetchRawHtml(`${base}/contact`).catch(() => '')
+        newEmail = html ? extractMailtoEmail(html) : null
+      }
+
+      if (!newEmail || newEmail === lead.email) continue
+
+      console.log(`[researcher] Fixed bounced email for ${lead.business_name}: ${lead.email} → ${newEmail}`)
+
+      await supabase.from('leads').update({ email: newEmail }).eq('id', lead.id)
+      await supabase.from('emails').update({ status: 'pending_send' }).eq('id', emailRecord.id)
+
+      await supabase.from('activity_log').insert({
+        event_type: 'email_fixed',
+        lead_id: lead.id,
+        description: `Bounced email corrected for ${lead.business_name}: ${lead.email} → ${newEmail}`,
+        metadata: { old_email: lead.email, new_email: newEmail },
+      })
+    } catch (err) {
+      console.error(`[researcher] Error fixing bounced email for lead_id=${emailRecord.lead_id}:`, err)
+    }
+  }
 }
 
 export async function runResearcherAgent(): Promise<number> {
@@ -23,6 +108,9 @@ export async function runResearcherAgent(): Promise<number> {
     console.log('System is paused - Researcher agent skipped')
     return 0
   }
+
+  // Fix any bounced emails from previous sends before processing new leads
+  await fixBouncedEmails(supabase)
 
   const { data: leads } = await supabase
     .from('leads')
@@ -59,7 +147,18 @@ export async function runResearcherAgent(): Promise<number> {
         }
       }
 
-      // Agentic email search — only if no email from Outscraper and we have a website
+      // Mailto-first extraction — cheaper than Claude, catches most real emails
+      if (!foundEmail && rawHtml) {
+        const mailtoEmail = extractMailtoEmail(rawHtml)
+        if (mailtoEmail) {
+          foundEmail = mailtoEmail
+          emailMethod = 'mailto_link'
+          emailsFound++
+          console.log(`[researcher] Found email via mailto: for "${lead.business_name}": ${mailtoEmail}`)
+        }
+      }
+
+      // Agentic email search — only if mailto didn't find anything and we have website text
       if (!foundEmail && lead.website && websiteText) {
         console.log(`[researcher] Starting agentic email search for "${lead.business_name}"`)
 
