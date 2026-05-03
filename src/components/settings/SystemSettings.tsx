@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { Toggle } from '@/components/ui/Toggle'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
+import type { OutscraperUsageData } from '@/app/dashboard/settings/page'
 
 interface Setting {
   key: string
@@ -12,22 +14,32 @@ interface Setting {
 
 interface SystemSettingsProps {
   initialSettings: Setting[]
+  usageData: OutscraperUsageData
 }
 
 const CITIES = ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide']
 
-export function SystemSettings({ initialSettings }: SystemSettingsProps) {
+export function SystemSettings({ initialSettings, usageData }: SystemSettingsProps) {
   const [settings, setSettings] = useState<Record<string, string>>(
     Object.fromEntries(initialSettings.map((s) => [s.key, s.value]))
   )
   const [saving, setSaving] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
 
-  // Danger Zone state
+  // Danger Zone — reset state
   const [showResetModal, setShowResetModal] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [resetDone, setResetDone] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
+
+  // Danger Zone — delete by date state
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const [deleteDate, setDeleteDate] = useState(todayStr)
+  const [deleteCount, setDeleteCount] = useState<number | null>(null)
+  const [checkingDelete, setCheckingDelete] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteResult, setDeleteResult] = useState<{ text: string; ok: boolean } | null>(null)
 
   // Pipeline state
   const [pipelineRunning, setPipelineRunning] = useState(false)
@@ -142,6 +154,37 @@ export function SystemSettings({ initialSettings }: SystemSettingsProps) {
       setTestError(String(err))
     } finally {
       setTestSending(false)
+    }
+  }
+
+  async function checkDeleteCount() {
+    if (!deleteDate) return
+    setCheckingDelete(true)
+    setDeleteResult(null)
+    setDeleteCount(null)
+    const res = await fetch(`/api/leads/delete-by-date?date=${deleteDate}`)
+    const json = await res.json() as { count?: number; error?: string }
+    setCheckingDelete(false)
+    if (json.error) { setDeleteResult({ text: json.error, ok: false }); return }
+    setDeleteCount(json.count ?? 0)
+    setShowDeleteModal(true)
+  }
+
+  async function confirmDelete() {
+    setDeleting(true)
+    const res = await fetch('/api/leads/delete-by-date', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: deleteDate }),
+    })
+    const json = await res.json() as { deleted?: number; error?: string }
+    setDeleting(false)
+    setShowDeleteModal(false)
+    if (json.error) {
+      setDeleteResult({ text: `Error: ${json.error}`, ok: false })
+    } else {
+      setDeleteResult({ text: `Deleted ${json.deleted ?? 0} leads from ${deleteDate}`, ok: true })
+      setDeleteCount(null)
     }
   }
 
@@ -523,38 +566,150 @@ export function SystemSettings({ initialSettings }: SystemSettingsProps) {
         </p>
       </section>
 
+      {/* API Usage & Costs */}
+      <section>
+        <h3 className="text-base font-semibold text-white mb-1">API Usage & Costs</h3>
+        <p className="text-xs mb-4" style={{ color: '#64748b' }}>
+          Outscraper usage from pipeline runs. Each search costs ~$0.002.
+        </p>
+
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          {[
+            { label: 'Today',           calls: usageData.todayCalls,  cost: usageData.todayCost  },
+            { label: 'This week',        calls: usageData.weekCalls,   cost: usageData.weekCost   },
+            { label: 'This month',       calls: usageData.monthCalls,  cost: usageData.monthCost  },
+            { label: 'Avg per run',      calls: usageData.avgCallsPerRun, cost: usageData.avgCallsPerRun * 0.002 },
+          ].map(({ label, calls, cost }) => (
+            <div key={label} className="rounded-lg p-3" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
+              <p className="text-xs mb-1" style={{ color: '#64748b' }}>{label}</p>
+              <p className="text-base font-semibold text-white">{calls} calls</p>
+              <p className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>${cost.toFixed(3)}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded-lg p-3 mb-4 flex items-center justify-between" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
+          <span className="text-sm" style={{ color: '#94a3b8' }}>Estimated monthly cost (at current pace)</span>
+          <span className="text-sm font-semibold text-white">${usageData.estimatedMonthlyCost.toFixed(2)}</span>
+        </div>
+
+        {/* Last 7 days table */}
+        <div className="rounded-lg overflow-hidden" style={{ border: '1px solid #2a2d3e' }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: '#0f1117', borderBottom: '1px solid #2a2d3e' }}>
+                {['Date', 'Runs', 'Outscraper Calls', 'Cost'].map((h) => (
+                  <th key={h} className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {usageData.last7Days.map((row) => (
+                <tr key={row.date} style={{ borderBottom: '1px solid #1e2130' }}>
+                  <td className="px-4 py-2.5 text-white">{row.label}</td>
+                  <td className="px-4 py-2.5" style={{ color: row.runs > 0 ? '#94a3b8' : '#475569' }}>{row.runs}</td>
+                  <td className="px-4 py-2.5" style={{ color: row.calls > 0 ? '#38bdf8' : '#475569' }}>{row.calls}</td>
+                  <td className="px-4 py-2.5" style={{ color: row.cost > 0 ? '#94a3b8' : '#475569' }}>
+                    {row.cost > 0 ? `$${row.cost.toFixed(3)}` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {/* Danger Zone */}
       <section>
-        <h3 className="text-base font-semibold mb-1" style={{ color: '#f87171' }}>Danger Zone</h3>
+        <h3 className="text-base font-semibold mb-1" style={{ color: '#f87171' }}>⚠️ Danger Zone</h3>
         <p className="text-xs mb-4" style={{ color: '#64748b' }}>
           Irreversible actions. Use with caution.
         </p>
 
-        <div className="rounded-lg p-4" style={{ border: '1px solid #7f1d1d', background: '#1a0a0a' }}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-white">Reset All Data</p>
-              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>
-                Delete all leads, emails, DMs, deals, and activity logs
-              </p>
+        <div className="rounded-lg overflow-hidden" style={{ border: '1px solid #7f1d1d', background: '#1a0a0a' }}>
+          {/* Delete by date */}
+          <div className="p-4 border-b" style={{ borderColor: '#7f1d1d' }}>
+            <p className="text-sm text-white mb-0.5">Delete Leads by Date</p>
+            <p className="text-xs mb-3" style={{ color: '#64748b' }}>
+              Permanently delete all leads added on a specific date, along with related emails, DMs, follow-ups, and activity log entries.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                type="date"
+                value={deleteDate}
+                max={todayStr}
+                onChange={(e) => { setDeleteDate(e.target.value); setDeleteResult(null); setDeleteCount(null) }}
+                className="px-3 py-1.5 rounded-lg text-sm text-white outline-none"
+                style={{ background: '#0f1117', border: '1px solid #7f1d1d', colorScheme: 'dark' }}
+              />
+              <button
+                onClick={checkDeleteCount}
+                disabled={!deleteDate || checkingDelete}
+                className="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                style={{ background: '#7f1d1d', color: '#fca5a5', border: '1px solid #991b1b' }}
+              >
+                {checkingDelete ? 'Checking…' : 'Delete Leads on This Date'}
+              </button>
+              {deleteResult && (
+                <span className="text-xs" style={{ color: deleteResult.ok ? '#4ade80' : '#f87171' }}>
+                  {deleteResult.text}
+                </span>
+              )}
             </div>
-            <button
-              onClick={() => { setShowResetModal(true); setResetDone(false); setResetError(null) }}
-              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-              style={{ background: '#7f1d1d', color: '#fca5a5', border: '1px solid #991b1b' }}
-            >
-              Reset All Data
-            </button>
           </div>
 
-          {resetDone && (
-            <p className="mt-3 text-sm" style={{ color: '#4ade80' }}>All data cleared successfully.</p>
-          )}
-          {resetError && (
-            <p className="mt-3 text-sm text-red-400">{resetError}</p>
-          )}
+          {/* Reset all */}
+          <div className="p-4">
+            <p className="text-sm text-white mb-0.5">Reset All Data</p>
+            <p className="text-xs mb-3" style={{ color: '#64748b' }}>
+              Delete all leads, emails, DMs, deals, and activity logs.
+            </p>
+            <button
+              onClick={() => { setShowResetModal(true); setResetDone(false); setResetError(null) }}
+              className="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors"
+              style={{ background: '#7f1d1d', color: '#fca5a5', border: '1px solid #991b1b' }}
+            >
+              Reset Everything
+            </button>
+            {resetDone && (
+              <p className="mt-2 text-sm" style={{ color: '#4ade80' }}>All data cleared successfully.</p>
+            )}
+            {resetError && (
+              <p className="mt-2 text-sm text-red-400">{resetError}</p>
+            )}
+          </div>
         </div>
       </section>
+
+      {/* Delete by date confirmation modal */}
+      <Modal
+        open={showDeleteModal}
+        onClose={() => !deleting && setShowDeleteModal(false)}
+        title="Confirm Deletion"
+      >
+        <div className="space-y-4">
+          <p className="text-sm" style={{ color: '#94a3b8' }}>
+            This will permanently delete{' '}
+            <span className="font-semibold text-white">{deleteCount} lead{deleteCount !== 1 ? 's' : ''}</span>{' '}
+            added on <span className="font-semibold text-white">{deleteDate}</span>, along with all
+            related emails, DMs, follow-ups, and activity log entries.
+          </p>
+          {deleteCount === 0 && (
+            <p className="text-sm" style={{ color: '#fbbf24' }}>No leads found for this date.</p>
+          )}
+          <div className="flex justify-end gap-3 pt-1">
+            <Button variant="secondary" size="sm" onClick={() => setShowDeleteModal(false)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" onClick={confirmDelete} disabled={deleting || deleteCount === 0}>
+              {deleting ? 'Deleting…' : `Delete ${deleteCount} lead${deleteCount !== 1 ? 's' : ''}`}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Reset confirmation modal */}
       {showResetModal && (

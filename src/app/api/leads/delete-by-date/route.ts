@@ -49,7 +49,7 @@ export async function DELETE(request: NextRequest) {
   const ids = leads.map((l) => l.id)
 
   // Delete child records first
-  const childTables = ['emails', 'dm_queue', 'follow_ups'] as const
+  const childTables = ['emails', 'dm_queue', 'follow_ups', 'activity_log'] as const
   for (const table of childTables) {
     try {
       await supabase.from(table).delete().in('lead_id', ids)

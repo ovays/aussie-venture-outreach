@@ -5,7 +5,6 @@ import { Search, Star, AtSign, Mail } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { LeadDetailPanel } from './LeadDetailPanel'
-import { DeleteByDate } from './DeleteByDate'
 import { formatDate } from '@/lib/utils'
 
 interface Lead {
@@ -74,9 +73,6 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
 
   return (
     <div className="relative">
-      {/* Delete by date */}
-      <DeleteByDate onDeleted={() => { setPage(1); fetchLeads() }} />
-
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 p-4 border-b" style={{ borderColor: '#2a2d3e' }}>
         <div className="flex items-center gap-2 flex-1 min-w-48 px-3 py-2 rounded-lg" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
