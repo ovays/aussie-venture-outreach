@@ -26,11 +26,11 @@ export const dailyPipeline = task({
   },
 })
 
-// Runs daily at 8:00am Sydney time
+// Runs daily at 11:15am Sydney time
 export const dailyPipelineSchedule = schedules.task({
-  id: 'daily-pipeline-schedule',
+  id: 'daily-pipeline',
   cron: {
-    pattern: '0 21 * * *',
+    pattern: '15 11 * * *',
     timezone: 'Australia/Sydney',
   },
   maxDuration: 60,
