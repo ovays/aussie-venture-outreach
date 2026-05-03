@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { X, ExternalLink } from 'lucide-react'
+import { X, ExternalLink, Pencil, Check, X as XIcon } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
@@ -42,7 +42,32 @@ export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProp
   const [notes, setNotes] = useState(lead?.notes ?? '')
   const [savingNotes, setSavingNotes] = useState(false)
 
+  const [editingEmail, setEditingEmail] = useState(false)
+  const [emailInput, setEmailInput] = useState(lead?.email ?? '')
+  const [savingEmail, setSavingEmail] = useState(false)
+  const [emailSaved, setEmailSaved] = useState(false)
+
   if (!lead) return null
+
+  async function saveEmail() {
+    if (!lead) return
+    setSavingEmail(true)
+    await fetch('/api/leads', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: lead.id, email: emailInput || null }),
+    })
+    onUpdate(lead.id, { email: emailInput || null })
+    setSavingEmail(false)
+    setEditingEmail(false)
+    setEmailSaved(true)
+    setTimeout(() => setEmailSaved(false), 3000)
+  }
+
+  function cancelEmailEdit() {
+    setEmailInput(lead?.email ?? '')
+    setEditingEmail(false)
+  }
 
   async function saveNotes() {
     if (!lead) return
@@ -111,7 +136,6 @@ export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProp
           {[
             { label: 'Category', value: lead.category_name },
             { label: 'Location', value: [lead.suburb, lead.city].filter(Boolean).join(', ') },
-            { label: 'Email', value: lead.email },
             { label: 'Phone', value: lead.phone },
             { label: 'Rating', value: lead.google_rating ? `${lead.google_rating} ★` : null },
             { label: 'Added', value: formatDate(lead.created_at) },
@@ -123,6 +147,62 @@ export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProp
               </div>
             ) : null
           )}
+
+          {/* Email — editable */}
+          <div className="text-sm">
+            <div className="flex items-center justify-between">
+              <span style={{ color: '#64748b' }}>Email</span>
+              {!editingEmail && (
+                <button
+                  onClick={() => { setEmailInput(lead.email ?? ''); setEditingEmail(true) }}
+                  className="flex items-center gap-1 transition-colors hover:text-white"
+                  style={{ color: '#64748b' }}
+                  title="Edit email"
+                >
+                  <span style={{ color: '#e2e8f0' }}>{lead.email ?? '—'}</span>
+                  <Pencil size={11} className="ml-1.5 shrink-0" />
+                </button>
+              )}
+            </div>
+
+            {editingEmail && (
+              <div className="mt-2 space-y-2">
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') saveEmail(); if (e.key === 'Escape') cancelEmailEdit() }}
+                  autoFocus
+                  className="w-full px-3 py-1.5 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-sky-500"
+                  style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+                  placeholder="email@example.com"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={saveEmail}
+                    disabled={savingEmail}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                    style={{ background: '#0284c7', color: 'white' }}
+                  >
+                    <Check size={11} />
+                    {savingEmail ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    onClick={cancelEmailEdit}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-colors"
+                    style={{ color: '#64748b' }}
+                  >
+                    <XIcon size={11} />
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {emailSaved && !editingEmail && (
+              <p className="text-xs mt-1" style={{ color: '#4ade80' }}>Email updated ✓</p>
+            )}
+          </div>
 
           {lead.website && (
             <div className="flex justify-between text-sm">
