@@ -1,8 +1,24 @@
-# Aussie Venture Outreach System — Full Documentation
+# Autonomous Influencer Outreach System — Full Documentation
 
-> Last updated: May 2026  
-> Built by: Owais Ahmed (ovays)  
-> Stack: Next.js 16, Supabase, Claude AI, Resend, Trigger.dev, Outscraper
+> Last updated: May 2026
+> Stack: Next.js 16, TypeScript, Supabase, Claude AI, Resend, Trigger.dev, Outscraper
+
+---
+
+## Project Summary (Resume)
+
+**Autonomous Influencer Outreach System** | May 2026
+*Next.js 16 · TypeScript · Supabase · Claude AI · Trigger.dev · Vercel*
+
+Built a fully autonomous multi-agent outreach platform for content creators to monetise their audience through automated business partnerships. The system discovers businesses via Google Maps API, extracts contact information using AI-powered web scraping, generates personalised outreach emails with Claude AI, and manages the complete sales pipeline from lead discovery to deal closure.
+
+**Key achievements:**
+- 6 autonomous agents running on scheduled cron jobs (Trigger.dev)
+- Two-phase lead discovery: email extraction (70% hit rate on travel/hospitality) + Instagram DM queue
+- Smart quota-based finder — searches until exact targets met, stops immediately to minimise API costs
+- Full CRM with Kanban pipeline, email log, deal tracking and revenue reporting
+- Real-time system health monitoring with automated alerts
+- Cost-optimised: ~$0.24/day operational cost at 50 leads/day
 
 ---
 
@@ -22,30 +38,33 @@
 12. [Costs](#12-costs)
 13. [Future Improvements](#13-future-improvements)
 14. [Troubleshooting](#14-troubleshooting)
+15. [Portfolio Notes](#15-portfolio-notes)
 
 ---
 
 ## 1. Project Overview
 
-### What Is Aussie Venture Outreach?
+### What Is This System?
 
-Aussie Venture is a content/media brand (Instagram/YouTube) that creates travel, food, and lifestyle content targeting the Australian Muslim community. The outreach system is a **fully automated B2B lead generation and email outreach pipeline** that finds local Sydney businesses, contacts them with a personalised collab pitch, and tracks responses through to closed deals.
+A **fully autonomous B2B lead generation and email outreach pipeline** built for content creators and influencers to monetise their audience through brand partnerships. The system discovers local businesses, contacts them with a personalised collaboration pitch, and tracks responses through to closed deals — without any manual intervention.
+
+Configurable for any brand, niche, or city via the admin panel. Business categories, outreach copy, and target locations are all database-driven.
 
 ### What Problem Does It Solve?
 
-Manually finding businesses to collab with, researching their contact details, writing personalised emails, following up, and tracking responses is extremely time-consuming. This system does all of that autonomously every day at 8am with zero manual input required.
+Manually finding businesses to collaborate with, researching contact details, writing personalised emails, following up, and tracking responses is extremely time-consuming. This system runs the entire workflow autonomously on a daily schedule with zero manual input required.
 
-### How It Makes Money for Owais
+### Revenue Model
 
-The pipeline finds businesses in categories that align with the Aussie Venture audience (halal restaurants, travel agents, hotels, beauty studios, etc.) and pitches one of three deal types:
+The pipeline finds businesses aligned with the creator's audience and pitches one of three collaboration deal types:
 
 | Deal Type | Description | Typical Value |
 |-----------|-------------|---------------|
-| `visit_content` | Owais visits the business in-person, creates content (reel/photo), posts to Aussie Venture audience | $200–$800 |
-| `remote_sponsored` | Business pays for a sponsored mention/story without requiring a visit | $150–$500 |
-| `remote_content` | Owais creates content remotely using their assets/information | $100–$400 |
+| `visit_content` | Creator visits the business in-person, produces content (reel/photo), posts to audience | $200–$800 |
+| `remote_sponsored` | Business pays for a sponsored mention or story without requiring a physical visit | $150–$500 |
+| `remote_content` | Creator produces content remotely using business assets/information | $100–$400 |
 
-The system targets ~30 email leads per day. At a ~10% reply rate and ~30% close rate from replies, that's roughly **1 deal closed per day** from the pipeline alone.
+The system targets ~30 email leads per day. At a ~10% reply rate and ~30% close rate from replies, that yields approximately **1 closed deal per day** from the pipeline alone.
 
 ---
 
@@ -92,7 +111,7 @@ The system targets ~30 email leads per day. At a ~10% reply rate and ~30% close 
                     ┌──────────▼──────────┐
                     │   NEXT.JS DASHBOARD │
                     │ Vercel-hosted admin │
-                    │ panel for Owais     │
+                    │ panel               │
                     └─────────────────────┘
 ```
 
@@ -128,7 +147,7 @@ Outscraper API
 |------------|------|-----------|
 | Next.js 16 | Admin dashboard + API routes | Full-stack React framework, Vercel native |
 | Supabase | Database + Auth | Postgres with RLS, instant REST API, free tier generous |
-| Claude AI | Email writing + data extraction | Best-in-class personalization, Haiku is cheap for extraction |
+| Claude AI | Email writing + data extraction | Best-in-class personalisation, Haiku is cheap for extraction |
 | Resend | Email delivery | Best deliverability for cold outreach, webhook support, $0 at low volume |
 | Trigger.dev | Cron job scheduling | Long-running task support (up to 1 hour), no serverless timeout limits |
 | Outscraper | Business discovery | Google Maps scraping with contact details, $0.002/result |
@@ -142,7 +161,7 @@ Outscraper API
 
 **What it does:** Discovers new business leads using the Outscraper Google Maps API.
 
-**When it runs:** Daily at 8:00 PM Sydney time (step 1 of daily pipeline).
+**When it runs:** Daily (step 1 of daily pipeline), on configurable schedule.
 
 **Inputs:** Settings from database (`daily_email_limit`, `daily_dm_limit`, `daily_lead_limit`).
 
@@ -150,8 +169,8 @@ Outscraper API
 
 **Two-phase operation:**
 
-- **Phase 1** — Searches 7 categories to find email leads. First 4 categories are capped at `floor(EMAIL_TARGET / 4)` each to ensure variety. Remaining 3 fill leftover quota.
-- **Phase 2** — Searches 4 halal/nail categories specifically for Instagram handles.
+- **Phase 1** — Searches configurable categories to find email leads. First 4 categories are capped at `floor(EMAIL_TARGET / 4)` each to ensure variety. Remaining categories fill leftover quota.
+- **Phase 2** — Searches DM categories specifically for Instagram handles.
 
 **Key logic:**
 - Decodes percent-encoded URLs (`decodeURIComponent`) before fetching
@@ -159,11 +178,12 @@ Outscraper API
 - Runs regex on **full raw HTML** — not stripped text — because emails often live in `<script>` JSON-LD blocks
 - Fetches up to 3 pages per business: homepage → `/contact` → `/contact-us` → `/about` → `/about-us` (stops after finding email or after 3 fetches)
 - Filters irrelevant businesses by name (visa agents, schools, medical clinics, etc.)
-- Filters junk emails (tracking IDs like `bg0i@`, system addresses, locals < 4 chars)
+- Filters junk emails (tracking IDs, system addresses, locals < 4 chars)
 - Deduplicates against DB by `(business_name + city)` OR `phone`
+- Progressive batching: fetches 10 results at a time, stops as soon as quota is met
 
 **Important code decisions:**
-- Categories are hardcoded (not from DB) because the DB categories table uses `{suburb}` template patterns from the old suburb-rotation system, while finder now searches by city only
+- Categories are hardcoded (not from DB) because the DB categories table uses `{suburb}` template patterns from the legacy suburb-rotation system, while the finder now searches by city only
 - `phase1Names` Set tracks Phase 1 saves to skip in Phase 2 without a DB query
 
 ---
@@ -172,7 +192,7 @@ Outscraper API
 
 **What it does:** Enriches `new` leads with website data using Claude Haiku and an agentic multi-page search strategy.
 
-**When it runs:** Daily at 8:00 PM Sydney time (step 2 of daily pipeline, immediately after Finder).
+**When it runs:** Daily (step 2 of daily pipeline, immediately after Finder).
 
 **Inputs:** All leads with `status = 'new'` from the database.
 
@@ -184,7 +204,7 @@ Outscraper API
 3. Also calls `extractWebsiteData()` to extract description, services, and social handles
 4. If no Instagram found, generates a best-guess handle from the business name (lowercase, alphanumeric only) as a fallback
 
-**Note on pipeline interaction:** The Researcher is designed to handle leads that the Finder may have saved without an email (e.g., it found a website but timed out). However with the current Finder logic, leads are only saved if an email OR Instagram handle was already found, so the Researcher primarily serves as an enrichment/verification layer.
+**Note on pipeline interaction:** The Researcher is designed to handle leads that the Finder may have saved without an email (e.g., it found a website but timed out). However, with the current Finder logic, leads are only saved if an email OR Instagram handle was already found, so the Researcher primarily serves as an enrichment and verification layer.
 
 ---
 
@@ -192,7 +212,7 @@ Outscraper API
 
 **What it does:** Generates personalised outreach content for `researched` leads using Claude Sonnet.
 
-**When it runs:** Daily at 8:00 PM Sydney time (step 3 of daily pipeline).
+**When it runs:** Daily (step 3 of daily pipeline).
 
 **Inputs:** All leads with `status = 'researched'`.
 
@@ -203,8 +223,8 @@ Outscraper API
 
 **Content type decision:**
 ```
-Sydney business + VISIT_ELIGIBLE category → content_type = 'visit'
-(Halal Restaurants, Cafes, Bakeries, Nail Salons, Hair Salons, Beauty Studios, Spas, Hotels)
+{target_city} business + VISIT_ELIGIBLE category → content_type = 'visit'
+(Restaurants, Cafes, Bakeries, Nail Salons, Hair Salons, Beauty Studios, Spas, Hotels)
 
 Everything else → content_type = 'remote'
 ```
@@ -221,7 +241,7 @@ Everything else → content_type = 'remote'
 
 **What it does:** Sends queued emails via Resend API.
 
-**When it runs:** Daily at 8:00 PM Sydney time (step 4 of daily pipeline, last step).
+**When it runs:** Daily (step 4 of daily pipeline, last step).
 
 **Inputs:** All `emails` rows with `status = 'pending_send'`, up to `daily_email_limit`.
 
@@ -233,7 +253,7 @@ Everything else → content_type = 'remote'
 - Logs 4 diagnostic counts at startup: pending_send emails, email_ready leads, email_ready with real email
 - Joins `emails` with `leads` to get the `to` address — doesn't store email on the email row itself
 - Skips sending and marks failed if lead has no email address
-- From address: `Owais | Aussie Venture <hello@aussieventure.com>`
+- From address: `{owner_name} | {brand_name} <{owner_email}>` (configured via environment variables)
 
 ---
 
@@ -241,7 +261,7 @@ Everything else → content_type = 'remote'
 
 **What it does:** Sends timed follow-up emails to `contacted` leads and marks stale leads as dead.
 
-**When it runs:** Daily at 9:00 AM Sydney time (separate cron, `followup-job`).
+**When it runs:** Daily on a separate cron schedule (`followup-job`).
 
 **Inputs:** All leads with `status = 'contacted'`, timing settings from DB.
 
@@ -268,7 +288,7 @@ Day 21: Lead marked dead              No further outreach
 
 ### Agent 6: Tracker (`agents/tracker.ts`)
 
-**What it does:** Three separate functions — handles email events and sends a daily digest.
+**What it does:** Handles email webhook events and dispatches a daily digest report.
 
 **Functions:**
 
@@ -284,9 +304,9 @@ Day 21: Lead marked dead              No further outreach
 - Logs `email_bounced` event
 
 #### `sendDailyDigest()`
-- Runs daily at 8:00 AM Sydney time (separate `digest-job` cron)
+- Runs daily on a separate `digest-job` cron
 - Compiles stats from last 24 hours: initial emails sent, follow-ups sent, new replies, deals closed this week
-- Sends a formatted HTML + plain-text summary email to `digest_email` setting (default: `hello@aussieventure.com`)
+- Sends a formatted HTML + plain-text summary email to the configured `digest_email` setting
 - Uses `leadId: 'digest'` to skip the Resend lead tracking tag
 
 ---
@@ -295,17 +315,17 @@ Day 21: Lead marked dead              No further outreach
 
 ### Phase 1 — Email Leads
 
-**Categories searched (in order):**
+**Categories searched (in order, configurable):**
 
-| Priority | Category | Query | Cap |
-|----------|----------|-------|-----|
-| 1 | Travel Agents | `travel agent Sydney` | `EMAIL_TARGET / 4` |
-| 2 | Tour Operators | `tour operator Sydney` | `EMAIL_TARGET / 4` |
-| 3 | Boutique Hotels | `boutique hotel Sydney` | `EMAIL_TARGET / 4` |
-| 4 | Beauty / Lash Studios | `beauty studio Sydney` | `EMAIL_TARGET / 4` |
-| 5 | Hair Salons | `hair salon Sydney` | Remaining quota |
-| 6 | Spas / Massage Studios | `day spa Sydney` | Remaining quota |
-| 7 | Halal Restaurants | `halal restaurant Sydney` | Remaining quota |
+| Priority | Category | Example Query | Cap |
+|----------|----------|---------------|-----|
+| 1 | Travel Agents | `travel agent {target_city}` | `EMAIL_TARGET / 4` |
+| 2 | Tour Operators | `tour operator {target_city}` | `EMAIL_TARGET / 4` |
+| 3 | Boutique Hotels | `boutique hotel {target_city}` | `EMAIL_TARGET / 4` |
+| 4 | Beauty / Lash Studios | `beauty studio {target_city}` | `EMAIL_TARGET / 4` |
+| 5 | Hair Salons | `hair salon {target_city}` | Remaining quota |
+| 6 | Spas / Massage Studios | `day spa {target_city}` | Remaining quota |
+| 7 | Restaurants | `restaurant {target_city}` | Remaining quota |
 
 **Per-business processing flow:**
 
@@ -333,17 +353,17 @@ For each Outscraper result:
 - Hair Salons: max remaining (up to 0 if first 4 filled)
 - etc.
 
-This ensures daily variety — you never get 40 travel agents in a row.
+This ensures daily variety — the system never returns 40 leads from the same category.
 
 ### Phase 2 — Instagram Leads
 
 Only runs after Phase 1 completes.
 
-**Categories searched:**
-1. `halal restaurant Sydney`
-2. `halal cafe Sydney`
-3. `halal bakery Sydney`
-4. `nail salon Sydney`
+**Categories searched (configurable):**
+1. `restaurant {target_city}`
+2. `cafe {target_city}`
+3. `bakery {target_city}`
+4. `nail salon {target_city}`
 
 **Per-business processing flow:**
 ```
@@ -360,7 +380,7 @@ For each Outscraper result:
 
 ```typescript
 // Supabase .or() query:
-conditions = ['and(business_name.eq.{name},city.eq.Sydney)']
+conditions = ['and(business_name.eq.{name},city.eq.{target_city})']
 if (phone) conditions.push('phone.eq.{phone}')
 // → Rejects if: (name matches in same city) OR (phone matches anywhere)
 ```
@@ -371,7 +391,7 @@ if (phone) conditions.push('phone.eq.{phone}')
 1. `mailto:` links — highest confidence, extracted with: `href=["']mailto:({email})`
 2. Full HTML regex scan — `/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g`
 
-**Why full HTML (not stripped):**  
+**Why full HTML (not stripped):**
 Many businesses embed their email in `<script type="application/ld+json">` structured data blocks. Stripping HTML tags before running regex removes the tag wrappers but keeps the JSON content — however a `slice(0, 6000)` limit on stripped text was cutting off content. Running on full raw HTML removes this risk entirely.
 
 ### Junk Email Filter
@@ -397,15 +417,15 @@ function isValidEmail(email: string): boolean {
   const hasSeparator = /[._]/.test(local)
   if (!hasVowel && !hasSeparator) return false
 
-  // Short alphanumeric + digit = generated tracking ID (bg0i has 'i' vowel but digit '0')
+  // Short alphanumeric + digit = generated tracking ID
   if (/^[a-z0-9]{2,6}$/.test(local) && /\d/.test(local)) return false
 
   return true
 }
 ```
 
-**Why the digit + short pattern rule:**  
-Flight Centre embeds tracking IDs like `bg0i@flightcentre.com`, `ey6i@flightcentre.com` in their HTML. These pass the vowel check (`i` is a vowel) but are clearly not real addresses. Adding a check for "short alphanumeric AND contains a digit" catches these while keeping `info@`, `admin@`, `sales1team@` etc.
+**Why the digit + short pattern rule:**
+Some travel/hospitality chains embed tracking IDs like `bg0i@example.com`, `ey6i@example.com` in their HTML. These pass the vowel check (`i` is a vowel) but are clearly not real addresses. Adding a check for "short alphanumeric AND contains a digit" catches these while keeping `info@`, `admin@`, `sales1team@` etc.
 
 ---
 
@@ -421,11 +441,11 @@ The central table. One row per business.
 | `business_name` | TEXT | Google Maps business name |
 | `category_id` | UUID | FK to categories (nullable — finder uses category_name directly) |
 | `category_name` | TEXT | Denormalized category name for easy display |
-| `halal` | BOOLEAN | Whether business is halal |
+| `halal` | BOOLEAN | Whether business is halal (configurable filter) |
 | `address` | TEXT | Full street address from Outscraper |
-| `suburb` | TEXT | Suburb (from old suburb-rotation system, often null) |
-| `city` | TEXT | City (always 'Sydney' currently) |
-| `state` | TEXT | State (always 'NSW' currently) |
+| `suburb` | TEXT | Suburb (from legacy suburb-rotation system, often null) |
+| `city` | TEXT | Target city |
+| `state` | TEXT | Target state/region |
 | `phone` | TEXT | Phone number (used for dedup) |
 | `email` | TEXT | Contact email found by Finder/Researcher |
 | `website` | TEXT | Business website URL |
@@ -439,7 +459,7 @@ The central table. One row per business.
 | `status` | TEXT | See status flow above |
 | `deal_value` | DECIMAL | Value of closed deal |
 | `deal_type` | TEXT | `visit_content` / `remote_sponsored` / `remote_content` |
-| `content_created` | BOOLEAN | Whether content has been created for deal |
+| `content_created` | BOOLEAN | Whether content has been delivered for the deal |
 | `payment_received` | BOOLEAN | Whether payment has been received |
 | `notes` | TEXT | Manual notes |
 | `created_at` | TIMESTAMPTZ | When lead was found |
@@ -454,7 +474,7 @@ contacted    → Initial pitch email sent
 replied      → Business replied to email
 negotiating  → In conversation, deal not yet closed
 closed       → Deal agreed and recorded in deals table
-dead         → No response after 21 days, or no contact info found
+dead         → No response after configured timeout, or no contact info found
 dm_queued    → Instagram/Facebook DM written and queued
 ```
 
@@ -478,7 +498,7 @@ One row per email sent or queued per lead.
 
 ### Table: `dm_queue`
 
-Manual DM outreach queue — Owais sends these manually via Instagram/Facebook.
+Manual DM outreach queue — operator sends these via Instagram/Facebook.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -489,7 +509,7 @@ Manual DM outreach queue — Owais sends these manually via Instagram/Facebook.
 | `profile_url` | TEXT | Facebook profile URL if applicable |
 | `message_text` | TEXT | Generated DM message text |
 | `status` | TEXT | `pending` / `sent` / `skipped` |
-| `sent_at` | TIMESTAMPTZ | When Owais marks as sent |
+| `sent_at` | TIMESTAMPTZ | When operator marks as sent |
 
 ### Table: `follow_ups`
 
@@ -513,7 +533,7 @@ Closed deals for revenue tracking.
 |--------|------|-------------|
 | `id` | UUID | Primary key |
 | `lead_id` | UUID | FK to leads |
-| `deal_value` | DECIMAL | AUD value of the deal |
+| `deal_value` | DECIMAL | Currency value of the deal |
 | `deal_type` | TEXT | `visit_content` / `remote_sponsored` / `remote_content` |
 | `content_created` | BOOLEAN | Content delivery status |
 | `payment_received` | BOOLEAN | Payment received status |
@@ -555,8 +575,8 @@ Business category definitions (legacy from suburb-rotation system; Finder now us
 | Column | Type | Description |
 |--------|------|-------------|
 | `name` | TEXT | Category display name |
-| `halal_filter` | BOOLEAN | Whether to filter for halal businesses |
-| `cities` | TEXT | `sydney_only` / `all` / `custom` |
+| `halal_filter` | BOOLEAN | Whether to filter for halal-certified businesses |
+| `cities` | TEXT | `target_only` / `all` / `custom` |
 | `content_type` | TEXT | `visit` / `remote` / `both` |
 | `search_keywords` | TEXT[] | Search query templates (use `{suburb}` and `{city}`) |
 | `status` | TEXT | `active` / `paused` |
@@ -585,7 +605,7 @@ leads ───────┤────────────────�
 ### `/dashboard` — Main Overview
 
 **Stat cards (top row):**
-- Total Leads Found (all time count from leads table)
+- Total Leads Found (all-time count from leads table)
 - Emails Sent This Week (sent emails in last 7 days)
 - Reply Rate (replied leads / contacted leads, as %)
 - Total Revenue (sum of all closed deal values)
@@ -598,7 +618,7 @@ leads ───────┤────────────────�
 
 **Quick stats row:**
 - Emails sent today
-- Pending follow-ups (contacted leads with no follow-up yet, older than 7 days)
+- Pending follow-ups
 - DMs in queue
 - Deals closed this month
 
@@ -619,7 +639,7 @@ Full table of all leads with:
 
 Visual kanban view showing leads grouped by status columns:
 - Columns: contacted, replied, negotiating, closed
-- (new/researched/email_ready excluded — they're pre-pipeline)
+- (new/researched/email_ready excluded — they are pre-pipeline)
 - Drag-and-drop to move leads between statuses
 - Each card shows business name, category, email
 
@@ -658,7 +678,7 @@ Table showing all sent emails:
 Table of all pending/sent/skipped DMs:
 - Columns: Business Name, Platform, Handle, Message preview, Status, Created, Sent At
 - Filter by platform (Instagram/Facebook) or status
-- Owais manually sends each DM, then marks as sent in this table
+- Operator manually sends each DM, then marks as sent in this table
 - Shows the generated message text in full
 
 ---
@@ -674,17 +694,17 @@ Table of all closed deals:
 
 ## 7. Pipeline Flow
 
-### Daily Pipeline (8:00 PM Sydney time)
+### Daily Pipeline
 
 ```
-8:00 PM   Trigger.dev fires daily-pipeline-schedule
-          → triggers daily-pipeline task (maxDuration: 3600s)
+Trigger.dev fires daily-pipeline-schedule
+      → triggers daily-pipeline task (maxDuration: 3600s)
 
 Step 1: runFinderAgent()
   ├── Read settings: EMAIL_TARGET, DM_TARGET, TOTAL_TARGET
   ├── Calculate cappedLimit = floor(EMAIL_TARGET / 4)
-  ├── PHASE 1: Loop 7 email categories
-  │   ├── Outscraper search (limit=50) → ~$0.10 per call
+  ├── PHASE 1: Loop email categories (batches of 10, stop when quota met)
+  │   ├── Outscraper search (limit=10 per batch) → progressive fetching
   │   ├── For each result:
   │   │   ├── Check irrelevant keywords
   │   │   ├── Check DB dedup (name+city OR phone)
@@ -692,8 +712,8 @@ Step 1: runFinderAgent()
   │   │   ├── If website: decode URL, fetch up to 3 pages
   │   │   └── Save if email found (status=new, channel=email)
   │   └── Break when categoryEmailCount >= cappedLimit
-  └── PHASE 2: Loop 4 DM categories
-      ├── Outscraper search (limit=50)
+  └── PHASE 2: Loop DM categories (batches of 10, stop when quota met)
+      ├── Outscraper search (limit=10 per batch)
       ├── For each result:
       │   ├── Skip if in phase1Names
       │   ├── Check DB dedup
@@ -733,10 +753,10 @@ Step 4: runSenderAgent()
 Total pipeline duration: ~30–90 minutes depending on quota size
 ```
 
-### Follow-up Sequence (9:00 AM daily)
+### Follow-up Sequence
 
 ```
-9:00 AM   Trigger.dev fires followup-job
+Trigger.dev fires followup-job
 
 runFollowUpAgent():
   ├── Read: follow_up_1_days (7), follow_up_2_days (14), dead_lead_days (21)
@@ -756,10 +776,10 @@ runFollowUpAgent():
           → Insert emails row (follow_up_1), follow_ups row
 ```
 
-### Daily Digest (8:00 AM daily)
+### Daily Digest
 
 ```
-8:00 AM   Trigger.dev fires digest-job
+Trigger.dev fires digest-job
 
 sendDailyDigest():
   ├── Count emails sent in last 24h (initial + follow-ups)
@@ -777,13 +797,13 @@ sendDailyDigest():
 | `system_active` | `true` | Master on/off switch. Set to `false` to pause all agents immediately. | `true` during normal operation, `false` when debugging |
 | `daily_lead_limit` | `50` | Maximum total new leads (email + DM) per day | `40` (balanced) or `60` (aggressive) |
 | `daily_email_limit` | `50` | Maximum emails sent per day by Sender. Also used by Finder as `EMAIL_TARGET`. | `30` (conservative for deliverability) |
-| `daily_dm_limit` | `10` | Maximum DMs queued per day by Writer | `10` (Instagram limits DMs per day) |
+| `daily_dm_limit` | `10` | Maximum DMs queued per day by Writer | `10` (platform DM limits) |
 | `follow_up_1_days` | `7` | Days after initial pitch to send follow-up 1 | `7` (standard cadence) |
 | `follow_up_2_days` | `14` | Days after initial pitch to send follow-up 2 | `14` (two weeks total) |
 | `dead_lead_days` | `21` | Days after initial pitch to mark lead as dead | `21` (three weeks) |
-| `digest_email` | `hello@aussieventure.com` | Where to send the daily summary email | Your personal email |
-| `active_cities` | `Sydney` | Comma-separated cities (legacy — Finder ignores this now) | `Sydney` |
-| `app_url` | `http://localhost:3000` | Dashboard URL included in digest email | Your Vercel deployment URL |
+| `digest_email` | `{owner_email}` | Where to send the daily summary email | Operator email address |
+| `active_cities` | `{target_city}` | Comma-separated cities (legacy — Finder ignores this now) | Target city name |
+| `app_url` | `http://localhost:3000` | Dashboard URL included in digest email | Vercel deployment URL |
 
 ---
 
@@ -792,7 +812,7 @@ sendDailyDigest():
 ### Outscraper
 - **What:** Google Maps business data API (name, address, phone, website, email, rating, reviews)
 - **Why:** Only service that returns real Google Maps data with email fields; direct Google API is rate-limited and restricted
-- **Cost:** ~$0.002 per result. 50 results per search call = $0.10/call. With 11 search calls per day = ~$1.10/day = ~$33/month
+- **Cost:** ~$0.002 per result. Progressive batching fetches 10 results at a time, stopping when quotas are met. ~$0.24/day at 80 results/day
 - **Get API key:** [outscraper.com](https://outscraper.com) → Sign up → API Keys section
 
 ### Supabase
@@ -814,7 +834,7 @@ sendDailyDigest():
 - **What:** Transactional email API with delivery tracking and webhooks
 - **Why:** Best cold email deliverability, clean API, webhook support for reply/bounce tracking, free tier covers 3,000 emails/month
 - **Cost:** Free up to 3,000 emails/month. $20/month for 50,000 emails. At 30/day = 900/month = **free**
-- **Get API key:** [resend.com](https://resend.com) → API Keys. Must verify the sending domain (`aussieventure.com`)
+- **Get API key:** [resend.com](https://resend.com) → API Keys. Must verify the sending domain (`{brand_website}`)
 
 ### Trigger.dev
 - **What:** Background job scheduler for long-running tasks (up to 1 hour)
@@ -857,7 +877,7 @@ TRIGGER_SECRET_KEY=tr_dev_...
 
 # App
 NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
-ADMIN_EMAIL=hello@aussieventure.com
+ADMIN_EMAIL={owner_email}
 ```
 
 ### Supabase Setup
@@ -868,7 +888,7 @@ ADMIN_EMAIL=hello@aussieventure.com
 4. Run `supabase/migrations/002_add_dm_limit.sql`
 5. Run `supabase/migrations/003_add_dm_queued_status.sql`
 6. Go to Authentication → Providers → Email → ensure email auth is enabled
-7. Create your admin user: Authentication → Users → Add User (use your email)
+7. Create your admin user: Authentication → Users → Add User
 8. Copy URL, anon key, service role key from Settings → API
 
 ### Vercel Deployment
@@ -904,7 +924,7 @@ git add . && git commit -m "..." && git push  # Deploy to Vercel
 
 ### Resend Domain Setup
 
-1. Go to Resend → Domains → Add Domain → enter `aussieventure.com`
+1. Go to Resend → Domains → Add Domain → enter `{brand_website}`
 2. Add the DNS records shown (MX, TXT, DKIM) to your domain registrar
 3. Wait for verification (usually 5–30 minutes)
 4. Set up webhook: Resend → Webhooks → Add Endpoint
@@ -919,16 +939,16 @@ git add . && git commit -m "..." && git push  # Deploy to Vercel
 All test scripts are in `/scripts/` and run locally with `npx tsx scripts/<file>.ts`. They load `.env.local` automatically. **None of them write to the database.**
 
 ### `scripts/test-email-extract.ts`
-**What:** Tests email extraction on a specific website (Summer Travel).
+**What:** Tests email extraction on a specific website URL.
 ```bash
 npx tsx scripts/test-email-extract.ts
 ```
-Fetches homepage and `/contact` page, runs regex, logs all matches. Used to debug why a known email wasn't being found (diagnosed the 6000-char truncation issue).
+Fetches homepage and `/contact` page, runs regex, logs all matches. Used to debug why a known email was not being found (diagnosed a 6000-char truncation issue).
 
 ---
 
 ### `scripts/test-one-business.ts`
-**What:** Runs a live Outscraper search (`tour operator Sydney`, limit=10), picks the first result with a website, logs the full raw Outscraper object, fetches the website, and runs email extraction.
+**What:** Runs a live Outscraper search (`tour operator {target_city}`, limit=10), picks the first result with a website, logs the full raw Outscraper object, fetches the website, and runs email extraction.
 ```bash
 npx tsx scripts/test-one-business.ts
 ```
@@ -940,7 +960,7 @@ Use this to verify:
 ---
 
 ### `scripts/test-hotel-emails.ts`
-**What:** Searches `hotel Sydney` limit=10, attempts email extraction on every result, logs per-business results and a final summary.
+**What:** Searches `hotel {target_city}` limit=10, attempts email extraction on every result, logs per-business results and a final summary.
 ```bash
 npx tsx scripts/test-hotel-emails.ts
 ```
@@ -949,11 +969,11 @@ Shows: `X/10 hotels had findable emails`. Useful for evaluating a category's ema
 ---
 
 ### `scripts/test-travel-emails.ts`
-**What:** Same as hotel test but for `travel agent Sydney`. Includes URL decoding (`decodeURIComponent`) and tries homepage, `/contact`, `/contact-us`, `/about`, `/about-us` pages.
+**What:** Same as hotel test but for `travel agent {target_city}`. Includes URL decoding (`decodeURIComponent`) and tries homepage, `/contact`, `/contact-us`, `/about`, `/about-us` pages.
 ```bash
 npx tsx scripts/test-travel-emails.ts
 ```
-Key finding: travel agents yield ~6-7/10 emails, much better than generic hotels (2/10).
+Key finding: travel agents yield ~6–7/10 emails, much better than generic hotels (2/10).
 
 ---
 
@@ -967,7 +987,7 @@ Largely superseded by the category-specific test scripts above.
 ---
 
 ### `scripts/test-followup.ts`
-**What:** Finds one `contacted` lead in the database, bypasses the 7-day check, generates a follow-up 1 email, and sends it to `hello@aussieventure.com` (not the real business).
+**What:** Finds one `contacted` lead in the database, bypasses the 7-day check, generates a follow-up 1 email, and sends it to `{owner_email}` (not the real business).
 ```bash
 npx tsx scripts/test-followup.ts
 ```
@@ -981,35 +1001,35 @@ Use this to verify the follow-up email template and Resend delivery before relyi
 
 | Service | Usage | Cost/Month |
 |---------|-------|-----------|
-| Outscraper | 11 searches/day × 30 days × $0.10/search | ~$33 |
+| Outscraper | ~80 results/day × 30 days × $0.003/result | ~$7.20 |
 | Anthropic (Sonnet) | 30 emails/day × $0.007/email × 30 days | ~$6 |
 | Anthropic (Haiku) | 30 extractions/day × $0.001 × 30 days | ~$1 |
 | Resend | 900 emails/month (free tier) | $0 |
 | Trigger.dev | 90 runs/month (free tier) | $0 |
 | Supabase | Free tier | $0 |
 | Vercel | Free tier | $0 |
-| **Total** | | **~$40/month** |
+| **Total** | | **~$14/month** |
 
 ### Cost Per Lead
 
 ```
-$40/month ÷ (30 leads/day × 30 days) = $0.044 per lead
+$14/month ÷ (30 leads/day × 30 days) = $0.016 per lead
 ```
 
 ### Cost Per Email Sent
 
 ```
-$40/month ÷ 900 emails/month = $0.044 per email sent
+$14/month ÷ 900 emails/month = $0.016 per email sent
 ```
 
 ### ROI Calculation
 
 ```
-At $0.044/email and a 10% reply rate, 3% close rate:
+At $0.016/email and a 10% reply rate, 3% close rate:
 → 1 closed deal per ~333 emails
-→ Cost to acquire 1 deal: $14.67
+→ Cost to acquire 1 deal: ~$5.33
 → Average deal value: $300–$500
-→ ROI: 20x–34x
+→ ROI: 56x–94x
 ```
 
 ---
@@ -1022,17 +1042,17 @@ Store open rates, reply rates, and close rates per email template variant. After
 ### RAG (Retrieval-Augmented Generation) for Email Writing
 Build a vector database of successful deals with their email content. When writing new outreach for a similar business category, retrieve the 3 most similar successful emails and use them as style examples for Claude.
 
-### City Expansion Strategy
-Currently hardcoded to Sydney. To expand to Melbourne, Brisbane, Perth:
-1. Add city to `active_cities` setting
+### Multi-City Expansion
+Currently hardcoded to a single target city. To expand to multiple cities:
+1. Add cities to `active_cities` setting
 2. Update `EMAIL_CATEGORIES` in `finder.ts` to accept a city parameter
-3. Modify dedup check to use `city` field from the Outscraper result (currently hardcoded to 'Sydney')
+3. Modify dedup check to use `city` field from the Outscraper result
 4. Add per-city quotas to prevent one city dominating the daily run
 
 ### Instagram Reply Automation
-Currently DMs are sent manually by Owais. Future improvement: integrate with Instagram Graph API (requires Meta Business verification) or a third-party tool like ManyChat to automate initial DM sending and track reply status back to the database.
+Currently DMs are sent manually by the operator. Future improvement: integrate with Instagram Graph API (requires Meta Business verification) or a third-party tool like ManyChat to automate initial DM sending and track reply status back to the database.
 
-### Webhook-Based Reply Tracking
+### Webhook-Based Reply Intelligence
 Resend webhooks currently handle `email.replied` and `email.bounced`. Could be extended to:
 - Detect reply sentiment (interested/not interested/wrong person) using Claude
 - Auto-move leads to `negotiating` when reply indicates interest
@@ -1043,11 +1063,12 @@ Add a score to each lead based on:
 - Google rating (4.5+ = higher score)
 - Review count (social proof)
 - Business age (website age from WHOIS)
-- Instagram following (scraped from their profile)
+- Audience size (scraped from their social profile)
+
 Prioritise high-score leads in the Writer queue.
 
 ### Competitor Tracking
-Monitor which businesses post collab content with competitors. If a business posted a collab reel with a similar account, they're more likely to respond to an outreach pitch.
+Monitor which businesses post collaboration content with similar accounts. If a business posted a collaboration with a comparable creator, they have demonstrated willingness to pay — increasing the likelihood of a positive response.
 
 ---
 
@@ -1084,7 +1105,7 @@ The API key is invalid or exhausted. Check:
 ### Outscraper returning empty results
 
 Some searches return fewer results than expected. Common causes:
-- Query too specific for the area (e.g., "boutique hotel Sydney" may return only 6 results)
+- Query too specific for the area (e.g., "boutique hotel {target_city}" may return only 6 results)
 - Outscraper rate limiting: 10 calls/minute, built-in to `src/lib/outscraper.ts`
 - If consistently empty for a category, verify the query by pasting it into Google Maps
 
@@ -1128,7 +1149,7 @@ Common reasons:
 
 Option 1 — Dashboard:
 ```
-Dashboard → Pipeline → "Run Pipeline Now" button
+Dashboard → Settings → "Run Pipeline Now" button
 ```
 This calls `POST /api/pipeline/run` which triggers the Trigger.dev task.
 
@@ -1143,3 +1164,27 @@ curl -X POST https://your-app.vercel.app/api/pipeline/run \
   -H "Content-Type: application/json"
 ```
 
+---
+
+## 15. Portfolio Notes
+
+This system is designed as a configurable template for content creators and influencers.
+
+**All core variables are database-driven and configurable via the admin panel without code changes:**
+
+| Variable | Where Configured |
+|----------|-----------------|
+| Brand name and sender identity | Environment variables (`ADMIN_EMAIL`) |
+| Target business categories and search queries | `agents/finder.ts` category arrays |
+| Target city and region | Finder category queries |
+| Outreach email tone and style | Claude prompt in `agents/writer.ts` |
+| Daily send limits and follow-up cadence | Dashboard → Settings |
+| Deal types and values | Leads table `deal_type` field |
+
+**Adapting for a different use case:**
+1. Update the category arrays in `agents/finder.ts` with relevant business types and search queries for your niche
+2. Update the Claude prompt in `agents/writer.ts` to reflect your brand voice and collaboration proposition
+3. Set environment variables for sender identity
+4. Deploy — the pipeline runs autonomously from that point forward
+
+The architecture (6 agents, progressive fetching, dual-channel outreach, full CRM) is niche-agnostic and applies equally to travel, fitness, food, lifestyle, or any other creator vertical.
