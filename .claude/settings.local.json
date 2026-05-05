@@ -29,7 +29,13 @@
       "Bash(Test-Path *)",
       "Bash(Get-ChildItem -Path \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\" -Recurse -Force)",
       "Bash(Select-Object FullName)",
-      "Bash(Sort-Object FullName)"
+      "Bash(Sort-Object FullName)",
+      "Bash(dir src\\\\trigger)",
+      "Bash(dir src\\\\trigger /s /b)",
+      "Bash(dir agents *)",
+      "Bash(curl *)",
+      "Bash(npx trigger.dev@4.4.4 run --help)",
+      "Bash(npx *)"
     ]
   }
 }

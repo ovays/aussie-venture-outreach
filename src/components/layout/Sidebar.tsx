@@ -55,7 +55,7 @@ export default function Sidebar() {
         {/* Header */}
         <div className="px-5 py-5 border-b flex items-center justify-between" style={{ borderColor: '#2a2d3e' }}>
           <div>
-            <h1 className="text-lg font-bold text-white leading-tight">Outreach OS</h1>
+            <h1 className="text-lg font-bold text-white leading-tight">Aussie Venture</h1>
             <p className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>Outreach System</p>
           </div>
           {/* Close button — mobile only */}
