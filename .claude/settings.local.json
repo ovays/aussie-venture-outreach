@@ -25,7 +25,8 @@
       "Bash(Out-Null)",
       "Bash(Write-Host \"done\")",
       "Bash(node *)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(Test-Path *)"
     ]
   }
 }
