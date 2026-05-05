@@ -59,14 +59,14 @@ export function KanbanBoard({ leads: initialLeads }: KanbanBoardProps) {
   }
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-4 p-6 min-h-0 flex-1">
+    <div className="flex gap-3 overflow-x-auto pb-4 p-3 md:p-6 min-h-0 flex-1 snap-x snap-mandatory">
       {COLUMNS.map(({ key, label, color }) => {
         const columnLeads = leads.filter((l) => l.status === key)
 
         return (
           <div
             key={key}
-            className="flex flex-col rounded-xl shrink-0 w-64"
+            className="flex flex-col rounded-xl shrink-0 w-[82vw] md:w-64 snap-center"
             style={{ background: '#1e2130', border: '1px solid #2a2d3e' }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {

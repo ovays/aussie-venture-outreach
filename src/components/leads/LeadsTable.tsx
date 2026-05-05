@@ -74,49 +74,56 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
   return (
     <div className="relative">
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 p-4 border-b" style={{ borderColor: '#2a2d3e' }}>
-        <div className="flex items-center gap-2 flex-1 min-w-48 px-3 py-2 rounded-lg" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
+      <div className="flex flex-col sm:flex-row flex-wrap gap-2 p-3 md:p-4 border-b" style={{ borderColor: '#2a2d3e' }}>
+        {/* Search — full width on mobile */}
+        <div
+          className="flex items-center gap-2 w-full sm:flex-1 sm:min-w-48 px-3 py-2 rounded-lg"
+          style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+        >
           <Search size={14} style={{ color: '#64748b' }} />
           <input
             type="text"
             placeholder="Search business name..."
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-            className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none"
+            className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none min-w-0"
           />
         </div>
 
-        <select
-          value={status}
-          onChange={(e) => { setStatus(e.target.value); setPage(1) }}
-          className="px-3 py-2 rounded-lg text-sm text-white outline-none"
-          style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
-        >
-          <option value="">All Statuses</option>
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+        {/* Selects + clear */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <select
+            value={status}
+            onChange={(e) => { setStatus(e.target.value); setPage(1) }}
+            className="px-3 py-2 rounded-lg text-sm text-white outline-none"
+            style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+          >
+            <option value="">All Statuses</option>
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
 
-        <select
-          value={city}
-          onChange={(e) => { setCity(e.target.value); setPage(1) }}
-          className="px-3 py-2 rounded-lg text-sm text-white outline-none"
-          style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
-        >
-          <option value="">All Cities</option>
-          {CITIES.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
+          <select
+            value={city}
+            onChange={(e) => { setCity(e.target.value); setPage(1) }}
+            className="px-3 py-2 rounded-lg text-sm text-white outline-none"
+            style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+          >
+            <option value="">All Cities</option>
+            {CITIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
 
-        {(search || status || city) && (
-          <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setStatus(''); setCity(''); setPage(1) }}>
-            Clear
-          </Button>
-        )}
+          {(search || status || city) && (
+            <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setStatus(''); setCity(''); setPage(1) }}>
+              Clear
+            </Button>
+          )}
 
-        <span className="ml-auto text-sm" style={{ color: '#64748b' }}>{total} leads</span>
+          <span className="text-sm ml-auto sm:ml-0" style={{ color: '#64748b' }}>{total} leads</span>
+        </div>
       </div>
 
       {/* Table */}
@@ -124,11 +131,14 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
-              {['Business', 'Category', 'Location', 'Contact', 'Status', 'Rating', 'Added', 'Actions'].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>
-                  {h}
-                </th>
-              ))}
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Business</th>
+              <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Category</th>
+              <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Location</th>
+              <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Contact</th>
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Status</th>
+              <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Rating</th>
+              <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Added</th>
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -152,11 +162,11 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
                     <span className="font-medium text-white">{lead.business_name}</span>
                     {lead.halal && <span className="ml-1.5 text-xs text-green-400">Halal</span>}
                   </td>
-                  <td className="px-4 py-3" style={{ color: '#94a3b8' }}>{lead.category_name}</td>
-                  <td className="px-4 py-3" style={{ color: '#94a3b8' }}>
+                  <td className="hidden md:table-cell px-4 py-3" style={{ color: '#94a3b8' }}>{lead.category_name}</td>
+                  <td className="hidden md:table-cell px-4 py-3" style={{ color: '#94a3b8' }}>
                     {[lead.suburb, lead.city].filter(Boolean).join(', ')}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="hidden md:table-cell px-4 py-3">
                     <div className="flex items-center gap-2">
                       {lead.email && <span title={lead.email}><Mail size={13} className="text-sky-400" /></span>}
                       {lead.instagram_handle && <span title={lead.instagram_handle}><AtSign size={13} className="text-pink-400" /></span>}
@@ -165,7 +175,7 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
                   <td className="px-4 py-3">
                     <StatusBadge status={lead.status} />
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="hidden md:table-cell px-4 py-3">
                     {lead.google_rating ? (
                       <span className="flex items-center gap-1" style={{ color: '#fbbf24' }}>
                         <Star size={11} fill="#fbbf24" />
@@ -173,7 +183,7 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
                       </span>
                     ) : <span style={{ color: '#64748b' }}>—</span>}
                   </td>
-                  <td className="px-4 py-3 text-xs" style={{ color: '#64748b' }}>{formatDate(lead.created_at)}</td>
+                  <td className="hidden md:table-cell px-4 py-3 text-xs" style={{ color: '#64748b' }}>{formatDate(lead.created_at)}</td>
                   <td className="px-4 py-3">
                     <Button
                       size="sm"

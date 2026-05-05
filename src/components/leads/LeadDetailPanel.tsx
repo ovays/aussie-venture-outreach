@@ -103,7 +103,7 @@ export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProp
 
   return (
     <div
-      className="fixed right-0 top-0 h-full w-96 z-40 overflow-y-auto shadow-2xl"
+      className="fixed right-0 top-0 h-full w-full sm:w-96 z-40 overflow-y-auto shadow-2xl"
       style={{ background: '#1a1d27', borderLeft: '1px solid #2a2d3e' }}
     >
       <div className="flex items-center justify-between px-5 py-4 border-b sticky top-0" style={{ borderColor: '#2a2d3e', background: '#1a1d27' }}>

@@ -72,19 +72,19 @@ export function DMQueueTable() {
   return (
     <div>
       {/* Info bar */}
-      <div className="px-5 py-4 border-b" style={{ borderColor: '#2a2d3e' }}>
+      <div className="px-4 md:px-5 py-3 md:py-4 border-b" style={{ borderColor: '#2a2d3e' }}>
         <p className="text-sm" style={{ color: '#94a3b8' }}>
           These businesses have Instagram/Facebook. Send them a DM manually from the Instagram app.
         </p>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+      <div className="flex flex-wrap items-center gap-2 md:gap-3 px-4 py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
         {(['', 'pending', 'sent', 'skipped'] as const).map((s) => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}
-            className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+            className="px-3 py-2 rounded-full text-xs font-medium transition-colors min-h-[36px]"
             style={{
               background: statusFilter === s ? '#0284c7' : '#1e2130',
               color: statusFilter === s ? 'white' : '#94a3b8',
@@ -98,20 +98,91 @@ export function DMQueueTable() {
             <button
               key={p}
               onClick={() => setPlatformFilter(p)}
-              className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+              className="px-3 py-2 rounded-full text-xs font-medium transition-colors min-h-[36px]"
               style={{
                 background: platformFilter === p ? '#2a2d3e' : 'transparent',
                 color: platformFilter === p ? 'white' : '#64748b',
               }}
             >
-              {p === '' ? 'All Platforms' : p.charAt(0).toUpperCase() + p.slice(1)}
+              {p === '' ? 'All' : p.charAt(0).toUpperCase() + p.slice(1)}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto">
+      {/* ── Mobile card view ── */}
+      <div className="md:hidden">
+        {loading ? (
+          <p className="px-4 py-12 text-center text-sm" style={{ color: '#64748b' }}>Loading...</p>
+        ) : items.length === 0 ? (
+          <p className="px-4 py-12 text-center text-sm" style={{ color: '#64748b' }}>No DMs in queue</p>
+        ) : (
+          items.map((item) => (
+            <div key={item.id} className="px-4 py-4 border-b" style={{ borderColor: '#1e2130' }}>
+              {/* Top row: business + status */}
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="min-w-0">
+                  <p className="font-medium text-white truncate">{item.leads?.business_name ?? '—'}</p>
+                  <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>{item.leads?.city}</p>
+                </div>
+                <StatusBadge status={item.status} />
+              </div>
+
+              {/* Handle + message preview stacked */}
+              <a
+                href={handleUrl(item)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-xs hover:text-sky-400 transition-colors block mb-1"
+                style={{ color: '#94a3b8' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {item.handle}
+              </a>
+              <p className="text-xs mb-3" style={{ color: '#64748b' }}>
+                {item.message_text.slice(0, 100)}...
+              </p>
+
+              {/* Action buttons — stacked vertically */}
+              {item.status === 'pending' ? (
+                <div className="flex flex-col gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="w-full justify-center"
+                    onClick={() => copyInline(item.id, item.message_text)}
+                  >
+                    {copiedId === item.id ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy DM</>}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    className="w-full justify-center"
+                    onClick={() => updateStatus(item.id, 'sent')}
+                  >
+                    Mark Sent
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="w-full justify-center"
+                    onClick={() => updateStatus(item.id, 'skipped')}
+                  >
+                    Skip
+                  </Button>
+                </div>
+              ) : (
+                <Button size="sm" variant="secondary" onClick={() => setSelectedItem(item)}>
+                  View
+                </Button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* ── Desktop table view ── */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e' }}>

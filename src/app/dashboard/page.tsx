@@ -100,7 +100,7 @@ export default async function DashboardPage() {
   return (
     <div>
       <TopBar title="Dashboard" />
-      <div className="p-6 space-y-6">
+      <div className="p-3 md:p-6 space-y-4 md:space-y-6">
         {/* Stats Row */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatsCard label="Total Leads Found" value={totalLeads ?? 0} sub="All time" />

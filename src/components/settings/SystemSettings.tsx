@@ -231,7 +231,7 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
           </div>
 
           {/* Lead limit */}
-          <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
             <div>
               <p className="text-sm text-white">Daily Lead Limit</p>
               <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Max new leads to find per day</p>
@@ -244,7 +244,7 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
                 onBlur={(e) => updateSetting('daily_lead_limit', e.target.value)}
                 min={1}
                 max={500}
-                className="w-24 px-3 py-1.5 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
+                className="w-full sm:w-24 px-3 py-2 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
                 style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
               />
               <SaveIndicator k="daily_lead_limit" />
@@ -252,7 +252,7 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
           </div>
 
           {/* Email limit */}
-          <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
             <div>
               <p className="text-sm text-white">Daily Email Limit</p>
               <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Max emails to send per day</p>
@@ -265,7 +265,7 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
                 onBlur={(e) => updateSetting('daily_email_limit', e.target.value)}
                 min={1}
                 max={500}
-                className="w-24 px-3 py-1.5 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
+                className="w-full sm:w-24 px-3 py-2 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
                 style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
               />
               <SaveIndicator k="daily_email_limit" />
@@ -273,7 +273,7 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
           </div>
 
           {/* DM limit */}
-          <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
             <div>
               <p className="text-sm text-white">Daily DM Limit</p>
               <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Max DMs to queue per day (Instagram + Facebook)</p>
@@ -286,7 +286,7 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
                 onBlur={(e) => updateSetting('daily_dm_limit', e.target.value)}
                 min={1}
                 max={200}
-                className="w-24 px-3 py-1.5 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
+                className="w-full sm:w-24 px-3 py-2 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
                 style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
               />
               <SaveIndicator k="daily_dm_limit" />
@@ -294,7 +294,7 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
           </div>
 
           {/* Digest email */}
-          <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
             <div>
               <p className="text-sm text-white">Digest Email</p>
               <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Where to send the daily summary</p>
@@ -305,8 +305,8 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
                 value={settings['digest_email'] ?? ''}
                 onChange={(e) => setSettings((p) => ({ ...p, digest_email: e.target.value }))}
                 onBlur={(e) => updateSetting('digest_email', e.target.value)}
-                className="px-3 py-1.5 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-sky-500"
-                style={{ background: '#0f1117', border: '1px solid #2a2d3e', width: '220px' }}
+                className="w-full sm:w-56 px-3 py-2 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-sky-500"
+                style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
               />
               <SaveIndicator k="digest_email" />
             </div>
@@ -326,7 +326,7 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
                 <button
                   key={city}
                   onClick={() => toggleCity(city)}
-                  className="px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                  className="px-3 py-2 rounded-full text-sm font-medium transition-colors min-h-[36px]"
                   style={{
                     background: activeCities.includes(city) ? '#0284c7' : '#1e2130',
                     color: activeCities.includes(city) ? 'white' : '#94a3b8',
@@ -350,7 +350,7 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
             { key: 'follow_up_2_days', label: 'Follow-up 2 delay', description: 'Days before sending second follow-up' },
             { key: 'dead_lead_days', label: 'Mark dead after', description: 'Days of no reply before marking lead as dead' },
           ].map(({ key, label, description }) => (
-            <div key={key} className="flex items-center justify-between py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+            <div key={key} className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
               <div>
                 <p className="text-sm text-white">{label}</p>
                 <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>{description}</p>
@@ -364,7 +364,7 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
                     onBlur={(e) => updateSetting(key, e.target.value)}
                     min={1}
                     max={90}
-                    className="w-20 px-3 py-1.5 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
+                    className="w-full sm:w-20 px-3 py-2 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
                     style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
                   />
                   <span className="text-sm" style={{ color: '#64748b' }}>days</span>
@@ -415,7 +415,7 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
           Generate and preview a real outreach email for any business type and city, then send it to hello@aussieventure.com.
         </p>
 
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
           <div>
             <label className="block text-xs mb-1.5" style={{ color: '#94a3b8' }}>Business Type</label>
             <select

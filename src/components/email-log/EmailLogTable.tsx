@@ -61,16 +61,16 @@ export function EmailLogTable() {
   return (
     <div>
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-5 border-b" style={{ borderColor: '#2a2d3e' }}>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 md:p-5 border-b" style={{ borderColor: '#2a2d3e' }}>
         {[
-          { label: 'Total Sent', value: totalSent, color: '#38bdf8' },
-          { label: 'Total Replied', value: totalReplied, color: '#4ade80' },
-          { label: 'Reply Rate', value: `${replyRate}%`, color: '#a78bfa' },
-          { label: 'Bounce Rate', value: `${bounceRate}%`, color: '#f87171' },
+          { label: 'Total Sent',   value: totalSent,        color: '#38bdf8' },
+          { label: 'Total Replied', value: totalReplied,    color: '#4ade80' },
+          { label: 'Reply Rate',   value: `${replyRate}%`,  color: '#a78bfa' },
+          { label: 'Bounce Rate',  value: `${bounceRate}%`, color: '#f87171' },
         ].map(({ label, value, color }) => (
           <div key={label}>
             <p className="text-xs" style={{ color: '#64748b' }}>{label}</p>
-            <p className="text-2xl font-bold mt-0.5" style={{ color }}>{value}</p>
+            <p className="text-xl md:text-2xl font-bold mt-0.5" style={{ color }}>{value}</p>
           </div>
         ))}
       </div>
@@ -80,7 +80,7 @@ export function EmailLogTable() {
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
-          className="px-3 py-1.5 rounded-lg text-sm text-white outline-none"
+          className="px-3 py-2 rounded-lg text-sm text-white outline-none"
           style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
         >
           <option value="">All Types</option>
@@ -92,7 +92,7 @@ export function EmailLogTable() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-1.5 rounded-lg text-sm text-white outline-none"
+          className="px-3 py-2 rounded-lg text-sm text-white outline-none"
           style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
         >
           <option value="">All Statuses</option>
@@ -108,11 +108,13 @@ export function EmailLogTable() {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
-              {['Business', 'Type', 'Subject', 'Status', 'Sent At', 'Replied', 'Actions'].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>
-                  {h}
-                </th>
-              ))}
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Business</th>
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Type</th>
+              <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Subject</th>
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Status</th>
+              <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Sent At</th>
+              <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Replied</th>
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -132,7 +134,7 @@ export function EmailLogTable() {
                       {TYPE_LABELS[email.type]}
                     </span>
                   </td>
-                  <td className="px-4 py-3 max-w-xs">
+                  <td className="hidden md:table-cell px-4 py-3 max-w-xs">
                     <p className="text-sm truncate" style={{ color: '#e2e8f0' }}>{email.subject}</p>
                   </td>
                   <td className="px-4 py-3">
@@ -140,10 +142,10 @@ export function EmailLogTable() {
                       {email.status.replace('_', ' ')}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs" style={{ color: '#64748b' }}>
+                  <td className="hidden md:table-cell px-4 py-3 text-xs" style={{ color: '#64748b' }}>
                     {email.sent_at ? formatDateTime(email.sent_at) : '—'}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="hidden md:table-cell px-4 py-3">
                     {email.replied_at ? (
                       <span className="text-xs text-green-400">Yes</span>
                     ) : (
