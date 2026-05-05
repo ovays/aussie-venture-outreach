@@ -14,17 +14,43 @@ export const dailyPipelineJob = schedules.task({
   run: async () => {
     console.log("Starting scheduled daily pipeline...")
 
-    console.log("Step 1: Finder agent")
-    const leadsFound = await runFinderAgent()
+    let leadsFound = 0
 
-    console.log("Step 2: Researcher agent")
-    await runResearcherAgent()
+    try {
+      console.log("Step 1: Finder agent")
+      leadsFound = await runFinderAgent()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error("PIPELINE FAILED at Step 1 (Finder):", error)
+      throw new Error(`Pipeline failed at Finder: ${message}`)
+    }
 
-    console.log("Step 3: Writer agent")
-    await runWriterAgent()
+    try {
+      console.log("Step 2: Researcher agent")
+      await runResearcherAgent()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error("PIPELINE FAILED at Step 2 (Researcher):", error)
+      throw new Error(`Pipeline failed at Researcher: ${message}`)
+    }
 
-    console.log("Step 4: Sender agent")
-    await runSenderAgent()
+    try {
+      console.log("Step 3: Writer agent")
+      await runWriterAgent()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error("PIPELINE FAILED at Step 3 (Writer):", error)
+      throw new Error(`Pipeline failed at Writer: ${message}`)
+    }
+
+    try {
+      console.log("Step 4: Sender agent")
+      await runSenderAgent()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error("PIPELINE FAILED at Step 4 (Sender):", error)
+      throw new Error(`Pipeline failed at Sender: ${message}`)
+    }
 
     console.log("Daily pipeline complete")
     return { leadsFound }

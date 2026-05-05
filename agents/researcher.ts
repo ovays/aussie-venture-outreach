@@ -98,6 +98,7 @@ async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>
 export async function runResearcherAgent(): Promise<number> {
   const supabase = createServiceClient()
 
+  try {
   const { data: systemSetting } = await supabase
     .from('settings')
     .select('value')
@@ -264,4 +265,20 @@ export async function runResearcherAgent(): Promise<number> {
   })
 
   return processed
+
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[researcher] Fatal error:', error)
+    await supabase.from('activity_log').insert({
+      event_type: 'agent_error',
+      description: `Agent failed: ${message}`,
+      metadata: {
+        agent: 'researcher',
+        error: message,
+        stack: error instanceof Error ? error.stack : null,
+        timestamp: new Date().toISOString(),
+      },
+    })
+    throw error
+  }
 }

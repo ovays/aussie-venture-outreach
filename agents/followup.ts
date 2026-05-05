@@ -5,6 +5,7 @@ import { textToHtml } from '@/lib/utils'
 export async function runFollowUpAgent(): Promise<void> {
   const supabase = createServiceClient()
 
+  try {
   const { data: systemSetting } = await supabase
     .from('settings')
     .select('value')
@@ -188,4 +189,20 @@ hello@aussieventure.com`
   })
 
   console.log(`Follow-up agent done. FU1: ${followUp1Sent}, FU2: ${followUp2Sent}, Dead: ${markedDead}`)
+
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[followup] Fatal error:', error)
+    await supabase.from('activity_log').insert({
+      event_type: 'agent_error',
+      description: `Agent failed: ${message}`,
+      metadata: {
+        agent: 'followup',
+        error: message,
+        stack: error instanceof Error ? error.stack : null,
+        timestamp: new Date().toISOString(),
+      },
+    })
+    throw error
+  }
 }

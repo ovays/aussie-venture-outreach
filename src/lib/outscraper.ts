@@ -146,6 +146,8 @@ const headers: Record<string, string> = {
     return uniqueResults
 
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    if (msg.includes('402')) throw error  // balance exhausted — propagate to caller
     console.error('Outscraper error:', error)
     return []
   }

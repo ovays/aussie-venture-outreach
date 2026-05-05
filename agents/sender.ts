@@ -4,6 +4,7 @@ import { sendEmail } from '@/lib/resend'
 export async function runSenderAgent(): Promise<{ sent: number; failed: number }> {
   const supabase = createServiceClient()
 
+  try {
   const { data: systemSetting } = await supabase
     .from('settings')
     .select('value')
@@ -141,4 +142,20 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
 
   console.log(`Sender agent done - ${sent} sent, ${failed} failed`)
   return { sent, failed }
+
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[sender] Fatal error:', error)
+    await supabase.from('activity_log').insert({
+      event_type: 'agent_error',
+      description: `Agent failed: ${message}`,
+      metadata: {
+        agent: 'sender',
+        error: message,
+        stack: error instanceof Error ? error.stack : null,
+        timestamp: new Date().toISOString(),
+      },
+    })
+    throw error
+  }
 }

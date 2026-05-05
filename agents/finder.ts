@@ -228,6 +228,7 @@ async function cleanupDmQueue(supabase: ReturnType<typeof createServiceClient>):
 export async function runFinderAgent(): Promise<number> {
   const supabase = createServiceClient()
 
+  try {
   const { data: systemSetting } = await supabase
     .from('settings')
     .select('value')
@@ -283,6 +284,8 @@ export async function runFinderAgent(): Promise<number> {
         callCount++
         results = await searchBusinesses(category.query, 10, skip)
       } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        if (msg.includes('402')) throw error  // balance exhausted — abort pipeline
         console.error(`[finder] Search error for "${category.query}":`, error)
         break
       }
@@ -398,6 +401,8 @@ export async function runFinderAgent(): Promise<number> {
         callCount++
         results = await searchBusinesses(category.query, 10, skip)
       } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        if (msg.includes('402')) throw error  // balance exhausted — abort pipeline
         console.error(`[finder] Search error for "${category.query}":`, error)
         break
       }
@@ -538,6 +543,24 @@ export async function runFinderAgent(): Promise<number> {
   })
 
   return total
+
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[finder] Fatal error:', error)
+    const isBalanceError = message.includes('402')
+    await supabase.from('activity_log').insert({
+      event_type: 'agent_error',
+      description: `Agent failed: ${message}`,
+      metadata: {
+        agent: 'finder',
+        error: message,
+        stack: error instanceof Error ? error.stack : null,
+        is_balance_error: isBalanceError,
+        timestamp: new Date().toISOString(),
+      },
+    })
+    throw error
+  }
 }
 
 function extractInstagramHandle(text: string): string | null {

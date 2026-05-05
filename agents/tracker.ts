@@ -47,6 +47,7 @@ export async function handleEmailBounce(leadId: string, emailId: string): Promis
 export async function sendDailyDigest(): Promise<void> {
   const supabase = createServiceClient()
 
+  try {
   const { data: digestSetting } = await supabase
     .from('settings')
     .select('value')
@@ -95,6 +96,14 @@ export async function sendDailyDigest(): Promise<void> {
     0
   )
 
+  // Pipeline errors in last 24h
+  const { data: agentErrors } = await supabase
+    .from('activity_log')
+    .select('description, metadata, created_at')
+    .eq('event_type', 'agent_error')
+    .gte('created_at', oneDayAgo)
+    .order('created_at', { ascending: true })
+
   const date = now.toLocaleDateString('en-AU', {
     timeZone: 'Australia/Sydney',
     day: 'numeric',
@@ -125,6 +134,20 @@ export async function sendDailyDigest(): Promise<void> {
     })
     .join('\n')
 
+  const errorsList = (agentErrors ?? [])
+    .map((e) => {
+      const meta = e.metadata as { agent?: string; error?: string } | null
+      const agent = meta?.agent ?? 'unknown'
+      const errorMsg = meta?.error ?? e.description ?? ''
+      const time = new Date(e.created_at).toLocaleTimeString('en-AU', {
+        timeZone: 'Australia/Sydney',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      return `• ${agent} agent failed at ${time} — ${errorMsg.slice(0, 100)}`
+    })
+    .join('\n')
+
   const body = `Morning Owais!
 
 Here's what happened in the last 24 hours:
@@ -142,7 +165,7 @@ DEALS CLOSED THIS WEEK (${(dealsThisWeek ?? []).length})
 ${dealsList || 'None'}
 Total this week: $${totalDealValue.toFixed(2)}
 
-View Dashboard: ${appUrl}/dashboard`
+${(agentErrors ?? []).length > 0 ? `\n🚨 PIPELINE ERRORS (${(agentErrors ?? []).length})\n${errorsList}\n` : ''}View Dashboard: ${appUrl}/dashboard`
 
   const html = `<!DOCTYPE html>
 <html>
@@ -166,6 +189,7 @@ View Dashboard: ${appUrl}/dashboard`
 <p style="white-space: pre-line;">${dealsList || 'None'}</p>
 <p><strong>Total this week: $${totalDealValue.toFixed(2)}</strong></p>
 
+${(agentErrors ?? []).length > 0 ? `<h3 style="color: #f87171;">🚨 Pipeline Errors (${(agentErrors ?? []).length})</h3><p style="white-space: pre-line; color: #fca5a5;">${errorsList}</p>` : ''}
 <p><a href="${appUrl}/dashboard" style="background: #38bdf8; color: #0f1117; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold;">View Dashboard →</a></p>
 </body>
 </html>`
@@ -190,4 +214,20 @@ View Dashboard: ${appUrl}/dashboard`
   })
 
   console.log('Daily digest sent')
+
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[tracker] Fatal error in sendDailyDigest:', error)
+    await supabase.from('activity_log').insert({
+      event_type: 'agent_error',
+      description: `Agent failed: ${message}`,
+      metadata: {
+        agent: 'tracker',
+        error: message,
+        stack: error instanceof Error ? error.stack : null,
+        timestamp: new Date().toISOString(),
+      },
+    })
+    throw error
+  }
 }

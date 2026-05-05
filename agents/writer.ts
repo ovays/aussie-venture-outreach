@@ -7,6 +7,7 @@ export async function runWriterAgent(): Promise<void> {
 
   const supabase = createServiceClient()
 
+  try {
   const { data: systemSetting, error: settingErr } = await supabase
     .from('settings')
     .select('value')
@@ -218,4 +219,20 @@ export async function runWriterAgent(): Promise<void> {
     description: `Writer complete: ${emailsQueued} emails, ${dmsQueued} DMs, ${deadCount} dead`,
     metadata: { emails_queued: emailsQueued, dms_queued: dmsQueued, dead_count: deadCount, total_processed: processed },
   })
+
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[writer] Fatal error:', error)
+    await supabase.from('activity_log').insert({
+      event_type: 'agent_error',
+      description: `Agent failed: ${message}`,
+      metadata: {
+        agent: 'writer',
+        error: message,
+        stack: error instanceof Error ? error.stack : null,
+        timestamp: new Date().toISOString(),
+      },
+    })
+    throw error
+  }
 }
