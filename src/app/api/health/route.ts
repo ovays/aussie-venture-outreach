@@ -29,7 +29,26 @@ export async function GET() {
     issues.push({ type: 'database', message: 'Database connection error', severity: 'critical' })
   }
 
-  // 2. Last pipeline run — warn if no finder_complete in 25 hours
+  // 2. System active check
+  try {
+    const { data: systemSetting } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'system_active')
+      .single()
+
+    if (systemSetting?.value === 'false') {
+      issues.push({
+        type: 'system_inactive',
+        message: 'System is paused — pipeline will not run automatically. Enable System Active in Settings to resume.',
+        severity: 'warning',
+      })
+    }
+  } catch {
+    // skip
+  }
+
+  // 3. Last pipeline run — warn if no finder_complete in 25 hours
   try {
     const { data } = await supabase
       .from('activity_log')
@@ -51,7 +70,7 @@ export async function GET() {
     // non-critical — skip if activity_log inaccessible
   }
 
-  // 3. Outscraper 402 / quota errors in last 24h
+  // 4. Outscraper 402 / quota errors in last 24h
   try {
     const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
     const { data } = await supabase
@@ -68,7 +87,7 @@ export async function GET() {
     // skip
   }
 
-  // 4. Resend bounces in last 24h
+  // 5. Resend bounces in last 24h
   try {
     const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
     const { count } = await supabase
@@ -88,7 +107,7 @@ export async function GET() {
     // skip
   }
 
-  // 5. Recent agent errors (last 25 hours)
+  // 6. Recent agent errors (last 25 hours)
   try {
     const since25h = new Date(Date.now() - 25 * 3_600_000).toISOString()
     const { data: agentErrors } = await supabase

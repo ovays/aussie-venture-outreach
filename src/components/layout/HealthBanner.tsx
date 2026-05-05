@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { AlertTriangle, AlertCircle, X, ExternalLink } from 'lucide-react'
+import { AlertTriangle, AlertCircle, PauseCircle, X, ExternalLink } from 'lucide-react'
+import Link from 'next/link'
 
 interface HealthIssue {
   type: string
@@ -56,6 +57,7 @@ export function HealthBanner() {
       {visible.map((issue) => {
         const critical = isCritical(issue)
         const isAgentError = issue.type.startsWith('agent_error')
+        const isSystemInactive = issue.type === 'system_inactive'
         return (
           <div
             key={issue.type}
@@ -67,21 +69,38 @@ export function HealthBanner() {
           >
             {critical ? (
               <AlertCircle size={14} className="shrink-0 mt-0.5" style={{ color: '#f87171' }} />
+            ) : isSystemInactive ? (
+              <PauseCircle size={14} className="shrink-0 mt-0.5" style={{ color: '#fb923c' }} />
             ) : (
               <AlertTriangle size={14} className="shrink-0 mt-0.5" style={{ color: '#fb923c' }} />
             )}
             <span className="flex-1 text-sm" style={{ color: critical ? '#fca5a5' : '#fdba74' }}>
               <span className="font-semibold">
-                {critical ? 'Pipeline Error' : 'Warning'}{issue.time ? ` · ${issue.time}` : ''}:{' '}
+                {critical ? 'Pipeline Error' : isSystemInactive ? 'System Paused' : 'Warning'}
+                {issue.time ? ` · ${issue.time}` : ''}:{' '}
               </span>
-              {issue.message}
+              {isSystemInactive ? (
+                <>
+                  Pipeline will not run automatically.{' '}
+                  <Link
+                    href="/dashboard/settings"
+                    className="underline hover:no-underline font-semibold"
+                    style={{ color: '#fb923c' }}
+                  >
+                    Go to Settings
+                  </Link>
+                  {' '}to activate.
+                </>
+              ) : (
+                issue.message
+              )}
               {isAgentError && (
                 <a
                   href={TRIGGER_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="ml-2 inline-flex items-center gap-1 underline hover:no-underline"
-                  style={{ color: critical ? '#f87171' : '#fb923c' }}
+                  style={{ color: '#f87171' }}
                 >
                   View logs <ExternalLink size={10} />
                 </a>
