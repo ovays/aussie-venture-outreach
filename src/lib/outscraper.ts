@@ -87,7 +87,7 @@ async function pollResults(resultsUrl: string, headers: Record<string, string>):
   return []
 }
 
-export async function searchBusinesses(query: string, limit = 20): Promise<OutscraperResult[]> {
+export async function searchBusinesses(query: string, limit = 20, skip = 0): Promise<OutscraperResult[]> {
   const cleanKey = (process.env.OUTSCRAPER_API_KEY ?? '').replace(/[^\x20-\x7E]/g, '').trim()
 
   const params = new URLSearchParams({
@@ -96,6 +96,8 @@ export async function searchBusinesses(query: string, limit = 20): Promise<Outsc
     language: 'en',
     region: 'AU',
   })
+
+  if (skip > 0) params.set('skip', String(skip))
 
   const url = `https://api.app.outscraper.com/maps/search-v3?${params}`
 
