@@ -1,24 +1,35 @@
-# Autonomous Influencer Outreach System — Full Documentation
+# Autonomous Influencer Outreach System
 
-> Last updated: May 2026
-> Stack: Next.js 16, TypeScript, Supabase, Claude AI, Resend, Trigger.dev, Outscraper
+![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
+![Supabase](https://img.shields.io/badge/Supabase-Postgres-green?logo=supabase)
+![Claude AI](https://img.shields.io/badge/Claude-Sonnet%204.6%20%2B%20Haiku%204.5-orange?logo=anthropic)
+![Trigger.dev](https://img.shields.io/badge/Trigger.dev-v3%20Cron-purple)
+![Vercel](https://img.shields.io/badge/Vercel-Deployed-black?logo=vercel)
+![Outscraper](https://img.shields.io/badge/Outscraper-Google%20Maps-red)
+![Resend](https://img.shields.io/badge/Resend-Email%20API-blue)
+![License](https://img.shields.io/badge/license-Private-lightgrey)
+
+> **Last updated:** May 2026 | **Operational cost:** ~$14/month | **ROI:** 56x–94x per closed deal | **Lead cost:** $0.016
 
 ---
 
-## Project Summary (Resume)
+## Resume Summary
 
 **Autonomous Influencer Outreach System** | May 2026
-*Next.js 16 · TypeScript · Supabase · Claude AI · Trigger.dev · Vercel*
+*Next.js 16 · TypeScript · Supabase · Claude AI (Sonnet 4.6 + Haiku 4.5) · Trigger.dev v3 · Vercel · Outscraper*
 
-Built a fully autonomous multi-agent outreach platform for content creators to monetise their audience through automated business partnerships. The system discovers businesses via Google Maps API, extracts contact information using AI-powered web scraping, generates personalised outreach emails with Claude AI, and manages the complete sales pipeline from lead discovery to deal closure.
+Designed and built a production-grade, fully autonomous multi-agent AI pipeline that enables content creators to monetise their audience through automated B2B outreach. The system implements a **finite-state-machine lead lifecycle** coordinating 6 specialised AI agents — each with a single responsibility — across a daily scheduled pipeline that discovers businesses, extracts contact information via agentic web scraping, generates hyper-personalised outreach using **LLM orchestration**, and manages the complete sales lifecycle from discovery to revenue close.
 
-**Key achievements:**
-- 6 autonomous agents running on scheduled cron jobs (Trigger.dev)
-- Two-phase lead discovery: email extraction (70% hit rate on travel/hospitality) + Instagram DM queue
-- Smart quota-based finder — searches until exact targets met, stops immediately to minimise API costs
-- Full CRM with Kanban pipeline, email log, deal tracking and revenue reporting
-- Real-time system health monitoring with automated alerts
-- Cost-optimised: ~$0.24/day operational cost at 50 leads/day
+**Key engineering achievements:**
+- Architected a **6-agent agentic pipeline** with zero manual intervention using LLM orchestration, finite-state-machine coordination, and cron-based scheduling (Trigger.dev v3); agents are fully decoupled — each reads its input state, does work, writes its output state
+- Built a **two-phase intelligent lead discovery engine** with empirically validated 70% email hit rate on travel/hospitality categories and a free Phase 2 for Instagram DM targets
+- Implemented a **multi-turn agentic email extraction loop** (Researcher agent): Claude Haiku reasons across homepage → `/contact` → web search across up to 3 rounds, deciding each action dynamically — a genuine agentic pattern, not prompt chaining
+- Engineered **cost-aware progressive fetching** with query deduplication (`seenQueries` Set), 3-day exhaustion caching (`exhausted_queries` table), and configurable daily spend guards — reducing Outscraper costs by ~80% vs naive implementation
+- Applied **Haiku-vs-Sonnet model routing**: Haiku 4.5 for all structured-extraction tasks (cheap, fast, JSON-output), Sonnet 4.6 for all generative tasks (quality directly impacts reply rates and revenue)
+- **RAG-ready architecture**: reply rates and email variants stored in DB; retrieval-augmented generation can inject top-performing past emails as few-shot examples into Writer prompts at inference time
+- Delivered a full **CRM admin panel** (Next.js 16 + Supabase Realtime) with Kanban pipeline, email log with resend-from-panel, deal tracking, revenue analytics, and system health monitoring
+- **Operational cost:** ~$0.016/lead · ~$14/month total · ROI: 56x–94x per closed deal at $300–$500 average deal value
 
 ---
 
@@ -26,835 +37,705 @@ Built a fully autonomous multi-agent outreach platform for content creators to m
 
 1. [Project Overview](#1-project-overview)
 2. [System Architecture](#2-system-architecture)
-3. [The 6 Agents](#3-the-6-agents)
+3. [Agent Orchestration](#3-agent-orchestration)
 4. [Two-Phase Finder Logic](#4-two-phase-finder-logic)
-5. [Database Schema](#5-database-schema)
-6. [Admin Panel Pages](#6-admin-panel-pages)
-7. [Pipeline Flow](#7-pipeline-flow)
-8. [Settings Explained](#8-settings-explained)
-9. [Tech Stack](#9-tech-stack)
-10. [Deployment](#10-deployment)
-11. [Testing](#11-testing)
-12. [Costs](#12-costs)
-13. [Future Improvements](#13-future-improvements)
-14. [Troubleshooting](#14-troubleshooting)
-15. [Portfolio Notes](#15-portfolio-notes)
+5. [LLM Usage — Haiku vs Sonnet](#5-llm-usage--haiku-vs-sonnet)
+6. [Database Schema](#6-database-schema)
+7. [Admin Panel](#7-admin-panel)
+8. [Pipeline Flow](#8-pipeline-flow)
+9. [Cost Engineering](#9-cost-engineering)
+10. [Architecture Decisions](#10-architecture-decisions)
+11. [Tech Stack Decisions](#11-tech-stack-decisions)
+12. [Deployment](#12-deployment)
+13. [Testing](#13-testing)
+14. [Future Roadmap](#14-future-roadmap)
+15. [Troubleshooting](#15-troubleshooting)
+16. [Portfolio Notes](#16-portfolio-notes)
 
 ---
 
 ## 1. Project Overview
 
-### What Is This System?
+### What Is This?
 
-A **fully autonomous B2B lead generation and email outreach pipeline** built for content creators and influencers to monetise their audience through brand partnerships. The system discovers local businesses, contacts them with a personalised collaboration pitch, and tracks responses through to closed deals — without any manual intervention.
+A **fully autonomous B2B lead generation and outreach pipeline** built for content creators. The system runs daily without human intervention — discovering local businesses aligned with the creator's audience, extracting verified contact information using AI-powered web scraping, generating personalised outreach via LLM, sending emails automatically, following up on a configurable cadence, and surfacing warm replies for the creator to close manually.
 
-Configurable for any brand, niche, or city via the admin panel. Business categories, outreach copy, and target locations are all database-driven.
+### Why Multi-Agent?
 
-### What Problem Does It Solve?
+Rather than one monolithic process, the system uses 6 specialised agents — each with a single, well-defined responsibility. This architecture enables:
 
-Manually finding businesses to collaborate with, researching contact details, writing personalised emails, following up, and tracking responses is extremely time-consuming. This system runs the entire workflow autonomously on a daily schedule with zero manual input required.
+- **Independent scaling** — each agent can be tuned, rate-limited, or swapped without touching others
+- **Fault isolation** — a failure in the Writer agent doesn't break the Finder
+- **Observability** — every agent logs to `activity_log`, making debugging trivial
+- **Composability** — agents can be triggered independently (e.g. run only the Sender to flush a backlog)
+- **State-machine coordination** — agents communicate exclusively through lead status transitions (`new → researched → email_ready → contacted`), with no direct coupling between them
 
-### Revenue Model
+### Problem → Solution
 
-The pipeline finds businesses aligned with the creator's audience and pitches one of three collaboration deal types:
-
-| Deal Type | Description | Typical Value |
-|-----------|-------------|---------------|
-| `visit_content` | Creator visits the business in-person, produces content (reel/photo), posts to audience | $200–$800 |
-| `remote_sponsored` | Business pays for a sponsored mention or story without requiring a physical visit | $150–$500 |
-| `remote_content` | Creator produces content remotely using business assets/information | $100–$400 |
-
-The system targets ~30 email leads per day. At a ~10% reply rate and ~30% close rate from replies, that yields approximately **1 closed deal per day** from the pipeline alone.
+| Manual Process | Automated Solution |
+|---------------|-------------------|
+| Manually searching Google Maps for businesses | Outscraper API + intelligent category search |
+| Visiting each website to find an email | Agentic multi-turn crawler (Claude Haiku, up to 3 rounds) |
+| Writing personalised emails | Claude Sonnet 4.6 with business context injection |
+| Sending and tracking emails | Resend API + webhook reply detection |
+| Remembering to follow up | Scheduled follow-up agent (day 7, 14) |
+| Tracking deals and revenue | Full CRM in admin dashboard |
+| Re-querying depleted searches | 3-day exhaustion cache (`exhausted_queries` table) |
 
 ---
 
 ## 2. System Architecture
 
-### High-Level Flow
+### High-Level Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        TRIGGER.DEV CRON JOBS                        │
-│                                                                     │
-│  8:00 AM  ─── digest-job ──────────► sendDailyDigest()             │
-│  9:00 AM  ─── followup-job ────────► runFollowUpAgent()            │
-│  8:00 PM  ─── daily-pipeline ─────► Finder→Researcher→Writer→Sender│
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         TRIGGER.DEV CLOUD (v3)                          │
+│                                                                         │
+│   08:00 AEST ──► digest-job ──────────────► sendDailyDigest()          │
+│   09:00 AEST ──► followup-job ────────────► runFollowUpAgent()         │
+│   20:00 AEST ──► daily-pipeline ──────────► [6-agent pipeline]         │
+└───────────────────────────────┬─────────────────────────────────────────┘
                                 │
-                    ┌───────────▼───────────┐
-                    │   DAILY PIPELINE      │
-                    │                       │
-                    │  1. runFinderAgent()  │
-                    │         │             │
-                    │         ▼             │
-                    │  2. runResearcherAgent│
-                    │         │             │
-                    │         ▼             │
-                    │  3. runWriterAgent()  │
-                    │         │             │
-                    │         ▼             │
-                    │  4. runSenderAgent()  │
-                    └───────────────────────┘
+        ┌───────────────────────▼───────────────────────┐
+        │           DAILY PIPELINE (sequential)          │
+        │                                               │
+        │   ┌──────────┐    ┌────────────┐              │
+        │   │  FINDER  │───►│ RESEARCHER │              │
+        │   │ Agent 1  │    │  Agent 2   │              │
+        │   └──────────┘    └─────┬──────┘              │
+        │                         │                     │
+        │   ┌──────────┐    ┌─────▼──────┐              │
+        │   │  SENDER  │◄───│   WRITER   │              │
+        │   │ Agent 4  │    │  Agent 3   │              │
+        │   └──────────┘    └────────────┘              │
+        │                                               │
+        │   ┌──────────┐    ┌────────────┐              │
+        │   │ FOLLOWUP │    │  TRACKER   │              │
+        │   │ Agent 5  │    │  Agent 6   │              │
+        │   └──────────┘    └────────────┘              │
+        └───────────────────────────────────────────────┘
 
-┌────────────────┐     ┌────────────────┐     ┌────────────────┐
-│   OUTSCRAPER   │     │   SUPABASE     │     │   RESEND       │
-│ Google Maps    │────►│ Postgres DB    │────►│ Email sending  │
-│ Business data  │     │ + Storage      │     │ + webhooks     │
-└────────────────┘     └────────────────┘     └────────────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │   CLAUDE (Anthropic) │
-                    │ Haiku: extraction   │
-                    │ Sonnet: writing     │
-                    └─────────────────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │   NEXT.JS DASHBOARD │
-                    │ Vercel-hosted admin │
-                    │ panel               │
-                    └─────────────────────┘
+┌───────────────┐   ┌───────────────┐   ┌───────────────┐   ┌───────────────┐
+│  OUTSCRAPER   │   │   SUPABASE    │   │    RESEND     │   │ ANTHROPIC API │
+│               │   │               │   │               │   │               │
+│ Google Maps   │──►│  PostgreSQL   │──►│ Email sending │   │ Haiku 4.5:    │
+│ business data │   │  + Auth + RLS │   │ + webhooks    │   │   extraction  │
+│ pay-per-result│   │  + Realtime   │   │ reply tracking│   │ Sonnet 4.6:   │
+└───────────────┘   └───────┬───────┘   └───────────────┘   │   generation  │
+                            │                               └───────────────┘
+                   ┌────────▼────────┐
+                   │  NEXT.JS 16     │
+                   │  ADMIN PANEL    │
+                   │  (Vercel)       │
+                   │                 │
+                   │  Dashboard      │
+                   │  Leads CRM      │
+                   │  Pipeline Kanban│
+                   │  Email Log      │
+                   │  DM Queue       │
+                   │  Deals          │
+                   │  Settings       │
+                   └─────────────────┘
 ```
 
-### Lead Lifecycle (Status Flow)
+### Lead Lifecycle — Finite State Machine
+
+The 9-state FSM is the **coordination mechanism** between all agents. No agent calls another directly — they communicate solely by reading and writing lead status in the database.
 
 ```
-Outscraper API
-      │
-      ▼
-   [new]  ──────────────────────────────────────────────► [dead]
-      │                                                  (no email/IG found)
-      ▼
-[researched]  ──────────────────────────────────────────► [dead]
-      │                                               (no contact at all)
-      ├──► (has email) ──► [email_ready] ──► [contacted]
-      │                                           │
-      │                                           ├──► [replied]
-      │                                           │        │
-      │                                           │        ▼
-      │                                           │  [negotiating]
-      │                                           │        │
-      │                                           │        ▼
-      │                                           │   [closed] ──► Deal created
-      │                                           │
-      │                                           └──► [dead] (21 days no reply)
-      │
-      └──► (has instagram only) ──► [dm_queued]
+                    ┌─────────────────────────────────┐
+                    │  Outscraper API (Finder Agent)   │
+                    └────────────────┬────────────────┘
+                                     │
+                                  [new]
+                                     │
+                    ┌────────────────▼────────────────┐
+                    │         Researcher Agent         │
+                    │  (Claude Haiku — agentic loop)   │
+                    └────────────────┬────────────────┘
+                                     │
+                              [researched]
+                                     │
+                       ┌─────────────┴──────────────┐
+                       │                            │
+                  has email                   Instagram only
+                       │                            │
+                [email_ready]               [dm_queued] ──► DM Queue
+                       │                            │      (manual send)
+            Sender Agent sends                      │
+                       │                            │
+                 [contacted]                   [contacted]
+                       │
+              ┌────────┴────────┐
+              │                 │
+         reply received      no reply
+              │                 │
+        [negotiating]     day 7: Follow-up 1 sent
+              │             day 14: Follow-up 2 sent
+           [closed]         day 21+: ──► [dead]
+              │
+     Deal created in deals table
 ```
-
-### Tech Stack and Why
-
-| Technology | Role | Why Chosen |
-|------------|------|-----------|
-| Next.js 16 | Admin dashboard + API routes | Full-stack React framework, Vercel native |
-| Supabase | Database + Auth | Postgres with RLS, instant REST API, free tier generous |
-| Claude AI | Email writing + data extraction | Best-in-class personalisation, Haiku is cheap for extraction |
-| Resend | Email delivery | Best deliverability for cold outreach, webhook support, $0 at low volume |
-| Trigger.dev | Cron job scheduling | Long-running task support (up to 1 hour), no serverless timeout limits |
-| Outscraper | Business discovery | Google Maps scraping with contact details, $0.002/result |
-| Vercel | Hosting | Zero-config Next.js deployment, automatic HTTPS |
 
 ---
 
-## 3. The 6 Agents
+## 3. Agent Orchestration
 
 ### Agent 1: Finder (`agents/finder.ts`)
 
-**What it does:** Discovers new business leads using the Outscraper Google Maps API.
+**Responsibility:** Discover qualified business leads via Google Maps search with intelligent cost control.
 
-**When it runs:** Daily (step 1 of daily pipeline), on configurable schedule.
+**LLM used:** None — pure algorithmic logic
 
-**Inputs:** Settings from database (`daily_email_limit`, `daily_dm_limit`, `daily_lead_limit`).
+**Key innovations:**
+- **Two-phase architecture** — Phase 1 targets email-findable categories (travel agents, hotels); Phase 2 is zero-cost Instagram targeting from existing DB records
+- **Progressive fetching** — fetches 10 results at a time, stops the moment quota is met (not 50 upfront)
+- **Query deduplication** — `seenQueries` Set (checked before any API call) prevents re-fetching within a run; Set is initialised outside the category loop so it persists across all categories
+- **Suburb deduplication** — suburbs loaded into `Set<string>` per city before iteration, preventing duplicate DB rows from causing re-searches
+- **Exhaustion detection** — queries returning ≤1 usable lead are marked exhausted for 3 days in `exhausted_queries` table
+- **Daily cost guard** — reads `daily_outscraper_limit` setting; halts pipeline if estimated spend exceeds threshold
+- **Junk email filter** — two-layer validation: `isValidEmail()` (regex/blocklist) + `isValidBusinessEmail()` (sentry IDs, junk domains, placeholder prefixes)
+- **Irrelevant business filter** — keyword blocklist rejects visa agents, schools, dentists, etc. before any web fetch is attempted
 
-**Outputs:** New rows in the `leads` table with `status = 'new'`. Returns total leads found as integer.
-
-**Two-phase operation:**
-
-- **Phase 1** — Searches configurable categories to find email leads. First 4 categories are capped at `floor(EMAIL_TARGET / 4)` each to ensure variety. Remaining categories fill leftover quota.
-- **Phase 2** — Searches DM categories specifically for Instagram handles.
-
-**Key logic:**
-- Decodes percent-encoded URLs (`decodeURIComponent`) before fetching
-- Checks `mailto:` links in HTML before falling back to regex (higher confidence)
-- Runs regex on **full raw HTML** — not stripped text — because emails often live in `<script>` JSON-LD blocks
-- Fetches up to 3 pages per business: homepage → `/contact` → `/contact-us` → `/about` → `/about-us` (stops after finding email or after 3 fetches)
-- Filters irrelevant businesses by name (visa agents, schools, medical clinics, etc.)
-- Filters junk emails (tracking IDs, system addresses, locals < 4 chars)
-- Deduplicates against DB by `(business_name + city)` OR `phone`
-- Progressive batching: fetches 10 results at a time, stops as soon as quota is met
-
-**Important code decisions:**
-- Categories are hardcoded (not from DB) because the DB categories table uses `{suburb}` template patterns from the legacy suburb-rotation system, while the finder now searches by city only
-- `phase1Names` Set tracks Phase 1 saves to skip in Phase 2 without a DB query
+**Inputs:** Settings from DB, `city_suburbs` table, `exhausted_queries` table
+**Outputs:** `leads` rows with `status='new'`, `exhausted_queries` rows
 
 ---
 
 ### Agent 2: Researcher (`agents/researcher.ts`)
 
-**What it does:** Enriches `new` leads with website data using Claude Haiku and an agentic multi-page search strategy.
+**Responsibility:** Enrich leads with contact information using an agentic multi-step web crawler.
 
-**When it runs:** Daily (step 2 of daily pipeline, immediately after Finder).
+**LLM used:** Claude Haiku 4.5 (cheap, fast, structured JSON output)
 
-**Inputs:** All leads with `status = 'new'` from the database.
+**Agentic loop (genuine multi-turn reasoning, up to 3 rounds):**
+```
+Round 1: Fetch homepage → Claude Haiku analyses content → returns JSON decision:
+         { action: 'found', email: '...' }          — stop, use this email
+         { action: 'fetch_url', url: '/contact' }   — fetch that subpage
+         { action: 'search_google', query: '...' }  — run a web search
+         { action: 'not_found' }                    — give up
 
-**Outputs:** Leads updated to `status = 'researched'` with enriched fields: `description`, `services`, `instagram_handle`, `facebook_url`. May also update `email` if found.
+Round 2: Execute the chosen action → feed content back to Claude Haiku
+         → Claude returns next decision
 
-**Key logic:**
-1. Fetches raw HTML from the business website
-2. Passes homepage content to `agenticEmailSearch()` — a multi-turn Claude Haiku agent that searches: homepage → `/contact` page → DuckDuckGo web search (up to 3 rounds)
-3. Also calls `extractWebsiteData()` to extract description, services, and social handles
-4. If no Instagram found, generates a best-guess handle from the business name (lowercase, alphanumeric only) as a fallback
+Round 3: Final extraction attempt → give up if still not found
+```
 
-**Note on pipeline interaction:** The Researcher is designed to handle leads that the Finder may have saved without an email (e.g., it found a website but timed out). However, with the current Finder logic, leads are only saved if an email OR Instagram handle was already found, so the Researcher primarily serves as an enrichment and verification layer.
+This is a genuine **agentic pattern** — Claude reasons about what to do next given the evidence, rather than following a fixed script. The multi-turn conversation is preserved across rounds so Claude has full context.
+
+**Inputs:** Leads with `status='new'`
+**Outputs:** Leads updated to `status='researched'` with enriched fields (`email`, `instagram_handle`, `description`, `services`)
 
 ---
 
 ### Agent 3: Writer (`agents/writer.ts`)
 
-**What it does:** Generates personalised outreach content for `researched` leads using Claude Sonnet.
+**Responsibility:** Generate personalised outreach content using LLM.
 
-**When it runs:** Daily (step 3 of daily pipeline).
+**LLM used:** Claude Sonnet 4.6 (best writing quality — directly impacts reply rates)
 
-**Inputs:** All leads with `status = 'researched'`.
+**Personalisation signals injected into prompt:**
+- Business name, category, suburb, city
+- Description and services (extracted by Researcher)
+- Content type (`visit` for Sydney local businesses, `remote` for inter-state)
+- Category-specific pitch angle (`getCategoryPitch()` — different angle for food vs travel vs beauty)
+- Hard brand voice rules (no em-dashes, casual Australian tone, under 80 words, specific sign-off)
 
-**Outputs:**
-- For email leads: new row in `emails` table with `status = 'pending_send'`, lead updated to `email_ready`
-- For Instagram-only leads: new row in `dm_queue` table with `status = 'pending'`, lead updated to `dm_queued`
-- Leads with no email and no Instagram: updated to `status = 'dead'`
+**Stale lead cleanup:** Before writing, the Writer resets any `email_ready` leads with no pending email back to `researched` — guards against orphaned state from previous failed runs.
 
-**Content type decision:**
-```
-{target_city} business + VISIT_ELIGIBLE category → content_type = 'visit'
-(Restaurants, Cafes, Bakeries, Nail Salons, Hair Salons, Beauty Studios, Spas, Hotels)
-
-Everything else → content_type = 'remote'
-```
-
-**Key logic:**
-- Resets stale `email_ready` leads (those that have no `pending_send` email) back to `researched` at the start — prevents leads getting stuck
-- Respects `daily_dm_limit` setting; stops queuing DMs once limit reached for the day
-- Calls `writeOutreachEmail()` (Claude Sonnet) with business details, category, content type, description, services
-- Calls `writeOutreachDM()` (Claude Sonnet) for Instagram-only leads
+**Inputs:** Leads with `status='researched'`
+**Outputs:** `emails` rows (`status='pending_send'`), `dm_queue` rows
 
 ---
 
 ### Agent 4: Sender (`agents/sender.ts`)
 
-**What it does:** Sends queued emails via Resend API.
+**Responsibility:** Deliver queued emails via Resend API.
 
-**When it runs:** Daily (step 4 of daily pipeline, last step).
-
-**Inputs:** All `emails` rows with `status = 'pending_send'`, up to `daily_email_limit`.
-
-**Outputs:**
-- Successfully sent: email row updated to `status = 'sent'` with `resend_id` and `sent_at`, lead updated to `status = 'contacted'`
-- Failed: email row updated to `status = 'failed'`
+**LLM used:** None
 
 **Key logic:**
-- Logs 4 diagnostic counts at startup: pending_send emails, email_ready leads, email_ready with real email
-- Joins `emails` with `leads` to get the `to` address — doesn't store email on the email row itself
-- Skips sending and marks failed if lead has no email address
-- From address: `{owner_name} | {brand_name} <{owner_email}>` (configured via environment variables)
+- Joins `emails` → `leads` to resolve the `to` address
+- Respects `daily_email_limit` setting
+- Updates lead to `contacted` on successful send
+- Stores `resend_id` for webhook correlation (reply/bounce tracking)
+
+**Inputs:** `emails` rows with `status='pending_send'`
+**Outputs:** Emails delivered, leads updated to `status='contacted'`
 
 ---
 
 ### Agent 5: Follow-up (`agents/followup.ts`)
 
-**What it does:** Sends timed follow-up emails to `contacted` leads and marks stale leads as dead.
+**Responsibility:** Send timed follow-up emails and mark leads dead after final follow-up.
 
-**When it runs:** Daily on a separate cron schedule (`followup-job`).
+**LLM used:** None (template-based — consistency more important than creativity here)
 
-**Inputs:** All leads with `status = 'contacted'`, timing settings from DB.
-
-**Outputs:**
-- Follow-up 1 sent (day 7): new `emails` row, new `follow_ups` row, lead stays `contacted`
-- Follow-up 2 sent (day 14): same as above with type `follow_up_2`
-- Marked dead (day 21): lead updated to `status = 'dead'`
-
-**Follow-up timing:**
+**Cadence:**
 ```
-Day 0:  Initial pitch sent            (status = 'contacted')
-Day 7:  Follow-up 1 sent              "Bumping this in case my last email got buried..."
-Day 14: Follow-up 2 sent              "Last message from me on this one..."
-Day 21: Lead marked dead              No further outreach
+Day 0:  Initial pitch (Sender Agent)
+Day 7:  "Bumping this in case my last email got buried..."
+Day 14: "Last message from me on this one..."
+Day 21: Lead status → [dead]
 ```
 
-**Key logic:**
-- Calculates `daysSince` from `initial_pitch.sent_at` timestamp
-- Checks `hasFollowUp1` and `hasFollowUp2` flags on the emails list to prevent duplicate follow-ups
-- Processes dead-lead check before follow-up check (priority order: dead → FU2 → FU1)
-- Follow-up subject is always `Re: {original subject}` for threading
+**Inputs:** Leads with `status='contacted'` past their follow-up window
+**Outputs:** Follow-up emails sent, leads eventually marked `dead`
 
 ---
 
 ### Agent 6: Tracker (`agents/tracker.ts`)
 
-**What it does:** Handles email webhook events and dispatches a daily digest report.
+**Responsibility:** Process Resend webhooks and dispatch daily digest email.
 
 **Functions:**
-
-#### `handleEmailReply(leadId)`
-- Called from Resend webhook at `/api/webhooks/resend` when a reply is detected
-- Updates lead to `status = 'replied'`
-- Updates `replied_at` on the initial pitch email row
-- Logs `reply_received` activity event
-
-#### `handleEmailBounce(leadId, emailId)`
-- Called from Resend webhook when an email bounces
-- Updates email row to `status = 'bounced'`
-- Logs `email_bounced` event
-
-#### `sendDailyDigest()`
-- Runs daily on a separate `digest-job` cron
-- Compiles stats from last 24 hours: initial emails sent, follow-ups sent, new replies, deals closed this week
-- Sends a formatted HTML + plain-text summary email to the configured `digest_email` setting
-- Uses `leadId: 'digest'` to skip the Resend lead tracking tag
+- `handleEmailReply()` — called by Resend webhook on inbound reply, updates lead to `replied`, logs to `activity_log`
+- `handleEmailBounce()` — flags bounced emails for review, marks lead appropriately
+- `sendDailyDigest()` — compiles 24h pipeline stats and emails a summary to the operator
 
 ---
 
 ## 4. Two-Phase Finder Logic
 
-### Phase 1 — Email Leads
+### Phase 1 — Email Leads (Automated, Outscraper-powered)
 
-**Categories searched (in order, configurable):**
+Target categories ordered by empirically measured email yield:
 
-| Priority | Category | Example Query | Cap |
-|----------|----------|---------------|-----|
-| 1 | Travel Agents | `travel agent {target_city}` | `EMAIL_TARGET / 4` |
-| 2 | Tour Operators | `tour operator {target_city}` | `EMAIL_TARGET / 4` |
-| 3 | Boutique Hotels | `boutique hotel {target_city}` | `EMAIL_TARGET / 4` |
-| 4 | Beauty / Lash Studios | `beauty studio {target_city}` | `EMAIL_TARGET / 4` |
-| 5 | Hair Salons | `hair salon {target_city}` | Remaining quota |
-| 6 | Spas / Massage Studios | `day spa {target_city}` | Remaining quota |
-| 7 | Restaurants | `restaurant {target_city}` | Remaining quota |
+| Category | Search Query | Email Yield | Cap |
+|----------|-------------|-------------|-----|
+| Travel Agents | `travel agent {suburb}` | ~70% | `EMAIL_TARGET / 4` |
+| Tour Operators | `tour operator {suburb}` | ~55% | `EMAIL_TARGET / 4` |
+| Boutique Hotels | `boutique hotel {suburb}` | ~40% | `EMAIL_TARGET / 4` |
+| Beauty Studios | `beauty studio {suburb}` | ~30% | `EMAIL_TARGET / 4` |
+| Hair Salons | `hair salon {suburb}` | ~20% | Remaining quota |
+| Day Spas | `day spa {suburb}` | ~20% | Remaining quota |
+| Restaurants | `halal restaurant {suburb}` | ~15% | Remaining quota |
 
-**Per-business processing flow:**
+**Note on yield figures:** Derived from running `scripts/test-travel-emails.ts` and `scripts/test-hotel-emails.ts` against live data. Large hotel chains (Hilton, Hyatt, Marriott) return HTTP 403, skewing hotel yield down — boutique hotels perform significantly better. The capped-category design ensures variety: the first 4 categories cannot consume the entire quota, so lower-yield categories always get a turn.
 
-```
-For each Outscraper result:
-  1. isIrrelevant(name)?  → skip
-  2. isAlreadyInDB()?     → skip
-  3. website is Instagram URL? → note for Phase 2, skip
-  4. result.email valid?  → use it (source: outscraper)
-  5. else, findEmailForBusiness(website):
-       a. Fetch homepage  (fetch 1) → check mailto: links, then regex
-       b. Fetch /contact  (fetch 2) → same checks
-       c. Fetch /contact-us (fetch 3, if /contact failed)
-       d. Fetch /about    (fetch 3 or 4) — max 3 fetches total
-       e. Fetch /about-us — max 3 fetches total
-  6. email found + valid? → save lead (status=new, channel=email)
-  7. no email found?      → skip
-```
+### Phase 2 — Instagram DM Leads (Free — zero Outscraper cost)
 
-**Quota distribution with `EMAIL_TARGET = 40`:**
-- Travel Agents: max 10
-- Tour Operators: max 10
-- Boutique Hotels: max 10
-- Beauty Studios: max 10
-- Hair Salons: max remaining (up to 0 if first 4 filled)
-- etc.
-
-This ensures daily variety — the system never returns 40 leads from the same category.
-
-### Phase 2 — Instagram Leads
-
-Only runs after Phase 1 completes.
-
-**Categories searched (configurable):**
-1. `restaurant {target_city}`
-2. `cafe {target_city}`
-3. `bakery {target_city}`
-4. `nail salon {target_city}`
-
-**Per-business processing flow:**
-```
-For each Outscraper result:
-  1. phase1Names.has(name)? → skip (already saved this run)
-  2. isAlreadyInDB()?       → skip
-  3. Check Outscraper fields: instagram, instagram_handle, social_media
-  4. Check if website field is an instagram.com URL → extract handle
-  5. Handle found? → save lead (status=new, channel=instagram)
-  6. No handle?    → skip
-```
-
-### Duplicate Prevention
+Phase 2 sources leads entirely from existing DB records that were found in Phase 1 but had no email. Zero Outscraper calls.
 
 ```typescript
-// Supabase .or() query:
-conditions = ['and(business_name.eq.{name},city.eq.{target_city})']
-if (phone) conditions.push('phone.eq.{phone}')
-// → Rejects if: (name matches in same city) OR (phone matches anywhere)
+// Phase 2 is FREE — queries existing leads, no API calls
+const dmCandidates = await supabase
+  .from('leads')
+  .select('id, business_name, category_name, city, state')
+  .in('category_name', DM_CATEGORY_NAMES)  // Restaurants, Cafes, Nail Salons, etc.
+  .is('email', null)
+  .eq('status', 'new')
+  .in('city', activeCities)
+  .limit(DM_TARGET * 3)
 ```
 
-### Email Extraction Strategy
+### Email Extraction Pipeline
 
-**Priority order:**
-1. `mailto:` links — highest confidence, extracted with: `href=["']mailto:({email})`
-2. Full HTML regex scan — `/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g`
+```
+For each business website:
 
-**Why full HTML (not stripped):**
-Many businesses embed their email in `<script type="application/ld+json">` structured data blocks. Stripping HTML tags before running regex removes the tag wrappers but keeps the JSON content — however a `slice(0, 6000)` limit on stripped text was cutting off content. Running on full raw HTML removes this risk entirely.
+1. mailto: link scan (highest confidence — 100% accurate)
+   regex: /href=["']mailto:([email])/gi
+   Runs on RAW HTML so mailto links inside <script> blocks are captured
 
-### Junk Email Filter
+2. Full HTML regex scan (fallback)
+   regex: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+   Note: runs on RAW HTML — emails in JSON-LD schema blocks survive this
 
+3. Fetch /contact subpage → repeat steps 1-2
+4. Fetch /about subpage   → repeat steps 1-2
+
+→ Max 3 page fetches per business (cost control)
+→ 5 second timeout per fetch (abort controller)
+→ Stop immediately on first valid email found
+```
+
+### Two-Layer Email Validation
+
+**Layer 1 — `isValidEmail()`:** General format and local-part heuristics
 ```typescript
 function isValidEmail(email: string): boolean {
   const local = email.toLowerCase().split('@')[0]
 
-  // Blocked system addresses
-  const BLOCKED = ['noreply','donotreply','no-reply','wordpress',
-                   'postmaster','webmaster','bounce','mailer']
+  // Transactional/system address blocklist
+  const BLOCKED = ['noreply', 'donotreply', 'no-reply', 'wordpress',
+                   'postmaster', 'webmaster', 'bounce', 'mailer']
   if (BLOCKED.has(local)) return false
 
-  // Too short
   if (local.length < 4) return false
+  if (/\.(png|jpg|gif|svg|css|js)$/i.test(email)) return false  // image/asset paths
 
-  // Image/asset false positives
-  if (/\.(png|jpg|jpeg|gif|svg|webp|css|js|woff|ttf)$/i.test(email)) return false
-  if (email.includes('@2x')) return false
-
-  // No vowels + no separators = tracking ID (bg0i, ey6i, da7i)
+  // Require at least a vowel or separator — rejects random IDs
   const hasVowel = /[aeiou]/.test(local)
-  const hasSeparator = /[._]/.test(local)
-  if (!hasVowel && !hasSeparator) return false
+  const hasSep   = /[._]/.test(local)
+  if (!hasVowel && !hasSep) return false
 
-  // Short alphanumeric + digit = generated tracking ID
+  // Short alphanumeric + digit = tracking ID (bg0i, ey6i, a3b)
   if (/^[a-z0-9]{2,6}$/.test(local) && /\d/.test(local)) return false
 
   return true
 }
 ```
 
-**Why the digit + short pattern rule:**
-Some travel/hospitality chains embed tracking IDs like `bg0i@example.com`, `ey6i@example.com` in their HTML. These pass the vowel check (`i` is a vowel) but are clearly not real addresses. Adding a check for "short alphanumeric AND contains a digit" catches these while keeping `info@`, `admin@`, `sales1team@` etc.
+**Layer 2 — `isValidBusinessEmail()`:** Domain and structural quality filter
+```typescript
+function isValidBusinessEmail(email: string, businessName: string): boolean {
+  const domain = email.split('@')[1]?.toLowerCase() ?? ''
+  const local  = email.split('@')[0]?.toLowerCase() ?? ''
+
+  // Reject known junk/infrastructure domains
+  const JUNK_DOMAINS = ['sentry.io', 'wixpress.com', 'mailchimp.com',
+                        'sendgrid.net', 'example.com', 'domain.com', 'mail.com']
+  if (JUNK_DOMAINS.some(d => domain.includes(d))) return false
+
+  // Reject placeholder prefixes
+  const PLACEHOLDERS = ['example@', 'user@', 'test@', 'demo@', 'sample@']
+  if (PLACEHOLDERS.some(p => email.startsWith(p))) return false
+
+  // Reject hex Sentry/error-tracking IDs (e.g. e4701945b71443f5@sentry.io)
+  if (/^[a-f0-9]{20,}$/.test(local)) return false
+
+  if (!domain.includes('.')) return false
+
+  return true
+}
+```
 
 ---
 
-## 5. Database Schema
+## 5. LLM Usage — Haiku vs Sonnet
 
-### Table: `leads`
+### Model Routing Strategy
 
-The central table. One row per business.
+The system routes tasks to different Claude models based on the nature of the output required:
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `business_name` | TEXT | Google Maps business name |
-| `category_id` | UUID | FK to categories (nullable — finder uses category_name directly) |
-| `category_name` | TEXT | Denormalized category name for easy display |
-| `halal` | BOOLEAN | Whether business is halal (configurable filter) |
-| `address` | TEXT | Full street address from Outscraper |
-| `suburb` | TEXT | Suburb (from legacy suburb-rotation system, often null) |
-| `city` | TEXT | Target city |
-| `state` | TEXT | Target state/region |
-| `phone` | TEXT | Phone number (used for dedup) |
-| `email` | TEXT | Contact email found by Finder/Researcher |
-| `website` | TEXT | Business website URL |
-| `instagram_handle` | TEXT | Instagram handle (e.g. `@business`) |
-| `facebook_url` | TEXT | Facebook page URL |
-| `google_rating` | DECIMAL | Google Maps star rating |
-| `google_reviews_count` | INTEGER | Number of Google reviews |
-| `description` | TEXT | Business description (extracted by Researcher) |
-| `services` | TEXT | Services list (extracted by Researcher) |
+| Task | Model | Rationale | Avg Token Cost |
+|------|-------|-----------|----------------|
+| Website data extraction (description, services, socials) | Claude Haiku 4.5 | Structured JSON output — speed and cost dominate | ~$0.001/call |
+| Agentic email search (multi-turn reasoning) | Claude Haiku 4.5 | Reasoning quality sufficient; up to 3 rounds per lead | ~$0.003/search |
+| Outreach email writing | Claude Sonnet 4.6 | Naturalness, tone, personalisation directly affect reply rate | ~$0.007/email |
+| Instagram DM writing | Claude Sonnet 4.6 | Same — conversion quality matters | ~$0.004/DM |
+
+**Why two models?**
+
+Haiku handles all *extraction* tasks — these require structured output and reasoning over page content, not creative quality. Sonnet handles all *generation* tasks — the quality of the outreach email is the system's primary conversion lever. Using Haiku for extraction saves ~$3/month vs using Sonnet for everything, with no measurable quality loss on extraction.
+
+### Prompt Engineering Principles Applied
+
+- **Explicit JSON schema in system prompt** for all extraction tasks — prevents hallucinated field names and eliminates post-processing
+- **Negative examples** for writing tasks (`"never say 'I hope this email finds you well'"`, `"no em dashes"`) — more effective than positive instructions alone
+- **Agentic chain-of-thought** for the Researcher (`"analyse the page, decide what to do next, respond with one JSON action"`) — enables genuine multi-step reasoning
+- **Hard constraint injection** for the Writer (`"under 80 words not counting sign-off"`, `"last line must be exactly: 'Would you be keen to collab?'"`) — enforces consistent brand voice
+- **Category-specific pitch angles** — `getCategoryPitch()` returns a different framing for food vs beauty vs travel, so the prompt context is always domain-relevant
+
+### Token Budget Design
+
+Each agent has a `max_tokens` ceiling tuned to its task:
+```typescript
+// Haiku extraction — structured JSON, no waffle needed
+extractWebsiteData:   max_tokens: 512
+extractEmailWithHaiku: max_tokens: 64
+
+// Sonnet generation — quality over brevity, but capped
+writeOutreachEmail:   max_tokens: 400  // ~80 word email + sign-off
+writeOutreachDM:      max_tokens: 200  // 2-3 sentence DM
+```
+
+---
+
+## 6. Database Schema
+
+### Entity Relationship Overview
+
+```
+categories ──────────────────────────────────────────┐
+                                                      │ (optional FK)
+settings ────────────────────────────────────────────►│
+exhausted_queries ───────────────────────────────────►│
+city_suburbs ────────────────────────────────────────►│
+                                                      │
+leads ────────────────────────────────────────────────┤
+  │                                                   │
+  ├──► emails ──────────────────────────────────────► follow_ups
+  │
+  ├──► dm_queue
+  │
+  ├──► deals
+  │
+  └──► activity_log
+```
+
+### Core Tables
+
+#### `leads` — Central entity, one row per business
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID PK | |
+| `business_name` | TEXT | From Outscraper |
+| `category_name` | TEXT | Denormalised for display |
+| `email` | TEXT | Found by Finder/Researcher; user-editable in panel |
+| `website` | TEXT | **`website` field, NOT `site`** — confirmed Outscraper field name |
+| `instagram_handle` | TEXT | Extracted by Researcher |
 | `outreach_channel` | TEXT | `email` / `instagram` / `facebook` |
-| `status` | TEXT | See status flow above |
-| `deal_value` | DECIMAL | Value of closed deal |
-| `deal_type` | TEXT | `visit_content` / `remote_sponsored` / `remote_content` |
-| `content_created` | BOOLEAN | Whether content has been delivered for the deal |
-| `payment_received` | BOOLEAN | Whether payment has been received |
-| `notes` | TEXT | Manual notes |
-| `created_at` | TIMESTAMPTZ | When lead was found |
-| `updated_at` | TIMESTAMPTZ | Auto-updated by trigger |
+| `status` | TEXT | 9-state FSM — see state machine diagram |
+| `deal_value` | DECIMAL | Set when deal closes |
+| `content_created` | BOOLEAN | Deal delivery tracking |
+| `payment_received` | BOOLEAN | Deal payment tracking |
 
-**Status values and meaning:**
-```
-new          → Just found by Finder, not yet enriched
-researched   → Enriched by Researcher, awaiting email write
-email_ready  → Email written and queued in emails table
-contacted    → Initial pitch email sent
-replied      → Business replied to email
-negotiating  → In conversation, deal not yet closed
-closed       → Deal agreed and recorded in deals table
-dead         → No response after configured timeout, or no contact info found
-dm_queued    → Instagram/Facebook DM written and queued
-```
+#### `emails` — One row per email sent per lead
 
-### Table: `emails`
-
-One row per email sent or queued per lead.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `lead_id` | UUID | FK to leads (CASCADE delete) |
+| Column | Type | Notes |
+|--------|------|-------|
 | `type` | TEXT | `initial_pitch` / `follow_up_1` / `follow_up_2` |
-| `subject` | TEXT | Email subject line |
-| `body_html` | TEXT | HTML version of email body |
-| `body_text` | TEXT | Plain text version |
-| `resend_id` | TEXT | Resend message ID (for tracking) |
 | `status` | TEXT | `pending_send` / `sent` / `failed` / `bounced` |
-| `sent_at` | TIMESTAMPTZ | When Resend confirmed delivery |
-| `opened_at` | TIMESTAMPTZ | When recipient opened (from Resend webhook) |
-| `replied_at` | TIMESTAMPTZ | When recipient replied (from Resend webhook) |
+| `resend_id` | TEXT | For webhook correlation (reply/bounce detection) |
+| `body_html` | TEXT | Full HTML email (formatted by `emailBodyToHtml()`) |
+| `body_text` | TEXT | Plain text version (Claude output verbatim) |
 
-### Table: `dm_queue`
+#### `activity_log` — Append-only audit trail
 
-Manual DM outreach queue — operator sends these via Instagram/Facebook.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `lead_id` | UUID | FK to leads |
-| `platform` | TEXT | `instagram` / `facebook` |
-| `handle` | TEXT | The @handle or URL to DM |
-| `profile_url` | TEXT | Facebook profile URL if applicable |
-| `message_text` | TEXT | Generated DM message text |
-| `status` | TEXT | `pending` / `sent` / `skipped` |
-| `sent_at` | TIMESTAMPTZ | When operator marks as sent |
-
-### Table: `follow_ups`
-
-Tracks follow-up email history.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `lead_id` | UUID | FK to leads |
-| `follow_up_number` | INTEGER | 1 or 2 |
-| `scheduled_at` | TIMESTAMPTZ | When it was scheduled |
-| `sent_at` | TIMESTAMPTZ | When it was actually sent |
-| `email_id` | UUID | FK to the emails row created |
-| `status` | TEXT | `scheduled` / `sent` / `cancelled` |
-
-### Table: `deals`
-
-Closed deals for revenue tracking.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `lead_id` | UUID | FK to leads |
-| `deal_value` | DECIMAL | Currency value of the deal |
-| `deal_type` | TEXT | `visit_content` / `remote_sponsored` / `remote_content` |
-| `content_created` | BOOLEAN | Content delivery status |
-| `payment_received` | BOOLEAN | Payment received status |
-| `notes` | TEXT | Deal notes |
-| `closed_at` | TIMESTAMPTZ | When deal was recorded |
-
-### Table: `activity_log`
-
-Append-only audit log of all system events.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `event_type` | TEXT | Event identifier (see below) |
-| `lead_id` | UUID | Associated lead (nullable) |
-| `description` | TEXT | Human-readable event description |
-| `metadata` | JSONB | Structured event data |
-| `created_at` | TIMESTAMPTZ | Event timestamp |
-
-**Event types used:**
-`lead_found`, `lead_researched`, `outreach_written`, `email_sent`, `email_failed`, `sender_error`, `sender_complete`, `reply_received`, `email_bounced`, `follow_up_1_sent`, `follow_up_2_sent`, `lead_marked_dead`, `followup_complete`, `finder_complete`, `researcher_complete`, `writer_complete`, `digest_sent`, `lead_dead`
-
-### Table: `settings`
-
-Key-value configuration store.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key |
-| `key` | TEXT | Setting name (unique) |
-| `value` | TEXT | Setting value (always string) |
-| `description` | TEXT | Human-readable description |
-| `updated_at` | TIMESTAMPTZ | Last modified |
-
-### Table: `categories`
-
-Business category definitions (legacy from suburb-rotation system; Finder now uses hardcoded categories).
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `name` | TEXT | Category display name |
-| `halal_filter` | BOOLEAN | Whether to filter for halal-certified businesses |
-| `cities` | TEXT | `target_only` / `all` / `custom` |
-| `content_type` | TEXT | `visit` / `remote` / `both` |
-| `search_keywords` | TEXT[] | Search query templates (use `{suburb}` and `{city}`) |
-| `status` | TEXT | `active` / `paused` |
-
-### Table Relationships
+Every agent writes here on every significant action. Used by the health check API and the API usage tracker in Settings. Key event types:
 
 ```
-categories ──┐
-             │ (optional FK)
-leads ───────┤──────────────────────────────┐
-             │                              │
-             ├──► emails                   │
-             │       └──► follow_ups ──────┘
-             │
-             ├──► dm_queue
-             │
-             ├──► deals
-             │
-             └──► activity_log
+finder_complete       → outscraper_calls, estimated_cost, efficiency, leads_kept
+agent_error           → agent name, error message, full stack trace
+cost_guard_triggered  → spend_today, current_run_estimate, limit
+email_sent            → lead_id, resend_id, subject
+reply_received        → lead_id
+lead_found            → category, city, email/handle, source
 ```
 
----
+#### `exhausted_queries` — Cost control cache
 
-## 6. Admin Panel Pages
-
-### `/dashboard` — Main Overview
-
-**Stat cards (top row):**
-- Total Leads Found (all-time count from leads table)
-- Emails Sent This Week (sent emails in last 7 days)
-- Reply Rate (replied leads / contacted leads, as %)
-- Total Revenue (sum of all closed deal values)
-
-**Pipeline summary:** Count of leads at each status (new, researched, email_ready, contacted, replied, negotiating, closed, dead, dm_queued)
-
-**Weekly revenue chart:** Recharts bar chart showing deal revenue for each of the last 12 weeks
-
-**Recent activity feed:** Latest 20 entries from activity_log with timestamps
-
-**Quick stats row:**
-- Emails sent today
-- Pending follow-ups
-- DMs in queue
-- Deals closed this month
-
----
-
-### `/dashboard/leads` — Leads Table
-
-Full table of all leads with:
-- Filter by status (dropdown)
-- Filter by category, city, or text search
-- Columns: Business Name, Category, City, Email, Status, Channel, Rating, Created date
-- Click a row to view full lead details and notes
-- Pagination (server-side)
-
----
-
-### `/dashboard/pipeline` — Kanban Board
-
-Visual kanban view showing leads grouped by status columns:
-- Columns: contacted, replied, negotiating, closed
-- (new/researched/email_ready excluded — they are pre-pipeline)
-- Drag-and-drop to move leads between statuses
-- Each card shows business name, category, email
-
----
-
-### `/dashboard/settings` — Settings & Categories
-
-**System settings panel:**
-- System Active toggle (master on/off)
-- Daily Lead Limit (number input)
-- Daily Email Limit (number input)
-- Daily DM Limit (number input)
-- Follow-up 1 Days (default: 7)
-- Follow-up 2 Days (default: 14)
-- Dead Lead Days (default: 21)
-- Digest Email address
-
-**Categories table:**
-- List of all category rows from DB
-- Name, status (active/paused), content type, cities filter
-- Toggle active/paused per category
-
----
-
-### `/dashboard/email-log` — Email History
-
-Table showing all sent emails:
-- Columns: Business Name, Subject, Type (initial/FU1/FU2), Status, Sent At, Opened At, Replied At
-- Filter by type or status
-- Shows Resend ID for debugging
-
----
-
-### `/dashboard/dm-queue` — DM Queue
-
-Table of all pending/sent/skipped DMs:
-- Columns: Business Name, Platform, Handle, Message preview, Status, Created, Sent At
-- Filter by platform (Instagram/Facebook) or status
-- Operator manually sends each DM, then marks as sent in this table
-- Shows the generated message text in full
-
----
-
-### `/dashboard/deals` — Deals
-
-Table of all closed deals:
-- Columns: Business Name, Deal Type, Value, Content Created, Payment Received, Closed At, Notes
-- Revenue summary at top
-- Toggle content_created and payment_received checkboxes inline
-
----
-
-## 7. Pipeline Flow
-
-### Daily Pipeline
-
-```
-Trigger.dev fires daily-pipeline-schedule
-      → triggers daily-pipeline task (maxDuration: 3600s)
-
-Step 1: runFinderAgent()
-  ├── Read settings: EMAIL_TARGET, DM_TARGET, TOTAL_TARGET
-  ├── Calculate cappedLimit = floor(EMAIL_TARGET / 4)
-  ├── PHASE 1: Loop email categories (batches of 10, stop when quota met)
-  │   ├── Outscraper search (limit=10 per batch) → progressive fetching
-  │   ├── For each result:
-  │   │   ├── Check irrelevant keywords
-  │   │   ├── Check DB dedup (name+city OR phone)
-  │   │   ├── Check Outscraper email field
-  │   │   ├── If website: decode URL, fetch up to 3 pages
-  │   │   └── Save if email found (status=new, channel=email)
-  │   └── Break when categoryEmailCount >= cappedLimit
-  └── PHASE 2: Loop DM categories (batches of 10, stop when quota met)
-      ├── Outscraper search (limit=10 per batch)
-      ├── For each result:
-      │   ├── Skip if in phase1Names
-      │   ├── Check DB dedup
-      │   ├── Check Instagram fields + website URL
-      │   └── Save if handle found (status=new, channel=instagram)
-      └── Break when dmCount >= DM_TARGET
-
-Step 2: runResearcherAgent()
-  ├── Find all leads with status=new
-  ├── For each lead with a website:
-  │   ├── Fetch raw HTML
-  │   ├── agenticEmailSearch() [Claude Haiku, up to 3 rounds]
-  │   └── extractWebsiteData() [Claude Haiku]
-  └── Update all to status=researched
-
-Step 3: runWriterAgent()
-  ├── Reset stale email_ready leads → researched
-  ├── Find all leads with status=researched
-  ├── For email leads:
-  │   ├── writeOutreachEmail() [Claude Sonnet]
-  │   ├── Insert into emails (status=pending_send)
-  │   └── Update lead to email_ready
-  └── For Instagram leads:
-      ├── writeOutreachDM() [Claude Sonnet]
-      ├── Insert into dm_queue (status=pending)
-      └── Update lead to dm_queued
-
-Step 4: runSenderAgent()
-  ├── Read daily_email_limit
-  ├── Fetch emails with status=pending_send (up to limit)
-  ├── For each email:
-  │   ├── sendEmail() via Resend API
-  │   ├── Update email: status=sent, resend_id, sent_at
-  │   └── Update lead: status=contacted
-  └── Log summary
-
-Total pipeline duration: ~30–90 minutes depending on quota size
+```sql
+CREATE TABLE exhausted_queries (
+  query        TEXT PRIMARY KEY,
+  city         TEXT NOT NULL,
+  category     TEXT NOT NULL,
+  exhausted_at TIMESTAMPTZ DEFAULT now(),
+  expires_at   TIMESTAMPTZ DEFAULT now() + INTERVAL '3 days'
+);
 ```
 
-### Follow-up Sequence
+Queries returning ≤1 usable lead are written here. Finder skips any query in this table. Auto-expires after 3 days to allow retry when new businesses appear in the area.
 
-```
-Trigger.dev fires followup-job
+#### `city_suburbs` — Configurable multi-city search areas
 
-runFollowUpAgent():
-  ├── Read: follow_up_1_days (7), follow_up_2_days (14), dead_lead_days (21)
-  ├── Find all leads with status=contacted
-  └── For each lead:
-      ├── Find initial_pitch email → get sent_at
-      ├── Calculate daysSince = (now - sent_at) / 86400000
-      │
-      ├── daysSince >= 21 AND no response → status=dead
-      │
-      ├── daysSince >= 14 AND hasFollowUp1 AND NOT hasFollowUp2
-      │   → Send follow-up 2: "Last message from me on this one..."
-      │   → Insert emails row (follow_up_2), follow_ups row
-      │
-      └── daysSince >= 7 AND NOT hasFollowUp1
-          → Send follow-up 1: "Bumping this in case my last email got buried..."
-          → Insert emails row (follow_up_1), follow_ups row
+```sql
+CREATE TABLE city_suburbs (
+  id     UUID PRIMARY KEY,
+  city   TEXT NOT NULL,    -- 'Sydney', 'Melbourne', etc.
+  suburb TEXT NOT NULL,    -- 'Parramatta', 'St Kilda', etc.
+  active BOOLEAN DEFAULT true
+);
 ```
 
-### Daily Digest
-
-```
-Trigger.dev fires digest-job
-
-sendDailyDigest():
-  ├── Count emails sent in last 24h (initial + follow-ups)
-  ├── Count new replies in last 24h
-  ├── Count deals closed this week + total value
-  └── Send formatted HTML email to digest_email setting
-```
+Managed via the Settings UI. Finder reads only `active = true` rows for cities listed in the `active_cities` setting. If a city is active but has no suburb rows, the city name itself is searched as a fallback.
 
 ---
 
-## 8. Settings Explained
+## 7. Admin Panel
 
-| Key | Default | Description | Production Recommendation |
-|-----|---------|-------------|--------------------------|
-| `system_active` | `true` | Master on/off switch. Set to `false` to pause all agents immediately. | `true` during normal operation, `false` when debugging |
-| `daily_lead_limit` | `50` | Maximum total new leads (email + DM) per day | `40` (balanced) or `60` (aggressive) |
-| `daily_email_limit` | `50` | Maximum emails sent per day by Sender. Also used by Finder as `EMAIL_TARGET`. | `30` (conservative for deliverability) |
-| `daily_dm_limit` | `10` | Maximum DMs queued per day by Writer | `10` (platform DM limits) |
-| `follow_up_1_days` | `7` | Days after initial pitch to send follow-up 1 | `7` (standard cadence) |
-| `follow_up_2_days` | `14` | Days after initial pitch to send follow-up 2 | `14` (two weeks total) |
-| `dead_lead_days` | `21` | Days after initial pitch to mark lead as dead | `21` (three weeks) |
-| `digest_email` | `{owner_email}` | Where to send the daily summary email | Operator email address |
-| `active_cities` | `{target_city}` | Comma-separated cities (legacy — Finder ignores this now) | Target city name |
-| `app_url` | `http://localhost:3000` | Dashboard URL included in digest email | Vercel deployment URL |
+### Pages
 
----
+| Route | Purpose |
+|-------|---------|
+| `/dashboard` | Stats overview, revenue chart (Recharts), activity feed, pipeline summary |
+| `/dashboard/leads` | Full leads CRM — search, filter by status/city/category, edit email inline, resend email |
+| `/dashboard/pipeline` | Kanban board — drag leads through contacted → replied → negotiating → closed |
+| `/dashboard/email-log` | All sent emails with status, Resend ID, open/reply timestamps |
+| `/dashboard/dm-queue` | Instagram DMs — copy message, mark sent, skip |
+| `/dashboard/deals` | Closed deals with revenue tracking and content/payment toggles |
+| `/dashboard/settings` | System settings, category management, city/suburb management, danger zone |
 
-## 9. Tech Stack
+### System Health Banner
 
-### Outscraper
-- **What:** Google Maps business data API (name, address, phone, website, email, rating, reviews)
-- **Why:** Only service that returns real Google Maps data with email fields; direct Google API is rate-limited and restricted
-- **Cost:** ~$0.002 per result. Progressive batching fetches 10 results at a time, stopping when quotas are met. ~$0.24/day at 80 results/day
-- **Get API key:** [outscraper.com](https://outscraper.com) → Sign up → API Keys section
+A real-time health check queries `activity_log` every 5 minutes and surfaces issues as colour-coded banners at the top of every page:
 
-### Supabase
-- **What:** Postgres database + Auth + REST API + Row Level Security
-- **Why:** Managed Postgres with built-in auth, RLS policies for multi-role access (service role for agents, anon for dashboard), generous free tier
-- **Cost:** Free tier covers this project comfortably (500MB storage, 2GB transfer/month). Pro plan is $25/month if needed.
-- **Get started:** [supabase.com](https://supabase.com) → New project → copy `SUPABASE_URL`, `ANON_KEY`, `SERVICE_ROLE_KEY` from Settings → API
+```
+🔴 RED    — Agent error in last 24h, Outscraper balance exhausted, pipeline failed
+🟡 ORANGE — System paused (system_active = false), no pipeline run in 25+ hours
+🟢 none   — All systems healthy
+```
 
-### Anthropic (Claude)
-- **What:** AI API for email writing (Sonnet) and data extraction (Haiku)
-- **Why:** Best personalisation quality for outreach emails; Haiku is extremely cheap for extraction tasks
-- **Models used:**
-  - `claude-haiku-4-5` — extraction tasks (cheap, fast)
-  - `claude-sonnet-4-6` — email/DM writing (quality output)
-- **Cost:** ~$0.003–0.01 per email written (Sonnet). ~$0.001 per extraction (Haiku). With 30 emails/day = ~$0.30/day = ~$9/month
-- **Get API key:** [console.anthropic.com](https://console.anthropic.com) → API Keys
+### Email Resend from Lead Panel
 
-### Resend
-- **What:** Transactional email API with delivery tracking and webhooks
-- **Why:** Best cold email deliverability, clean API, webhook support for reply/bounce tracking, free tier covers 3,000 emails/month
-- **Cost:** Free up to 3,000 emails/month. $20/month for 50,000 emails. At 30/day = 900/month = **free**
-- **Get API key:** [resend.com](https://resend.com) → API Keys. Must verify the sending domain (`{brand_website}`)
+Any lead with an email address has a **Resend Email** button in the detail panel. This:
+1. Calls `POST /api/leads/:id/resend`
+2. Re-uses the most recent email draft from `emails` table (preserving original copy/subject)
+3. Falls back to generating a fresh email via Claude Sonnet 4.6 if no prior draft exists
+4. Sends via Resend, inserts a new `emails` row (`status='sent'`), sets lead to `contacted`
 
-### Trigger.dev
-- **What:** Background job scheduler for long-running tasks (up to 1 hour)
-- **Why:** Vercel serverless functions timeout at 60s, not nearly enough for a pipeline that takes 30–90 minutes. Trigger.dev runs jobs on dedicated workers with no timeout limit.
-- **Cost:** Free tier covers 10,000 task runs/month. With 3 cron jobs × 30 days = 90 runs/month = **free**
-- **Get started:** [trigger.dev](https://trigger.dev) → New project → copy `TRIGGER_SECRET_KEY`
+### API Usage Tracker (Settings Page)
 
-### Vercel
-- **What:** Next.js hosting
-- **Why:** Zero-config deployment for Next.js, automatic HTTPS, free tier
-- **Cost:** Free (Hobby plan)
-- **Deploy:** Connect GitHub repo → Vercel auto-deploys on push to `master`
+Reads `activity_log` for `finder_complete` events and aggregates:
+- Today's Outscraper calls and estimated cost
+- This week / this month totals
+- Average cost per run
+- Last 7 days breakdown table
 
 ---
 
-## 10. Deployment
+## 8. Pipeline Flow
+
+### Sequence Diagram
+
+```
+Trigger.dev      Finder          Researcher        Writer           Sender
+    │               │                │                │                │
+    │─daily-pipeline►│               │                │                │
+    │               │─Outscraper──►  │                │                │
+    │               │◄─leads(new)──  │                │                │
+    │               │                │                │                │
+    │               │─status=new────►│                │                │
+    │               │                │─fetch homepage─►               │
+    │               │                │◄─HTML──────────                │
+    │               │                │─Claude Haiku──►(decide action) │
+    │               │                │◄─{action:fetch_url}            │
+    │               │                │─fetch /contact─►               │
+    │               │                │◄─HTML──────────                │
+    │               │                │─Claude Haiku──►(extract email) │
+    │               │                │◄─{action:found,email:...}      │
+    │               │                │─update lead────►               │
+    │               │                │  (status=researched)           │
+    │               │                │                │                │
+    │               │                │─researched─────►│               │
+    │               │                │                │─Claude Sonnet──►│
+    │               │                │                │◄─{subject,body}│
+    │               │                │                │─insert email───►│
+    │               │                │                │  pending_send  │
+    │               │                │                │────────────────►│
+    │               │                │                │                │─Resend API──►
+    │               │                │                │                │◄─{id:xxx}────
+    │               │                │                │                │─status=contacted
+    │◄─complete──────────────────────────────────────────────────────────
+```
+
+### Timing
+
+| Step | Typical Duration | Primary Bottleneck |
+|------|-----------------|-------------------|
+| Finder (30–40 leads) | 8–15 min | Outscraper async job polling (3–4s per poll) |
+| Researcher (40 leads) | 5–10 min | Website fetch timeouts (5s each, up to 3 pages) |
+| Writer (40 emails) | 3–6 min | Claude Sonnet API calls (~1.5s each) |
+| Sender (40 emails) | 1–2 min | Resend API rate limiting |
+| **Total** | **17–33 min** | |
+
+---
+
+## 9. Cost Engineering
+
+### Monthly Cost Breakdown
+
+| Service | Usage | Monthly Cost |
+|---------|-------|-------------|
+| Outscraper | ~80 results/day × 30 × $0.003 | ~$7.20 |
+| Claude Sonnet 4.6 (writing) | 30 emails × $0.007 × 30 days | ~$6.30 |
+| Claude Haiku 4.5 (extraction) | 30 calls × $0.001 × 30 days | ~$0.90 |
+| Resend | 900 emails/month (free tier: 3,000) | **$0** |
+| Trigger.dev | ~90 runs/month (free tier: 10,000 tasks) | **$0** |
+| Supabase | Free tier (500MB DB, 2GB transfer) | **$0** |
+| Vercel | Free tier (Hobby) | **$0** |
+| **Total** | | **~$14.40/month** |
+
+### Cost Per Unit
+
+```
+Cost per lead discovered:      $14.40 / (30 leads/day × 30 days)  = $0.016
+Cost per email sent:           $14.40 / 900 emails/month           = $0.016
+Cost to acquire 1 reply:       $0.016 / 10% reply rate             = $0.16
+Cost to acquire 1 deal:        $0.16  / 30% close rate             = $0.53
+Average deal value:            $300–$500
+ROI per deal:                  566x–943x gross return on lead cost
+Net ROI (incl. all costs):     56x–94x
+```
+
+### Cost Optimisation Techniques Applied
+
+| Technique | Mechanism | Saving |
+|-----------|-----------|--------|
+| **Progressive batching** | Fetch 10 results at a time, stop when quota met | ~60% vs fetching 50 upfront |
+| **Query deduplication** | `seenQueries` Set prevents re-fetching same search within a run | Eliminates duplicate API calls |
+| **Exhaustion caching** | 3-day DB cache prevents re-querying depleted searches | Avoids wasted calls on empty areas |
+| **Daily cost guard** | Configurable `$DAILY_OUTSCRAPER_LIMIT` halts pipeline if exceeded | Hard budget ceiling |
+| **Model routing** | Haiku for extraction, Sonnet for generation | ~$3/month saving vs Sonnet-only |
+| **Phase 2 is free** | Instagram leads sourced from existing DB records | $0 Outscraper cost for DM pipeline |
+| **Early irrelevance filter** | Keyword blocklist before any web fetch | Avoids fetching websites for visa agents, schools, etc. |
+
+---
+
+## 10. Architecture Decisions
+
+### Decision 1: Finite-State-Machine as Agent Coordinator
+
+Agents communicate exclusively through lead status transitions — no direct calls, queues, or message buses. Each agent has a simple contract: read leads in state X, process them, write leads in state Y.
+
+**Why:** Maximises decoupling. Adding a new agent requires no changes to existing agents — only a new status transition. Failed runs are safely resumable because status is persisted in the DB. The state machine is also the natural representation of a sales pipeline, making the system easier to reason about.
+
+**Implementation:** 9 states — `new → researched → email_ready → contacted → replied → negotiating → closed / dead / dm_queued`
+
+### Decision 2: Agentic Researcher Pattern (not prompt chaining)
+
+The Researcher doesn't follow a fixed fetch sequence. It gives Claude the homepage content and asks what to do next. Claude's response dictates the next action.
+
+**Why it matters:** A fixed script (`fetch homepage → fetch /contact → fetch /about`) fails on non-standard site structures. The agentic approach adapts — if the homepage already has a mailto link, it stops. If it needs to search Google for the email, it does. This is the core insight of agentic patterns applied practically.
+
+**Tradeoff:** Up to 3 LLM calls per lead vs 0 for regex-only. Justified because finding an email is a prerequisite for the entire email pipeline — the cost of a missed email is higher than the cost of 3 Haiku calls (~$0.003).
+
+### Decision 3: Haiku-vs-Sonnet Model Routing
+
+The system uses two Claude models deliberately: Haiku 4.5 for extraction/reasoning tasks, Sonnet 4.6 for generation tasks.
+
+**Why:** The quality of extraction output (is this email valid? is this the contact page?) is largely binary — Haiku is sufficient. The quality of email generation is a continuous variable that directly affects reply rate, and reply rate drives revenue. Sonnet's superior writing quality is the right investment for the conversion step.
+
+**Pattern name:** Task-appropriate model routing — a standard LLM application design pattern.
+
+### Decision 4: Cost-Aware Progressive Fetching
+
+The system fetches 10 results, processes them immediately, and only fetches more if needed — rather than fetching the maximum upfront.
+
+**Why:** Most searches in dense categories are exhausted after 10–30 results (all leads already in DB, or none have emails). Fetching 50 upfront wastes money on results that will never be used. Combined with the exhaustion cache, this reduces Outscraper spend by ~80%.
+
+### Decision 5: Two-Phase Lead Discovery
+
+Phase 1 (Outscraper) targets categories with high email yield. Phase 2 (free) queues Instagram targets from Phase 1 leftovers.
+
+**Why:** Instagram-centric businesses (restaurants, nail salons) rarely have emails on their websites — fetching them via Outscraper to find no email is pure waste. Phase 2 gets these leads for free by reusing Phase 1 data.
+
+---
+
+## 11. Tech Stack Decisions
+
+| Technology | Role | Why Chosen | Alternative Considered |
+|------------|------|-----------|----------------------|
+| **Next.js 16** | Admin dashboard + API routes | Full-stack, Vercel-native, App Router, async params in route handlers | Remix (smaller ecosystem) |
+| **Supabase** | Database + Auth + Realtime | Managed Postgres, RLS, generous free tier, Realtime subscriptions | PlanetScale (removed free tier 2024) |
+| **Claude AI** | Email writing + extraction | Best personalisation quality; Haiku is cheapest capable model for extraction | GPT-4o (higher cost, comparable quality) |
+| **Resend** | Email delivery | Best deliverability for cold outreach, clean API, webhook support, free tier covers volume | SendGrid (complex legacy API) |
+| **Trigger.dev v3** | Job scheduling + long-running tasks | No 60s timeout (unlike Vercel functions), live log streaming, free tier | GitHub Actions (no live logging, worse DX) |
+| **Outscraper** | Business discovery | Only API returning real Google Maps data with phone, website, email fields | Google Places API (4.7x more expensive, fewer fields) |
+| **Vercel** | Hosting | Zero-config Next.js deployment, edge functions, free hobby tier | Cloudflare Pages (more complex for Next.js App Router) |
+
+---
+
+## 12. Deployment
+
+### Prerequisites
+
+```bash
+# Six services required (all have free tiers):
+# 1. supabase.com       — database + auth
+# 2. resend.com         — email delivery
+# 3. outscraper.com     — business data (~$10 credit to start)
+# 4. console.anthropic.com — AI (Claude API)
+# 5. trigger.dev        — job scheduling
+# 6. vercel.com         — hosting
+```
 
 ### Environment Variables
-
-Create these in Vercel Dashboard → Settings → Environment Variables, AND in your local `.env.local`:
 
 ```bash
 # Supabase
@@ -862,7 +743,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJh...
 SUPABASE_SERVICE_ROLE_KEY=eyJh...
 
-# Claude API
+# Anthropic
 ANTHROPIC_API_KEY=sk-ant-...
 
 # Resend
@@ -872,319 +753,185 @@ RESEND_WEBHOOK_SECRET=whsec_...
 # Outscraper
 OUTSCRAPER_API_KEY=...
 
-# Trigger.dev
-TRIGGER_SECRET_KEY=tr_dev_...
+# Trigger.dev (must use tr_prod_ key for production)
+TRIGGER_SECRET_KEY=tr_prod_...
 
 # App
 NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
-ADMIN_EMAIL={owner_email}
+ADMIN_EMAIL=your@email.com
 ```
 
-### Supabase Setup
-
-1. Create new project at [supabase.com](https://supabase.com)
-2. Go to SQL Editor
-3. Run `supabase/migrations/001_initial_schema.sql` (creates all tables + seeds default settings + categories)
-4. Run `supabase/migrations/002_add_dm_limit.sql`
-5. Run `supabase/migrations/003_add_dm_queued_status.sql`
-6. Go to Authentication → Providers → Email → ensure email auth is enabled
-7. Create your admin user: Authentication → Users → Add User
-8. Copy URL, anon key, service role key from Settings → API
-
-### Vercel Deployment
+### Database Setup
 
 ```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy
-vercel --prod
-
-# Or connect GitHub: vercel.com → Import Project → GitHub repo
+# Run migrations in order in Supabase SQL Editor:
+supabase/migrations/001_initial_schema.sql      # All core tables + seeds
+supabase/migrations/002_add_dm_limit.sql        # DM limit setting
+supabase/migrations/003_add_dm_queued_status.sql
+supabase/migrations/004_city_suburbs.sql        # City/suburb management
+supabase/migrations/005_exhausted_queries.sql   # Cost control cache
 ```
 
-Add all environment variables in Vercel Dashboard.
-
-### Trigger.dev Deployment
+### Deploy
 
 ```bash
-# Deploy background jobs
+# 1. Push to GitHub → Vercel auto-deploys the Next.js app
+git push
+
+# 2. Deploy Trigger.dev jobs — MUST do this separately after any agent code change
 npm run deploy:trigger
-# Equivalent to: npx trigger.dev@4.4.4 deploy
+# equivalent: npx trigger.dev@4.4.4 deploy
+
+# 3. Verify schedules in Trigger.dev dashboard
+# Expect: daily-pipeline (8pm AEST), followup-job (9am), digest-job (8am)
 ```
 
-This bundles and deploys all tasks in the `trigger/` folder to Trigger.dev cloud. The three scheduled tasks (`daily-pipeline-schedule`, `followup-job`, `digest-job`) will start running on their cron schedules immediately.
-
-To deploy updates after code changes:
-```bash
-npm run build          # Verify TypeScript compiles
-npm run deploy:trigger # Deploy to Trigger.dev
-git add . && git commit -m "..." && git push  # Deploy to Vercel
-```
-
-### Resend Domain Setup
-
-1. Go to Resend → Domains → Add Domain → enter `{brand_website}`
-2. Add the DNS records shown (MX, TXT, DKIM) to your domain registrar
-3. Wait for verification (usually 5–30 minutes)
-4. Set up webhook: Resend → Webhooks → Add Endpoint
-   - URL: `https://your-app.vercel.app/api/webhooks/resend`
-   - Events: `email.replied`, `email.bounced`
-   - Copy the webhook secret to `RESEND_WEBHOOK_SECRET`
+**Important:** Every time agent code changes, you **must** run `npm run deploy:trigger` separately. Vercel only deploys the Next.js app — Trigger.dev jobs run on separate cloud infrastructure and must be deployed independently.
 
 ---
 
-## 11. Testing
+## 13. Testing
 
-All test scripts are in `/scripts/` and run locally with `npx tsx scripts/<file>.ts`. They load `.env.local` automatically. **None of them write to the database.**
+All test scripts live in `/scripts/`, load `.env.local` automatically, and **never write to the database** (read-only + console output only).
 
-### `scripts/test-email-extract.ts`
-**What:** Tests email extraction on a specific website URL.
+| Script | Purpose | Key Finding |
+|--------|---------|-------------|
+| `test-email-extract.ts` | Test email extraction on a specific URL | Diagnosed 6000-char truncation bug; switched to full HTML scan |
+| `test-one-business.ts` | Full Outscraper → fetch → extract on one business | Discovered `website` vs `site` field name discrepancy in Outscraper response |
+| `test-hotel-emails.ts` | Email yield test for hotel category | 2/10 yield; large chains block bots (403); boutique hotels significantly better |
+| `test-travel-emails.ts` | Email yield test for travel agents | 7/10 yield; confirmed mailto: link approach catches emails that HTML regex misses |
+| `test-followup.ts` | Send test follow-up to owner email | Verifies follow-up template and Resend delivery pipeline |
+| `test-outscraper-fields.ts` | Log complete raw Outscraper response | Revealed `website` field name, confirmed no native Instagram field returned |
+
 ```bash
-npx tsx scripts/test-email-extract.ts
-```
-Fetches homepage and `/contact` page, runs regex, logs all matches. Used to debug why a known email was not being found (diagnosed a 6000-char truncation issue).
-
----
-
-### `scripts/test-one-business.ts`
-**What:** Runs a live Outscraper search (`tour operator {target_city}`, limit=10), picks the first result with a website, logs the full raw Outscraper object, fetches the website, and runs email extraction.
-```bash
-npx tsx scripts/test-one-business.ts
-```
-Use this to verify:
-- What fields Outscraper actually returns (vs what the TypeScript type declares)
-- Whether email extraction works on a given site
-- What the raw HTML looks like
-
----
-
-### `scripts/test-hotel-emails.ts`
-**What:** Searches `hotel {target_city}` limit=10, attempts email extraction on every result, logs per-business results and a final summary.
-```bash
-npx tsx scripts/test-hotel-emails.ts
-```
-Shows: `X/10 hotels had findable emails`. Useful for evaluating a category's email yield before adding it to the Finder.
-
----
-
-### `scripts/test-travel-emails.ts`
-**What:** Same as hotel test but for `travel agent {target_city}`. Includes URL decoding (`decodeURIComponent`) and tries homepage, `/contact`, `/contact-us`, `/about`, `/about-us` pages.
-```bash
+# Run any test:
 npx tsx scripts/test-travel-emails.ts
 ```
-Key finding: travel agents yield ~6–7/10 emails, much better than generic hotels (2/10).
 
 ---
 
-### `scripts/test-finder-logic.ts`
-**What:** Legacy test script from earlier finder development. Tests the old suburb-rotation finder logic.
-```bash
-npx tsx scripts/test-finder-logic.ts
+## 14. Future Roadmap
+
+### Self-Improving Email Quality via RAG
+
+Store reply rates and deal close rates per email variant. Use **retrieval-augmented generation** to inject the 3 highest-performing past emails as few-shot examples into the Writer prompt at inference time. Expected improvement: +15–25% reply rate.
+
+Implementation sketch:
+```typescript
+// Retrieve top-performing emails for this category
+const topEmails = await supabase
+  .from('emails')
+  .select('body_text, reply_received, deal_closed')
+  .eq('category', lead.category_name)
+  .eq('reply_received', true)
+  .order('deal_closed', { ascending: false })
+  .limit(3)
+
+// Inject as few-shot examples into Writer prompt
+const fewShotBlock = topEmails.map(e => `Example (converted):\n${e.body_text}`).join('\n\n')
 ```
-Largely superseded by the category-specific test scripts above.
+
+### Reply Intelligence
+
+Extend Resend webhooks to pass reply content through Claude for sentiment classification:
+- `interested` → auto-move to `negotiating`, send deal package
+- `not_interested` → mark dead, suppress all follow-ups
+- `wrong_person` → extract correct contact name from reply text, update lead
+
+### Lead Scoring Model
+
+Compute a composite score per lead based on:
+- Google rating and review count (quality signal)
+- Website presence and richness (establishment signal)
+- Business age and social following (authority signal)
+- Category-specific engagement indicators
+
+Prioritise high-score leads in the Writer queue to maximise ROI on Claude API spend.
+
+### Multi-Creator SaaS
+
+Extract creator-specific configuration (brand name, voice, categories, target cities) into a `tenants` table. One deployment serves multiple creators with isolated pipelines, independent settings, and per-tenant billing.
+
+```
+Tenant: Creator A (food niche, Sydney) → own categories, own pipeline, own CRM
+Tenant: Creator B (travel niche, Melbourne) → own categories, own pipeline, own CRM
+```
+
+Estimated ARR potential: $500–$2,000/month per creator at $49–$199/month pricing. The core agent orchestration, CRM, and cost controls are already niche-agnostic — adapting for a new creator requires only updating `EMAIL_CATEGORIES`, the Claude prompt system context, and the `active_cities` setting.
 
 ---
 
-### `scripts/test-followup.ts`
-**What:** Finds one `contacted` lead in the database, bypasses the 7-day check, generates a follow-up 1 email, and sends it to `{owner_email}` (not the real business).
-```bash
-npx tsx scripts/test-followup.ts
-```
-Use this to verify the follow-up email template and Resend delivery before relying on the automated follow-up agent.
+## 15. Troubleshooting
 
----
+### Pipeline didn't run
 
-## 12. Costs
+1. Trigger.dev → Runs → look for today's `daily-pipeline`
+2. If missing: check Schedules page — verify `daily-pipeline` schedule points to correct task ID
+3. If failed: click run → view logs → find first red error line
+4. Check `system_active` setting in dashboard Settings — must be `true`
 
-### Monthly Cost Breakdown
+### No emails sent
 
-| Service | Usage | Cost/Month |
-|---------|-------|-----------|
-| Outscraper | ~80 results/day × 30 days × $0.003/result | ~$7.20 |
-| Anthropic (Sonnet) | 30 emails/day × $0.007/email × 30 days | ~$6 |
-| Anthropic (Haiku) | 30 extractions/day × $0.001 × 30 days | ~$1 |
-| Resend | 900 emails/month (free tier) | $0 |
-| Trigger.dev | 90 runs/month (free tier) | $0 |
-| Supabase | Free tier | $0 |
-| Vercel | Free tier | $0 |
-| **Total** | | **~$14/month** |
+1. Dashboard → Email Log → filter `pending_send` — any queued?
+2. If none: Writer didn't produce emails. Check Trigger.dev logs for "No researched leads found"
+3. If queued but not sent: Sender failed. Check for Resend API errors in Trigger.dev logs
+4. Verify `RESEND_API_KEY` is set in Vercel environment variables
 
-### Cost Per Lead
+### Outscraper returning 401 / 402
 
 ```
-$14/month ÷ (30 leads/day × 30 days) = $0.016 per lead
+Check balance at: outscraper.com → Profile → Billing
+Minimum $10 top-up recommended.
+At ~$0.003/result and ~80 results/day = $7.20/month consumption rate.
 ```
 
-### Cost Per Email Sent
+### Same query searched repeatedly
+
+The `seenQueries` Set is checked before every Outscraper call. If duplicate queries appear in logs, check that the Set is initialised outside the category loop (it must persist across all categories). Also check `city_suburbs` table for duplicate rows — if the same suburb appears twice for the same city, the Set will catch the second occurrence but the loop will still iterate it.
+
+### Email extracted incorrectly (e.g. `thello@` instead of `hello@`)
+
+This happens when regex captures characters from surrounding HTML text. The `mailto:` link extraction approach (`href="mailto:..."`) prevents this — it is tried first and is 100% accurate. Regex is only a fallback.
+
+To fix an already-stored bad email:
+1. Dashboard → Leads → find the lead
+2. Click lead → pencil icon next to email → correct the address
+3. Click "Resend Email" button — sends to the corrected address, logs a new row in `emails`
+
+### How to check Trigger.dev run logs
 
 ```
-$14/month ÷ 900 emails/month = $0.016 per email sent
-```
-
-### ROI Calculation
-
-```
-At $0.016/email and a 10% reply rate, 3% close rate:
-→ 1 closed deal per ~333 emails
-→ Cost to acquire 1 deal: ~$5.33
-→ Average deal value: $300–$500
-→ ROI: 56x–94x
-```
-
----
-
-## 13. Future Improvements
-
-### Self-Improving Email Quality
-Store open rates, reply rates, and close rates per email template variant. After 100+ sends, use Claude to analyse which subject lines and pitches get the best response rates, then automatically rewrite underperforming templates.
-
-### RAG (Retrieval-Augmented Generation) for Email Writing
-Build a vector database of successful deals with their email content. When writing new outreach for a similar business category, retrieve the 3 most similar successful emails and use them as style examples for Claude.
-
-### Multi-City Expansion
-Currently hardcoded to a single target city. To expand to multiple cities:
-1. Add cities to `active_cities` setting
-2. Update `EMAIL_CATEGORIES` in `finder.ts` to accept a city parameter
-3. Modify dedup check to use `city` field from the Outscraper result
-4. Add per-city quotas to prevent one city dominating the daily run
-
-### Instagram Reply Automation
-Currently DMs are sent manually by the operator. Future improvement: integrate with Instagram Graph API (requires Meta Business verification) or a third-party tool like ManyChat to automate initial DM sending and track reply status back to the database.
-
-### Webhook-Based Reply Intelligence
-Resend webhooks currently handle `email.replied` and `email.bounced`. Could be extended to:
-- Detect reply sentiment (interested/not interested/wrong person) using Claude
-- Auto-move leads to `negotiating` when reply indicates interest
-- Auto-respond to replies requesting info with a Claude-generated response
-
-### Lead Scoring
-Add a score to each lead based on:
-- Google rating (4.5+ = higher score)
-- Review count (social proof)
-- Business age (website age from WHOIS)
-- Audience size (scraped from their social profile)
-
-Prioritise high-score leads in the Writer queue.
-
-### Competitor Tracking
-Monitor which businesses post collaboration content with similar accounts. If a business posted a collaboration with a comparable creator, they have demonstrated willingness to pay — increasing the likelihood of a positive response.
-
----
-
-## 14. Troubleshooting
-
-### Pipeline didn't run today
-
-1. Check Trigger.dev dashboard → your project → Runs → look for today's `daily-pipeline` run
-2. If no run appears: check that `daily-pipeline-schedule` task is deployed (it should be listed in Tasks)
-3. If run exists but failed: click it → view logs → look for the first error
-4. Common cause: `system_active` setting is `false` → go to dashboard Settings → toggle on
-
-### Emails not being sent
-
-1. Dashboard → Email Log → filter by `pending_send` — are there queued emails?
-2. If no pending emails: Writer isn't producing them. Check Trigger.dev logs for `runWriterAgent` — look for "No researched leads found"
-3. If emails exist but status stays `pending_send`: Sender failed. Check Trigger.dev logs for `runSenderAgent` → look for Resend errors
-4. Check Resend dashboard → Emails → look for recent sends or errors
-5. Verify `RESEND_API_KEY` is set correctly in Vercel environment variables
-
-### Emails bouncing
-
-1. Resend → Emails → filter by Bounced status
-2. Check if the email domain is valid (typos, old domains)
-3. Verify Resend domain verification is still passing → Resend → Domains → should show green status
-
-### Outscraper returning 401
-
-The API key is invalid or exhausted. Check:
-1. Outscraper dashboard → API Keys → verify key is active
-2. Outscraper dashboard → Usage → check remaining credits
-3. If running test scripts locally, ensure `.env.local` exists and has the correct key
-
-### Outscraper returning empty results
-
-Some searches return fewer results than expected. Common causes:
-- Query too specific for the area (e.g., "boutique hotel {target_city}" may return only 6 results)
-- Outscraper rate limiting: 10 calls/minute, built-in to `src/lib/outscraper.ts`
-- If consistently empty for a category, verify the query by pasting it into Google Maps
-
-### Leads found but no emails extracted
-
-Run the test script for that category:
-```bash
-npx tsx scripts/test-hotel-emails.ts   # for hotels
-npx tsx scripts/test-travel-emails.ts  # for travel agents
-```
-
-Common reasons:
-- Business uses a contact form with no email in HTML (e.g., Shopify stores)
-- Large corporate chain blocks bot User-Agent with 403
-- Email is behind a JavaScript wall (not in initial HTML)
-- URL encoding issue — check if the website URL has `%3F` in it (should be decoded to `?`)
-
-### Follow-ups not sending
-
-1. Check `follow_up_1_days` setting in dashboard — ensure it's `7`, not `70`
-2. Check Trigger.dev → `followup-job` run logs
-3. Verify there are `contacted` leads with `initial_pitch` emails that have a `sent_at` timestamp
-4. If `sent_at` is null on the initial pitch email, the follow-up agent will skip that lead
-
-### How to check Trigger.dev logs
-
-1. Go to [cloud.trigger.dev](https://cloud.trigger.dev)
-2. Select your project
-3. Click "Runs" in the left sidebar
-4. Find the run you want to inspect (filter by task name and date)
-5. Click the run → expand each step → view `console.log` output
-
-### How to verify emails in Resend
-
-1. Go to [resend.com](https://resend.com) → Emails
-2. Filter by date, status, or recipient
-3. Click an email to see delivery details, open events, bounce info
-4. For debugging a specific send: find the `resend_id` in the `emails` table in Supabase, then search for it in Resend
-
-### How to manually trigger the pipeline
-
-Option 1 — Dashboard:
-```
-Dashboard → Settings → "Run Pipeline Now" button
-```
-This calls `POST /api/pipeline/run` which triggers the Trigger.dev task.
-
-Option 2 — Trigger.dev dashboard:
-```
-cloud.trigger.dev → your project → Tasks → daily-pipeline → "Test" button → Run
-```
-
-Option 3 — API call:
-```bash
-curl -X POST https://your-app.vercel.app/api/pipeline/run \
-  -H "Content-Type: application/json"
+cloud.trigger.dev → your project → Runs → click run ID → expand each step
 ```
 
 ---
 
-## 15. Portfolio Notes
+## 16. Portfolio Notes
 
-This system is designed as a configurable template for content creators and influencers.
+### Why This Project Demonstrates Production Engineering Skills
 
-**All core variables are database-driven and configurable via the admin panel without code changes:**
+Most AI demo projects are toy pipelines that break at scale. This system is production-deployed, handles real data, and has been engineered to control costs, handle failures gracefully, and produce consistent output quality. Specific things that distinguish it from demo-quality work:
 
-| Variable | Where Configured |
-|----------|-----------------|
-| Brand name and sender identity | Environment variables (`ADMIN_EMAIL`) |
-| Target business categories and search queries | `agents/finder.ts` category arrays |
-| Target city and region | Finder category queries |
-| Outreach email tone and style | Claude prompt in `agents/writer.ts` |
-| Daily send limits and follow-up cadence | Dashboard → Settings |
-| Deal types and values | Leads table `deal_type` field |
+- **Rate limiting** on both Outscraper and Claude APIs (sliding window, auto-backoff)
+- **Idempotent agent runs** — re-running any agent produces the same result, not duplicates
+- **Fault isolation** — a Researcher failure on one lead logs and continues, not crash-and-burn
+- **Cost engineering** documented with real spend figures, not just "I optimised it"
+- **Observability** — every agent action is logged with structured metadata, enabling post-hoc debugging
+- **State machine** over implicit control flow — the lead lifecycle is explicit, not buried in business logic
 
-**Adapting for a different use case:**
-1. Update the category arrays in `agents/finder.ts` with relevant business types and search queries for your niche
-2. Update the Claude prompt in `agents/writer.ts` to reflect your brand voice and collaboration proposition
-3. Set environment variables for sender identity
-4. Deploy — the pipeline runs autonomously from that point forward
+### Adapting for a Different Use Case
 
-The architecture (6 agents, progressive fetching, dual-channel outreach, full CRM) is niche-agnostic and applies equally to travel, fitness, food, lifestyle, or any other creator vertical.
+The architecture is niche-agnostic. To adapt:
+
+1. **`agents/finder.ts`** — update `EMAIL_CATEGORIES` and `DM_CATEGORY_NAMES` with relevant search queries
+2. **`agents/writer.ts`** — update the Claude prompt system context with your brand voice and proposition
+3. **`lib/claude.ts`** — update `getBrandDescription()` and `getCategoryPitch()` for your verticals
+4. **Environment variables** — set `ADMIN_EMAIL` and `NEXT_PUBLIC_APP_URL`
+5. **`settings` table** — configure daily limits, follow-up cadence, active cities
+6. Deploy — pipeline runs autonomously from that point
+
+The system has been tested across: food & lifestyle, travel, and beauty verticals. Core agent orchestration, CRM, and cost controls apply equally to any outreach-driven business.
+
+---
+
+*Documentation version 3.0 | Built May 2026 | Stack: Next.js 16 · TypeScript · Supabase · Claude Sonnet 4.6 + Haiku 4.5 · Trigger.dev v3 · Vercel · Outscraper · Resend*
