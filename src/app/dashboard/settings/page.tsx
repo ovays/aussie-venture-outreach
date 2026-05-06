@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import TopBar from '@/components/layout/TopBar'
 import { SystemSettings } from '@/components/settings/SystemSettings'
 import { CategoriesTable } from '@/components/settings/CategoriesTable'
+import { CitySuburbs } from '@/components/settings/CitySuburbs'
 import { Card } from '@/components/ui/Card'
 
 export const revalidate = 0
@@ -32,7 +33,7 @@ export default async function SettingsPage() {
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
 
-  const [{ data: settings }, { data: categories }, { data: usageEvents }] = await Promise.all([
+  const [{ data: settings }, { data: categories }, { data: usageEvents }, { data: suburbRows }] = await Promise.all([
     supabase.from('settings').select('*').order('key'),
     supabase.from('categories').select('*').order('name'),
     supabase
@@ -41,7 +42,19 @@ export default async function SettingsPage() {
       .eq('event_type', 'finder_complete')
       .gte('created_at', thirtyDaysAgo)
       .order('created_at', { ascending: false }),
+    supabase
+      .from('city_suburbs')
+      .select('id, city, suburb, active')
+      .order('city')
+      .order('suburb'),
   ])
+
+  // Group suburbs by city
+  const suburbsByCity: Record<string, { id: string; suburb: string; active: boolean }[]> = {}
+  for (const row of suburbRows ?? []) {
+    if (!suburbsByCity[row.city]) suburbsByCity[row.city] = []
+    suburbsByCity[row.city].push({ id: row.id, suburb: row.suburb, active: row.active })
+  }
 
   // Compute usage stats from raw events
   const now = Date.now()
@@ -98,6 +111,10 @@ export default async function SettingsPage() {
       <div className="p-6 space-y-6 max-w-4xl">
         <Card>
           <SystemSettings initialSettings={settings ?? []} usageData={usageData} />
+        </Card>
+
+        <Card>
+          <CitySuburbs initialData={suburbsByCity} />
         </Card>
 
         <Card>
