@@ -113,7 +113,7 @@ async function findEmailForBusiness(rawWebsite: string): Promise<{ email: string
 // ── Irrelevant business filter ───────────────────────────────────────────────
 
 const IRRELEVANT_KEYWORDS = [
-  'migration', 'migrant', 'visa', 'immigration', 'education', 'university',
+  'migrate', 'migration', 'migrant', 'visa', 'immigration', 'education', 'university',
   'college', 'school', 'tafe', 'accounting', 'tax', 'legal', 'lawyer',
   'solicitor', 'dentist', 'doctor', 'medical', 'pharmacy', 'clinic',
   'real estate', 'mortgage', 'insurance', 'finance', 'funeral',
@@ -122,6 +122,28 @@ const IRRELEVANT_KEYWORDS = [
 function isIrrelevant(name: string): boolean {
   const lower = name.toLowerCase()
   return IRRELEVANT_KEYWORDS.some((kw) => lower.includes(kw))
+}
+
+// ── Business email quality filter ────────────────────────────────────────────
+
+function isValidBusinessEmail(email: string, businessName: string): boolean {
+  const domain = email.split('@')[1]?.toLowerCase() ?? ''
+  const local  = email.split('@')[0]?.toLowerCase() ?? ''
+
+  void businessName // reserved for future name-match heuristics
+
+  const junkDomains = ['sentry.io', 'wixpress.com', 'mailchimp.com', 'sendgrid.net', 'example.com', 'domain.com', 'mail.com']
+  if (junkDomains.some((d) => domain.includes(d))) return false
+
+  const placeholders = ['example@', 'user@', 'test@', 'demo@', 'sample@']
+  if (placeholders.some((p) => email.startsWith(p))) return false
+
+  // Reject hex/random local parts (e.g. sentry error IDs)
+  if (/^[a-f0-9]{20,}$/.test(local)) return false
+
+  if (!domain.includes('.')) return false
+
+  return true
 }
 
 // ── DB dedup ─────────────────────────────────────────────────────────────────
@@ -407,6 +429,11 @@ export async function runFinderAgent(): Promise<number> {
             }
 
             if (foundEmail) {
+              if (!isValidBusinessEmail(foundEmail, name)) {
+                console.log(`❌ Skip: ${name} — junk email: ${foundEmail}`)
+                continue
+              }
+
               const { error } = await supabase.from('leads').insert({
                 business_name:        name,
                 category_name:        category.name,

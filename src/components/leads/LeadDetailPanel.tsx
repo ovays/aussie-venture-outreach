@@ -47,6 +47,10 @@ export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProp
   const [savingEmail, setSavingEmail] = useState(false)
   const [emailSaved, setEmailSaved] = useState(false)
 
+  const [resending, setResending] = useState(false)
+  const [resendStatus, setResendStatus] = useState<'idle' | 'sent' | 'error'>('idle')
+  const [resendError, setResendError] = useState('')
+
   if (!lead) return null
 
   async function saveEmail() {
@@ -67,6 +71,30 @@ export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProp
   function cancelEmailEdit() {
     setEmailInput(lead?.email ?? '')
     setEditingEmail(false)
+  }
+
+  async function resendEmail() {
+    if (!lead) return
+    setResending(true)
+    setResendStatus('idle')
+    setResendError('')
+    try {
+      const res = await fetch(`/api/leads/${lead.id}/resend`, { method: 'POST' })
+      const json = await res.json() as { success?: boolean; error?: string }
+      if (!res.ok || !json.success) {
+        setResendStatus('error')
+        setResendError(json.error ?? 'Failed to send')
+      } else {
+        setResendStatus('sent')
+        onUpdate(lead.id, { status: 'contacted' })
+        setTimeout(() => setResendStatus('idle'), 4000)
+      }
+    } catch {
+      setResendStatus('error')
+      setResendError('Network error')
+    } finally {
+      setResending(false)
+    }
   }
 
   async function saveNotes() {
@@ -203,6 +231,26 @@ export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProp
               <p className="text-xs mt-1" style={{ color: '#4ade80' }}>Email updated ✓</p>
             )}
           </div>
+
+          {/* Resend Email */}
+          {lead.email && (
+            <div className="pt-1">
+              <button
+                onClick={resendEmail}
+                disabled={resending}
+                className="w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                style={{ background: '#0284c7', color: 'white' }}
+              >
+                {resending ? 'Sending…' : 'Resend Email'}
+              </button>
+              {resendStatus === 'sent' && (
+                <p className="text-xs mt-1.5 text-center" style={{ color: '#4ade80' }}>Email sent ✅</p>
+              )}
+              {resendStatus === 'error' && (
+                <p className="text-xs mt-1.5 text-center" style={{ color: '#f87171' }}>{resendError}</p>
+              )}
+            </div>
+          )}
 
           {lead.website && (
             <div className="flex justify-between text-sm">
