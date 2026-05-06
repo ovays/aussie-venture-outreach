@@ -278,11 +278,26 @@ export async function runFinderAgent(): Promise<number> {
   console.log(`[finder] Per-category cap (first 4): ${cappedLimit}`)
   console.log(`[finder] Daily cost limit: $${DAILY_OUTSCRAPER_LIMIT}`)
 
-  // Load active suburbs from DB, grouped by city
+  // Read active_cities from settings — this is the source of truth for which cities to search
+  const { data: activeCitiesRow } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'active_cities')
+    .single()
+
+  const activeCitiesList = (activeCitiesRow?.value ?? 'Sydney')
+    .split(',')
+    .map((c: string) => c.trim())
+    .filter(Boolean)
+
+  console.log(`[finder] Active cities (from settings): ${activeCitiesList.join(', ')}`)
+
+  // Load active suburbs for active cities only — city_suburbs must also have active=true
   const { data: suburbData } = await supabase
     .from('city_suburbs')
     .select('city, suburb')
     .eq('active', true)
+    .in('city', activeCitiesList)
     .order('city')
     .order('suburb')
 
@@ -291,10 +306,12 @@ export async function runFinderAgent(): Promise<number> {
     if (!cityAreas[row.city]) cityAreas[row.city] = []
     cityAreas[row.city].push(row.suburb)
   }
-  if (Object.keys(cityAreas).length === 0) cityAreas['Sydney'] = ['Sydney CBD']
+  // If a city is active in settings but has no suburbs in city_suburbs, fall back to the city name
+  for (const city of activeCitiesList) {
+    if (!cityAreas[city]?.length) cityAreas[city] = [city]
+  }
 
-  const activeCities = Object.keys(cityAreas)
-  console.log(`[finder] Cities: ${activeCities.join(', ')} (${Object.values(cityAreas).flat().length} active suburbs)`)
+  console.log(`[finder] Suburbs loaded: ${Object.values(cityAreas).flat().length} across ${Object.keys(cityAreas).length} cities`)
 
   // FIX 2: clean up expired exhausted queries, then load non-expired ones
   await supabase.from('exhausted_queries').delete().lt('expires_at', new Date().toISOString())
