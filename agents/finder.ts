@@ -258,11 +258,15 @@ export async function runFinderAgent(): Promise<number> {
     .order('city')
     .order('suburb')
 
-  const cityAreas: Record<string, string[]> = {}
+  // Use a Set per city so duplicate DB rows never produce duplicate suburbs
+  const cityAreaSets: Record<string, Set<string>> = {}
   for (const row of suburbData ?? []) {
-    if (!cityAreas[row.city]) cityAreas[row.city] = []
-    cityAreas[row.city].push(row.suburb)
+    if (!cityAreaSets[row.city]) cityAreaSets[row.city] = new Set()
+    cityAreaSets[row.city].add(row.suburb)
   }
+  const cityAreas: Record<string, string[]> = Object.fromEntries(
+    Object.entries(cityAreaSets).map(([city, set]) => [city, [...set]])
+  )
   // If a city is active but has no configured suburbs, search the city name itself
   for (const city of activeCities) {
     if (!cityAreas[city]?.length) cityAreas[city] = [city]
@@ -317,6 +321,7 @@ export async function runFinderAgent(): Promise<number> {
 
         const query = category.query.replace('{city}', suburb)
 
+        // Check and guard BEFORE seenQueries.add — API call only happens after add
         if (seenQueries.has(query)) {
           console.log(`[finder] Skip duplicate query: "${query}"`)
           continue
