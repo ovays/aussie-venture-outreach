@@ -19,12 +19,8 @@ const EMAIL_CATEGORIES = [
   { name: 'Halal Restaurants',      query: 'halal restaurant {city}', capped: false },
 ]
 
-const DM_CATEGORIES = [
-  { name: 'Halal Restaurants', query: 'halal restaurant {city}' },
-  { name: 'Halal Cafes',       query: 'halal cafe {city}' },
-  { name: 'Halal Bakeries',    query: 'halal bakery {city}' },
-  { name: 'Nail Salons',       query: 'nail salon {city}' },
-]
+// DM categories: leads queued for manual Instagram outreach (no Outscraper)
+const DM_CATEGORY_NAMES = ['Halal Restaurants', 'Halal Cafes', 'Halal Bakeries', 'Nail Salons']
 
 const CITY_STATE: Record<string, string> = {
   Sydney:    'NSW',
@@ -128,20 +124,6 @@ function isIrrelevant(name: string): boolean {
   return IRRELEVANT_KEYWORDS.some((kw) => lower.includes(kw))
 }
 
-// ── Instagram handle validation ──────────────────────────────────────────────
-
-const INVALID_HANDLE_VALUES = new Set([
-  'not found', 'not mentioned', 'n/a', 'none', 'null', '', 'unknown',
-])
-
-function isValidInstagramHandle(handle: string): boolean {
-  const cleaned = handle.replace(/^@/, '').toLowerCase()
-  if (!cleaned) return false
-  if (INVALID_HANDLE_VALUES.has(cleaned)) return false
-  if (!/^[a-zA-Z0-9_.]{3,30}$/.test(cleaned)) return false
-  return true
-}
-
 // ── DB dedup ─────────────────────────────────────────────────────────────────
 
 async function isAlreadyInDB(
@@ -156,19 +138,6 @@ async function isAlreadyInDB(
     .from('leads')
     .select('id')
     .or(conditions.join(','))
-    .limit(1)
-  return !!data?.length
-}
-
-async function isInstagramHandleInDB(
-  supabase: ReturnType<typeof createServiceClient>,
-  handle: string
-): Promise<boolean> {
-  const normalised = handle.startsWith('@') ? handle : `@${handle}`
-  const { data } = await supabase
-    .from('leads')
-    .select('id')
-    .eq('instagram_handle', normalised)
     .limit(1)
   return !!data?.length
 }
@@ -202,41 +171,29 @@ async function cleanupDmQueue(supabase: ReturnType<typeof createServiceClient>):
   const { error: fbErr } = await supabase.from('dm_queue').delete().eq('platform', 'facebook')
   if (fbErr) console.error('[finder] Cleanup Facebook delete error:', fbErr.message)
 
-  await supabase.from('dm_queue').delete().is('handle', null)
-
-  const invalidValues = ['Not found', 'Not mentioned', '', 'N/A', 'None', 'null', 'Unknown']
+  const invalidValues = ['Not found', 'Not mentioned', 'N/A', 'None', 'null', 'Unknown']
   for (const val of invalidValues) {
     await supabase.from('dm_queue').delete().eq('handle', val)
   }
 
+  // Remove duplicate lead entries — keep oldest per lead_id
   const { data: allDms } = await supabase
     .from('dm_queue')
-    .select('id, lead_id, handle, created_at')
+    .select('id, lead_id, created_at')
     .order('created_at', { ascending: true })
 
   if (allDms?.length) {
     const seenLeadIds = new Map<string, string>()
-    const seenHandles = new Map<string, string>()
     const toDelete: string[] = []
-
     for (const dm of allDms) {
-      let isDup = false
       if (seenLeadIds.has(dm.lead_id)) {
-        isDup = true
+        toDelete.push(dm.id)
       } else {
         seenLeadIds.set(dm.lead_id, dm.id)
       }
-      const normHandle = dm.handle?.toLowerCase?.() ?? ''
-      if (normHandle && seenHandles.has(normHandle)) {
-        isDup = true
-      } else if (normHandle) {
-        seenHandles.set(normHandle, dm.id)
-      }
-      if (isDup) toDelete.push(dm.id)
     }
-
     if (toDelete.length) {
-      console.log(`[finder] Removing ${toDelete.length} duplicate/invalid DM queue entries`)
+      console.log(`[finder] Removing ${toDelete.length} duplicate DM queue entries`)
       await supabase.from('dm_queue').delete().in('id', toDelete)
     } else {
       console.log('[finder] DM queue is clean — no duplicates found')
@@ -268,36 +225,36 @@ export async function runFinderAgent(): Promise<number> {
     supabase.from('settings').select('value').eq('key', 'daily_outscraper_limit').single(),
   ])
 
-  const EMAIL_TARGET            = parseInt(emailLimitRow.data?.value ?? '30', 10)
-  const DM_TARGET               = parseInt(dmLimitRow.data?.value   ?? '10', 10)
-  const TOTAL_TARGET            = parseInt(totalLimitRow.data?.value ?? '40', 10)
-  const DAILY_OUTSCRAPER_LIMIT  = parseFloat(dailyOutscraperLimitRow.data?.value ?? '1.00')
-  const cappedLimit             = Math.floor(EMAIL_TARGET / 4)
+  const EMAIL_TARGET           = parseInt(emailLimitRow.data?.value ?? '30', 10)
+  const DM_TARGET              = parseInt(dmLimitRow.data?.value   ?? '10', 10)
+  const TOTAL_TARGET           = parseInt(totalLimitRow.data?.value ?? '40', 10)
+  const DAILY_OUTSCRAPER_LIMIT = parseFloat(dailyOutscraperLimitRow.data?.value ?? '1.00')
+  const cappedLimit            = Math.floor(EMAIL_TARGET / 4)
 
   console.log(`[finder] Targets: ${EMAIL_TARGET} email, ${DM_TARGET} DM, ${TOTAL_TARGET} total`)
   console.log(`[finder] Per-category cap (first 4): ${cappedLimit}`)
   console.log(`[finder] Daily cost limit: $${DAILY_OUTSCRAPER_LIMIT}`)
 
-  // Read active_cities from settings — this is the source of truth for which cities to search
-  const { data: activeCitiesRow } = await supabase
+  // FIX 1: read active_cities from settings — source of truth for which cities to search
+  const { data: activeCitySetting } = await supabase
     .from('settings')
     .select('value')
     .eq('key', 'active_cities')
     .single()
 
-  const activeCitiesList = (activeCitiesRow?.value ?? 'Sydney')
+  const activeCities: string[] = activeCitySetting?.value
     .split(',')
     .map((c: string) => c.trim())
-    .filter(Boolean)
+    .filter(Boolean) ?? ['Sydney']
 
-  console.log(`[finder] Active cities (from settings): ${activeCitiesList.join(', ')}`)
+  console.log('[finder] Active cities:', activeCities)
 
-  // Load active suburbs for active cities only — city_suburbs must also have active=true
+  // Load active suburbs for active cities only — both filters must be satisfied
   const { data: suburbData } = await supabase
     .from('city_suburbs')
     .select('city, suburb')
     .eq('active', true)
-    .in('city', activeCitiesList)
+    .in('city', activeCities)
     .order('city')
     .order('suburb')
 
@@ -306,14 +263,14 @@ export async function runFinderAgent(): Promise<number> {
     if (!cityAreas[row.city]) cityAreas[row.city] = []
     cityAreas[row.city].push(row.suburb)
   }
-  // If a city is active in settings but has no suburbs in city_suburbs, fall back to the city name
-  for (const city of activeCitiesList) {
+  // If a city is active but has no configured suburbs, search the city name itself
+  for (const city of activeCities) {
     if (!cityAreas[city]?.length) cityAreas[city] = [city]
   }
 
-  console.log(`[finder] Suburbs loaded: ${Object.values(cityAreas).flat().length} across ${Object.keys(cityAreas).length} cities`)
+  console.log(`[finder] Suburbs loaded: ${Object.values(cityAreas).flat().length} active suburbs`)
 
-  // FIX 2: clean up expired exhausted queries, then load non-expired ones
+  // Load exhausted queries (cleanup expired first)
   await supabase.from('exhausted_queries').delete().lt('expires_at', new Date().toISOString())
   const { data: exhaustedData } = await supabase
     .from('exhausted_queries')
@@ -322,11 +279,10 @@ export async function runFinderAgent(): Promise<number> {
   const exhaustedSet = new Set((exhaustedData ?? []).map((r) => r.query))
   console.log(`[finder] Exhausted queries cached: ${exhaustedSet.size} (skipped for 3 days)`)
 
-  // FIX 3: today's prior spend
+  // Today's prior Outscraper spend
   const spentToday = await getDailyOutscraperSpend(supabase)
   console.log(`[finder] Prior spend today: $${spentToday.toFixed(4)}`)
 
-  // FIX 4: seen queries this run (dedup within run)
   const seenQueries = new Set<string>()
   let costGuardHit = false
 
@@ -334,7 +290,6 @@ export async function runFinderAgent(): Promise<number> {
   let dmCount             = 0
   let callCount           = 0
   let totalResultsFetched = 0
-  const phase1Names = new Set<string>()
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // PHASE 1 — EMAIL LEADS
@@ -362,7 +317,6 @@ export async function runFinderAgent(): Promise<number> {
 
         const query = category.query.replace('{city}', suburb)
 
-        // FIX 4: skip if already seen or exhausted
         if (seenQueries.has(query)) {
           console.log(`[finder] Skip duplicate query: "${query}"`)
           continue
@@ -381,7 +335,7 @@ export async function runFinderAgent(): Promise<number> {
           if (categoryEmailCount >= categoryLimit) break
           if (costGuardHit) break
 
-          // FIX 3: cost guard — check before every Outscraper call
+          // Cost guard — check before every Outscraper call
           const currentRunEstimate = callCount * 10 * 0.003
           if (spentToday + currentRunEstimate >= DAILY_OUTSCRAPER_LIMIT) {
             console.log(`[finder] COST GUARD: Daily limit $${DAILY_OUTSCRAPER_LIMIT} reached — stopping`)
@@ -426,9 +380,9 @@ export async function runFinderAgent(): Promise<number> {
               continue
             }
 
+            // Business whose website IS an Instagram page has no real web presence for email
             if (rawWebsite && INSTAGRAM_REGEX.test(rawWebsite)) {
-              const handle = extractInstagramHandle(rawWebsite)
-              if (handle) console.log(`📌 Noted for Phase 2: ${name} → ${handle}`)
+              console.log(`❌ Skip: ${name} — website is Instagram (no email possible)`)
               continue
             }
 
@@ -471,7 +425,6 @@ export async function runFinderAgent(): Promise<number> {
               emailCount++
               categoryEmailCount++
               newLeadsThisBatch++
-              phase1Names.add(name)
               console.log(`✅ Email: ${name} → ${foundEmail} (source: ${emailSource})`)
 
               await supabase.from('activity_log').insert({
@@ -484,17 +437,15 @@ export async function runFinderAgent(): Promise<number> {
             }
           }
 
-          if (categoryEmailCount >= categoryLimit) break  // quota filled
+          if (categoryEmailCount >= categoryLimit) break
 
-          // FIX 2: mark exhausted when results page is less than full
           if (results.length < 10) {
             exhaustedThisQuery = true
             break
           }
 
-          // FIX 1: low yield — 10 results but <=1 usable lead, not worth continuing
           if (newLeadsThisBatch <= 1) {
-            console.log(`[finder] Low yield query exhausted: "${query}" — only ${newLeadsThisBatch} leads from 10 results`)
+            console.log(`[finder] Low yield: "${query}" — only ${newLeadsThisBatch} leads from 10 results`)
             exhaustedThisQuery = true
             break
           }
@@ -502,7 +453,6 @@ export async function runFinderAgent(): Promise<number> {
           skip += 10
         }
 
-        // FIX 2: persist exhausted query to DB so it's skipped for 3 days
         if (exhaustedThisQuery) {
           await supabase.from('exhausted_queries').upsert({
             query,
@@ -524,200 +474,71 @@ export async function runFinderAgent(): Promise<number> {
   console.log(`\n[finder] Phase 1 complete: ${emailCount}/${EMAIL_TARGET} email leads`)
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // PHASE 2 — INSTAGRAM LEADS ONLY
+  // PHASE 2 — MANUAL INSTAGRAM DM QUEUE
+  // No Outscraper calls — queue existing leads for manual Instagram outreach
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  console.log('\n[finder] ═══ PHASE 2: Instagram Leads ═══')
+  console.log('\n[finder] ═══ PHASE 2: Instagram DM Queue (free) ═══')
 
   await cleanupDmQueue(supabase)
 
-  for (const category of DM_CATEGORIES) {
+  // Get lead IDs already in dm_queue so we don't double-queue
+  const { data: existingDms } = await supabase
+    .from('dm_queue')
+    .select('lead_id')
+  const alreadyQueued = new Set((existingDms ?? []).map((r) => r.lead_id))
+
+  // Find leads in DM categories with no email — not yet queued, in active cities
+  const { data: dmCandidates } = await supabase
+    .from('leads')
+    .select('id, business_name, category_name, city, state')
+    .in('category_name', DM_CATEGORY_NAMES)
+    .is('email', null)
+    .eq('status', 'new')
+    .in('city', activeCities)
+    .order('created_at', { ascending: false })
+    .limit(DM_TARGET * 3)
+
+  for (const lead of dmCandidates ?? []) {
     if (dmCount >= DM_TARGET) break
     if (emailCount + dmCount >= TOTAL_TARGET) break
-    if (costGuardHit) break
+    if (alreadyQueued.has(lead.id)) continue
 
-    console.log(`\n[finder] Category: ${category.name}`)
+    // Derive a suggested Instagram handle from the business name
+    const suggestedHandle = lead.business_name
+      .toLowerCase()
+      .replace(/\s+/g, '')
+      .replace(/[^a-z0-9_.]/g, '')
+      .slice(0, 30) || 'instagram'
 
-    dmCitySuburbLoop:
-    for (const [city, suburbs] of Object.entries(cityAreas)) {
-      const state = CITY_STATE[city] ?? 'Unknown'
+    const dmMessage =
+      `Hi! We're Aussie Venture, a food & lifestyle media brand based in Sydney. ` +
+      `We'd love to feature ${lead.business_name} in our content. ` +
+      `Would you be open to a collaboration? DM us back if you're keen!`
 
-      for (const suburb of suburbs) {
-        if (dmCount >= DM_TARGET) break dmCitySuburbLoop
-        if (emailCount + dmCount >= TOTAL_TARGET) break dmCitySuburbLoop
-        if (costGuardHit) break dmCitySuburbLoop
+    const { error } = await supabase.from('dm_queue').insert({
+      lead_id:      lead.id,
+      platform:     'instagram',
+      handle:       suggestedHandle,
+      message_text: dmMessage,
+      status:       'pending',
+    })
 
-        const query = category.query.replace('{city}', suburb)
-
-        // FIX 4: skip if already seen or exhausted
-        if (seenQueries.has(query)) {
-          console.log(`[finder] Skip duplicate query: "${query}"`)
-          continue
-        }
-        if (exhaustedSet.has(query)) {
-          console.log(`[finder] Skip exhausted query: "${query}"`)
-          continue
-        }
-        seenQueries.add(query)
-
-        let skip = 0
-        let exhaustedThisQuery = false
-        while (true) {
-          if (dmCount >= DM_TARGET) break
-          if (emailCount + dmCount >= TOTAL_TARGET) break
-          if (costGuardHit) break
-
-          // FIX 3: cost guard — check before every Outscraper call
-          const currentRunEstimate = callCount * 10 * 0.003
-          if (spentToday + currentRunEstimate >= DAILY_OUTSCRAPER_LIMIT) {
-            console.log(`[finder] COST GUARD: Daily limit $${DAILY_OUTSCRAPER_LIMIT} reached — stopping`)
-            await supabase.from('activity_log').insert({
-              event_type:  'cost_guard_triggered',
-              description: `Daily Outscraper limit $${DAILY_OUTSCRAPER_LIMIT} reached`,
-              metadata:    { spent_today: spentToday, current_run_estimate: currentRunEstimate, limit: DAILY_OUTSCRAPER_LIMIT },
-            })
-            costGuardHit = true
-            break
-          }
-
-          let results
-          try {
-            callCount++
-            results = await searchBusinesses(query, 10, skip)
-          } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error)
-            if (msg.includes('402')) throw error  // balance exhausted — abort pipeline
-            console.error(`[finder] Search error for "${query}":`, error)
-            break
-          }
-          totalResultsFetched += results.length
-
-          let newLeadsThisBatch = 0
-
-          for (const result of results) {
-            if (dmCount >= DM_TARGET) break
-            if (emailCount + dmCount >= TOTAL_TARGET) break
-
-            const name       = result.name
-            const rawWebsite = result.website || null
-
-            if (phase1Names.has(name)) continue
-
-            if (await isAlreadyInDB(supabase, name, city, result.phone)) {
-              console.log(`❌ Skip: ${name} — already in DB`)
-              continue
-            }
-
-            let instagramHandle: string | null = null
-
-            const resultAny = result as unknown as Record<string, unknown>
-            for (const key of ['instagram', 'instagram_handle']) {
-              const val = resultAny[key]
-              if (typeof val === 'string' && val.trim()) {
-                const extracted = extractInstagramHandle(val)
-                if (extracted && isValidInstagramHandle(extracted)) {
-                  instagramHandle = extracted
-                  break
-                }
-                const bare = val.trim()
-                const candidate = bare.startsWith('@') ? bare : `@${bare}`
-                if (isValidInstagramHandle(candidate)) {
-                  instagramHandle = candidate
-                  break
-                }
-              }
-            }
-
-            if (!instagramHandle) {
-              const socialVal = resultAny['social_media']
-              if (typeof socialVal === 'string' && INSTAGRAM_REGEX.test(socialVal)) {
-                const extracted = extractInstagramHandle(socialVal)
-                if (extracted && isValidInstagramHandle(extracted)) instagramHandle = extracted
-              }
-            }
-
-            if (!instagramHandle && rawWebsite && INSTAGRAM_REGEX.test(rawWebsite)) {
-              const extracted = extractInstagramHandle(rawWebsite)
-              if (extracted && isValidInstagramHandle(extracted)) instagramHandle = extracted
-            }
-
-            if (!instagramHandle) {
-              console.log(`❌ Skip: ${name} — no valid Instagram handle found`)
-              continue
-            }
-
-            if (await isInstagramHandleInDB(supabase, instagramHandle)) {
-              console.log(`❌ Skip: ${name} — Instagram handle ${instagramHandle} already in DB`)
-              continue
-            }
-
-            const { error } = await supabase.from('leads').insert({
-              business_name:        name,
-              category_name:        category.name,
-              city:                 city,
-              state:                state,
-              phone:                result.phone  || null,
-              email:                null,
-              website:              rawWebsite,
-              address:              result.address || null,
-              instagram_handle:     instagramHandle,
-              google_rating:        result.rating  || null,
-              google_reviews_count: result.reviews || null,
-              status:               'new',
-              outreach_channel:     'instagram',
-            })
-
-            if (error) {
-              console.error(`[finder] Insert failed for "${name}": ${error.message}`)
-              continue
-            }
-
-            dmCount++
-            newLeadsThisBatch++
-            console.log(`📱 DM: ${name} → ${instagramHandle}`)
-
-            await supabase.from('activity_log').insert({
-              event_type:  'lead_found',
-              description: `DM lead: ${name} — ${instagramHandle}`,
-              metadata:    { category: category.name, city, instagram: instagramHandle, type: 'dm' },
-            })
-          }
-
-          if (dmCount >= DM_TARGET) break
-
-          // FIX 2: mark exhausted when results page is less than full
-          if (results.length < 10) {
-            exhaustedThisQuery = true
-            break
-          }
-
-          // FIX 1: low yield — 10 results but <=1 usable DM lead
-          if (newLeadsThisBatch <= 1) {
-            console.log(`[finder] Low yield query exhausted: "${query}" — only ${newLeadsThisBatch} leads from 10 results`)
-            exhaustedThisQuery = true
-            break
-          }
-
-          skip += 10
-        }
-
-        // FIX 2: persist exhausted query to DB
-        if (exhaustedThisQuery) {
-          await supabase.from('exhausted_queries').upsert({
-            query,
-            city,
-            category: category.name,
-            exhausted_at: new Date().toISOString(),
-            expires_at:   new Date(Date.now() + 3 * 86_400_000).toISOString(),
-          })
-          exhaustedSet.add(query)
-        }
-
-        if (costGuardHit) break dmCitySuburbLoop
-      }
-      if (costGuardHit) break
+    if (error) {
+      console.error(`[finder] DM queue insert failed for "${lead.business_name}": ${error.message}`)
+      continue
     }
-    if (costGuardHit) break
+
+    dmCount++
+    console.log(`📱 DM queued: ${lead.business_name} (search @${suggestedHandle} on Instagram)`)
+
+    await supabase.from('activity_log').insert({
+      event_type:  'lead_found',
+      description: `DM queued: ${lead.business_name} — search @${suggestedHandle} on Instagram`,
+      metadata:    { category: lead.category_name, city: lead.city, suggested_handle: suggestedHandle, type: 'dm' },
+    })
   }
+
+  console.log(`[finder] Phase 2: queued ${dmCount} businesses for manual Instagram outreach (no Outscraper calls)`)
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // SUMMARY
@@ -727,14 +548,14 @@ export async function runFinderAgent(): Promise<number> {
   const efficiency    = `${leadsKept}/${totalResultsFetched} results used`
 
   console.log(`\nPhase 1: ${emailCount}/${EMAIL_TARGET} email leads`)
-  console.log(`Phase 2: ${dmCount}/${DM_TARGET} DM leads`)
+  console.log(`Phase 2: ${dmCount}/${DM_TARGET} DM leads queued (manual Instagram)`)
   console.log(`Outscraper calls: ${callCount} | Results fetched: ${totalResultsFetched}`)
   console.log(`Estimated cost: $${estimatedCost} | Efficiency: ${efficiency}`)
   if (costGuardHit) console.log(`⚠️  Run stopped early by cost guard ($${DAILY_OUTSCRAPER_LIMIT} daily limit)`)
 
   await supabase.from('activity_log').insert({
     event_type:  'finder_complete',
-    description: `Finder complete: ${emailCount} email leads, ${dmCount} DM leads (${callCount} searches, ${totalResultsFetched} results fetched)`,
+    description: `Finder complete: ${emailCount} email leads, ${dmCount} DM leads queued (${callCount} Outscraper calls)`,
     metadata: {
       email_leads:        emailCount,
       dm_leads:           dmCount,
