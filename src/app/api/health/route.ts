@@ -107,7 +107,32 @@ export async function GET() {
     // skip
   }
 
-  // 6. Recent agent errors (last 25 hours)
+  // 6. Cost guard triggered in last 25 hours
+  try {
+    const since25h = new Date(Date.now() - 25 * 3_600_000).toISOString()
+    const { data: costGuard } = await supabase
+      .from('activity_log')
+      .select('created_at, metadata')
+      .eq('event_type', 'cost_guard_triggered')
+      .gte('created_at', since25h)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (costGuard) {
+      const meta = costGuard.metadata as { limit?: number } | null
+      issues.push({
+        type: 'cost_guard',
+        message: `Daily Outscraper limit $${meta?.limit ?? '?'} reached — pipeline stopped to prevent overspending. Adjust limit in Settings or wait until tomorrow.`,
+        severity: 'critical',
+        time: relativeTime(costGuard.created_at),
+      })
+    }
+  } catch {
+    // skip
+  }
+
+  // 7. Recent agent errors (last 25 hours)
   try {
     const since25h = new Date(Date.now() - 25 * 3_600_000).toISOString()
     const { data: agentErrors } = await supabase

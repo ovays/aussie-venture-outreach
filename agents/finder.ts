@@ -130,7 +130,6 @@ function isIrrelevant(name: string): boolean {
 
 // ── Instagram handle validation ──────────────────────────────────────────────
 
-// Invalid placeholder values returned by some Outscraper fields
 const INVALID_HANDLE_VALUES = new Set([
   'not found', 'not mentioned', 'n/a', 'none', 'null', '', 'unknown',
 ])
@@ -139,7 +138,6 @@ function isValidInstagramHandle(handle: string): boolean {
   const cleaned = handle.replace(/^@/, '').toLowerCase()
   if (!cleaned) return false
   if (INVALID_HANDLE_VALUES.has(cleaned)) return false
-  // Must be a real handle: letters/numbers/underscores/dots only, 3–30 chars
   if (!/^[a-zA-Z0-9_.]{3,30}$/.test(cleaned)) return false
   return true
 }
@@ -175,51 +173,65 @@ async function isInstagramHandleInDB(
   return !!data?.length
 }
 
+// ── Daily spend helper ───────────────────────────────────────────────────────
+
+async function getDailyOutscraperSpend(supabase: ReturnType<typeof createServiceClient>): Promise<number> {
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const { data } = await supabase
+    .from('activity_log')
+    .select('metadata')
+    .eq('event_type', 'finder_complete')
+    .gte('created_at', `${todayStr}T00:00:00.000Z`)
+
+  return (data ?? []).reduce((sum, row) => {
+    const meta = row.metadata as { estimated_cost?: string | number } | null
+    const cost = typeof meta?.estimated_cost === 'string'
+      ? parseFloat(meta.estimated_cost)
+      : typeof meta?.estimated_cost === 'number'
+        ? meta.estimated_cost
+        : 0
+    return sum + (isNaN(cost) ? 0 : cost)
+  }, 0)
+}
+
 // ── DM Queue cleanup ─────────────────────────────────────────────────────────
 
 async function cleanupDmQueue(supabase: ReturnType<typeof createServiceClient>): Promise<void> {
   console.log('[finder] Cleaning up invalid DM queue entries...')
 
-  // 1. Delete Facebook platform entries
   const { error: fbErr } = await supabase.from('dm_queue').delete().eq('platform', 'facebook')
   if (fbErr) console.error('[finder] Cleanup Facebook delete error:', fbErr.message)
 
-  // 2. Delete null handles
   await supabase.from('dm_queue').delete().is('handle', null)
 
-  // 3. Delete known invalid handle values
   const invalidValues = ['Not found', 'Not mentioned', '', 'N/A', 'None', 'null', 'Unknown']
   for (const val of invalidValues) {
     await supabase.from('dm_queue').delete().eq('handle', val)
   }
 
-  // 4. Remove duplicate lead entries — keep oldest per lead_id
   const { data: allDms } = await supabase
     .from('dm_queue')
     .select('id, lead_id, handle, created_at')
     .order('created_at', { ascending: true })
 
   if (allDms?.length) {
-    const seenLeadIds = new Map<string, string>()  // lead_id → first dm id
-    const seenHandles = new Map<string, string>()  // handle → first dm id
+    const seenLeadIds = new Map<string, string>()
+    const seenHandles = new Map<string, string>()
     const toDelete: string[] = []
 
     for (const dm of allDms) {
       let isDup = false
-
       if (seenLeadIds.has(dm.lead_id)) {
         isDup = true
       } else {
         seenLeadIds.set(dm.lead_id, dm.id)
       }
-
       const normHandle = dm.handle?.toLowerCase?.() ?? ''
       if (normHandle && seenHandles.has(normHandle)) {
         isDup = true
       } else if (normHandle) {
         seenHandles.set(normHandle, dm.id)
       }
-
       if (isDup) toDelete.push(dm.id)
     }
 
@@ -249,19 +261,22 @@ export async function runFinderAgent(): Promise<number> {
     return 0
   }
 
-  const [emailLimitRow, dmLimitRow, totalLimitRow] = await Promise.all([
+  const [emailLimitRow, dmLimitRow, totalLimitRow, dailyOutscraperLimitRow] = await Promise.all([
     supabase.from('settings').select('value').eq('key', 'daily_email_limit').single(),
     supabase.from('settings').select('value').eq('key', 'daily_dm_limit').single(),
     supabase.from('settings').select('value').eq('key', 'daily_lead_limit').single(),
+    supabase.from('settings').select('value').eq('key', 'daily_outscraper_limit').single(),
   ])
 
-  const EMAIL_TARGET = parseInt(emailLimitRow.data?.value ?? '30', 10)
-  const DM_TARGET    = parseInt(dmLimitRow.data?.value   ?? '10', 10)
-  const TOTAL_TARGET = parseInt(totalLimitRow.data?.value ?? '40', 10)
-  const cappedLimit  = Math.floor(EMAIL_TARGET / 4)
+  const EMAIL_TARGET            = parseInt(emailLimitRow.data?.value ?? '30', 10)
+  const DM_TARGET               = parseInt(dmLimitRow.data?.value   ?? '10', 10)
+  const TOTAL_TARGET            = parseInt(totalLimitRow.data?.value ?? '40', 10)
+  const DAILY_OUTSCRAPER_LIMIT  = parseFloat(dailyOutscraperLimitRow.data?.value ?? '1.00')
+  const cappedLimit             = Math.floor(EMAIL_TARGET / 4)
 
   console.log(`[finder] Targets: ${EMAIL_TARGET} email, ${DM_TARGET} DM, ${TOTAL_TARGET} total`)
   console.log(`[finder] Per-category cap (first 4): ${cappedLimit}`)
+  console.log(`[finder] Daily cost limit: $${DAILY_OUTSCRAPER_LIMIT}`)
 
   // Load active suburbs from DB, grouped by city
   const { data: suburbData } = await supabase
@@ -281,9 +296,26 @@ export async function runFinderAgent(): Promise<number> {
   const activeCities = Object.keys(cityAreas)
   console.log(`[finder] Cities: ${activeCities.join(', ')} (${Object.values(cityAreas).flat().length} active suburbs)`)
 
-  let emailCount         = 0
-  let dmCount            = 0
-  let callCount          = 0
+  // FIX 2: clean up expired exhausted queries, then load non-expired ones
+  await supabase.from('exhausted_queries').delete().lt('expires_at', new Date().toISOString())
+  const { data: exhaustedData } = await supabase
+    .from('exhausted_queries')
+    .select('query')
+    .gt('expires_at', new Date().toISOString())
+  const exhaustedSet = new Set((exhaustedData ?? []).map((r) => r.query))
+  console.log(`[finder] Exhausted queries cached: ${exhaustedSet.size} (skipped for 3 days)`)
+
+  // FIX 3: today's prior spend
+  const spentToday = await getDailyOutscraperSpend(supabase)
+  console.log(`[finder] Prior spend today: $${spentToday.toFixed(4)}`)
+
+  // FIX 4: seen queries this run (dedup within run)
+  const seenQueries = new Set<string>()
+  let costGuardHit = false
+
+  let emailCount          = 0
+  let dmCount             = 0
+  let callCount           = 0
   let totalResultsFetched = 0
   const phase1Names = new Set<string>()
 
@@ -295,6 +327,7 @@ export async function runFinderAgent(): Promise<number> {
   for (const category of EMAIL_CATEGORIES) {
     if (emailCount >= EMAIL_TARGET) break
     if (emailCount + dmCount >= TOTAL_TARGET) break
+    if (costGuardHit) break
 
     const categoryLimit = category.capped ? cappedLimit : EMAIL_TARGET - emailCount
     let categoryEmailCount = 0
@@ -308,13 +341,41 @@ export async function runFinderAgent(): Promise<number> {
         if (emailCount >= EMAIL_TARGET) break citySuburbLoop
         if (emailCount + dmCount >= TOTAL_TARGET) break citySuburbLoop
         if (categoryEmailCount >= categoryLimit) break citySuburbLoop
+        if (costGuardHit) break citySuburbLoop
 
         const query = category.query.replace('{city}', suburb)
+
+        // FIX 4: skip if already seen or exhausted
+        if (seenQueries.has(query)) {
+          console.log(`[finder] Skip duplicate query: "${query}"`)
+          continue
+        }
+        if (exhaustedSet.has(query)) {
+          console.log(`[finder] Skip exhausted query: "${query}"`)
+          continue
+        }
+        seenQueries.add(query)
+
         let skip = 0
+        let exhaustedThisQuery = false
         while (true) {
           if (emailCount >= EMAIL_TARGET) break
           if (emailCount + dmCount >= TOTAL_TARGET) break
           if (categoryEmailCount >= categoryLimit) break
+          if (costGuardHit) break
+
+          // FIX 3: cost guard — check before every Outscraper call
+          const currentRunEstimate = callCount * 10 * 0.003
+          if (spentToday + currentRunEstimate >= DAILY_OUTSCRAPER_LIMIT) {
+            console.log(`[finder] COST GUARD: Daily limit $${DAILY_OUTSCRAPER_LIMIT} reached — stopping`)
+            await supabase.from('activity_log').insert({
+              event_type:  'cost_guard_triggered',
+              description: `Daily Outscraper limit $${DAILY_OUTSCRAPER_LIMIT} reached`,
+              metadata:    { spent_today: spentToday, current_run_estimate: currentRunEstimate, limit: DAILY_OUTSCRAPER_LIMIT },
+            })
+            costGuardHit = true
+            break
+          }
 
           let results
           try {
@@ -327,6 +388,8 @@ export async function runFinderAgent(): Promise<number> {
             break
           }
           totalResultsFetched += results.length
+
+          let newLeadsThisBatch = 0
 
           for (const result of results) {
             if (emailCount >= EMAIL_TARGET) break
@@ -346,14 +409,12 @@ export async function runFinderAgent(): Promise<number> {
               continue
             }
 
-            // If website is an Instagram URL → note for Phase 2 and skip
             if (rawWebsite && INSTAGRAM_REGEX.test(rawWebsite)) {
               const handle = extractInstagramHandle(rawWebsite)
               if (handle) console.log(`📌 Noted for Phase 2: ${name} → ${handle}`)
               continue
             }
 
-            // Check Outscraper email field (free — no fetch needed)
             let foundEmail: string | null = null
             let emailSource = ''
             if (result.email && isValidEmail(result.email)) {
@@ -361,7 +422,6 @@ export async function runFinderAgent(): Promise<number> {
               emailSource = 'outscraper'
             }
 
-            // Fetch website pages if no email yet — mailto: checked first inside findEmailForBusiness
             if (!foundEmail && rawWebsite) {
               const found = await findEmailForBusiness(rawWebsite)
               if (found) {
@@ -393,6 +453,7 @@ export async function runFinderAgent(): Promise<number> {
 
               emailCount++
               categoryEmailCount++
+              newLeadsThisBatch++
               phase1Names.add(name)
               console.log(`✅ Email: ${name} → ${foundEmail} (source: ${emailSource})`)
 
@@ -406,12 +467,41 @@ export async function runFinderAgent(): Promise<number> {
             }
           }
 
-          if (categoryEmailCount >= categoryLimit) break  // quota filled — no need for more pages
-          if (results.length < 10) break                  // fewer results than requested — exhausted
+          if (categoryEmailCount >= categoryLimit) break  // quota filled
+
+          // FIX 2: mark exhausted when results page is less than full
+          if (results.length < 10) {
+            exhaustedThisQuery = true
+            break
+          }
+
+          // FIX 1: low yield — 10 results but <=1 usable lead, not worth continuing
+          if (newLeadsThisBatch <= 1) {
+            console.log(`[finder] Low yield query exhausted: "${query}" — only ${newLeadsThisBatch} leads from 10 results`)
+            exhaustedThisQuery = true
+            break
+          }
+
           skip += 10
         }
+
+        // FIX 2: persist exhausted query to DB so it's skipped for 3 days
+        if (exhaustedThisQuery) {
+          await supabase.from('exhausted_queries').upsert({
+            query,
+            city,
+            category: category.name,
+            exhausted_at: new Date().toISOString(),
+            expires_at:   new Date(Date.now() + 3 * 86_400_000).toISOString(),
+          })
+          exhaustedSet.add(query)
+        }
+
+        if (costGuardHit) break citySuburbLoop
       }
+      if (costGuardHit) break
     }
+    if (costGuardHit) break
   }
 
   console.log(`\n[finder] Phase 1 complete: ${emailCount}/${EMAIL_TARGET} email leads`)
@@ -421,12 +511,12 @@ export async function runFinderAgent(): Promise<number> {
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   console.log('\n[finder] ═══ PHASE 2: Instagram Leads ═══')
 
-  // Clean up stale/invalid DM queue entries before adding new ones
   await cleanupDmQueue(supabase)
 
   for (const category of DM_CATEGORIES) {
     if (dmCount >= DM_TARGET) break
     if (emailCount + dmCount >= TOTAL_TARGET) break
+    if (costGuardHit) break
 
     console.log(`\n[finder] Category: ${category.name}`)
 
@@ -437,12 +527,40 @@ export async function runFinderAgent(): Promise<number> {
       for (const suburb of suburbs) {
         if (dmCount >= DM_TARGET) break dmCitySuburbLoop
         if (emailCount + dmCount >= TOTAL_TARGET) break dmCitySuburbLoop
+        if (costGuardHit) break dmCitySuburbLoop
 
         const query = category.query.replace('{city}', suburb)
+
+        // FIX 4: skip if already seen or exhausted
+        if (seenQueries.has(query)) {
+          console.log(`[finder] Skip duplicate query: "${query}"`)
+          continue
+        }
+        if (exhaustedSet.has(query)) {
+          console.log(`[finder] Skip exhausted query: "${query}"`)
+          continue
+        }
+        seenQueries.add(query)
+
         let skip = 0
+        let exhaustedThisQuery = false
         while (true) {
           if (dmCount >= DM_TARGET) break
           if (emailCount + dmCount >= TOTAL_TARGET) break
+          if (costGuardHit) break
+
+          // FIX 3: cost guard — check before every Outscraper call
+          const currentRunEstimate = callCount * 10 * 0.003
+          if (spentToday + currentRunEstimate >= DAILY_OUTSCRAPER_LIMIT) {
+            console.log(`[finder] COST GUARD: Daily limit $${DAILY_OUTSCRAPER_LIMIT} reached — stopping`)
+            await supabase.from('activity_log').insert({
+              event_type:  'cost_guard_triggered',
+              description: `Daily Outscraper limit $${DAILY_OUTSCRAPER_LIMIT} reached`,
+              metadata:    { spent_today: spentToday, current_run_estimate: currentRunEstimate, limit: DAILY_OUTSCRAPER_LIMIT },
+            })
+            costGuardHit = true
+            break
+          }
 
           let results
           try {
@@ -455,6 +573,8 @@ export async function runFinderAgent(): Promise<number> {
             break
           }
           totalResultsFetched += results.length
+
+          let newLeadsThisBatch = 0
 
           for (const result of results) {
             if (dmCount >= DM_TARGET) break
@@ -472,7 +592,6 @@ export async function runFinderAgent(): Promise<number> {
 
             let instagramHandle: string | null = null
 
-            // Check Outscraper Instagram-specific fields only
             const resultAny = result as unknown as Record<string, unknown>
             for (const key of ['instagram', 'instagram_handle']) {
               const val = resultAny[key]
@@ -482,7 +601,6 @@ export async function runFinderAgent(): Promise<number> {
                   instagramHandle = extracted
                   break
                 }
-                // Accept bare @handle or plain username if it looks like a real handle
                 const bare = val.trim()
                 const candidate = bare.startsWith('@') ? bare : `@${bare}`
                 if (isValidInstagramHandle(candidate)) {
@@ -492,23 +610,17 @@ export async function runFinderAgent(): Promise<number> {
               }
             }
 
-            // Check social_media field only if it's an Instagram URL
             if (!instagramHandle) {
               const socialVal = resultAny['social_media']
               if (typeof socialVal === 'string' && INSTAGRAM_REGEX.test(socialVal)) {
                 const extracted = extractInstagramHandle(socialVal)
-                if (extracted && isValidInstagramHandle(extracted)) {
-                  instagramHandle = extracted
-                }
+                if (extracted && isValidInstagramHandle(extracted)) instagramHandle = extracted
               }
             }
 
-            // Check if website field is an Instagram URL
             if (!instagramHandle && rawWebsite && INSTAGRAM_REGEX.test(rawWebsite)) {
               const extracted = extractInstagramHandle(rawWebsite)
-              if (extracted && isValidInstagramHandle(extracted)) {
-                instagramHandle = extracted
-              }
+              if (extracted && isValidInstagramHandle(extracted)) instagramHandle = extracted
             }
 
             if (!instagramHandle) {
@@ -516,7 +628,6 @@ export async function runFinderAgent(): Promise<number> {
               continue
             }
 
-            // Dedup: skip if this Instagram handle already exists
             if (await isInstagramHandleInDB(supabase, instagramHandle)) {
               console.log(`❌ Skip: ${name} — Instagram handle ${instagramHandle} already in DB`)
               continue
@@ -544,6 +655,7 @@ export async function runFinderAgent(): Promise<number> {
             }
 
             dmCount++
+            newLeadsThisBatch++
             console.log(`📱 DM: ${name} → ${instagramHandle}`)
 
             await supabase.from('activity_log').insert({
@@ -553,12 +665,41 @@ export async function runFinderAgent(): Promise<number> {
             })
           }
 
-          if (dmCount >= DM_TARGET) break      // quota filled — stop fetching
-          if (results.length < 10) break       // fewer results than requested — exhausted
+          if (dmCount >= DM_TARGET) break
+
+          // FIX 2: mark exhausted when results page is less than full
+          if (results.length < 10) {
+            exhaustedThisQuery = true
+            break
+          }
+
+          // FIX 1: low yield — 10 results but <=1 usable DM lead
+          if (newLeadsThisBatch <= 1) {
+            console.log(`[finder] Low yield query exhausted: "${query}" — only ${newLeadsThisBatch} leads from 10 results`)
+            exhaustedThisQuery = true
+            break
+          }
+
           skip += 10
         }
+
+        // FIX 2: persist exhausted query to DB
+        if (exhaustedThisQuery) {
+          await supabase.from('exhausted_queries').upsert({
+            query,
+            city,
+            category: category.name,
+            exhausted_at: new Date().toISOString(),
+            expires_at:   new Date(Date.now() + 3 * 86_400_000).toISOString(),
+          })
+          exhaustedSet.add(query)
+        }
+
+        if (costGuardHit) break dmCitySuburbLoop
       }
+      if (costGuardHit) break
     }
+    if (costGuardHit) break
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -572,8 +713,7 @@ export async function runFinderAgent(): Promise<number> {
   console.log(`Phase 2: ${dmCount}/${DM_TARGET} DM leads`)
   console.log(`Outscraper calls: ${callCount} | Results fetched: ${totalResultsFetched}`)
   console.log(`Estimated cost: $${estimatedCost} | Efficiency: ${efficiency}`)
-
-  const total = leadsKept
+  if (costGuardHit) console.log(`⚠️  Run stopped early by cost guard ($${DAILY_OUTSCRAPER_LIMIT} daily limit)`)
 
   await supabase.from('activity_log').insert({
     event_type:  'finder_complete',
@@ -589,10 +729,11 @@ export async function runFinderAgent(): Promise<number> {
       leads_kept:         leadsKept,
       estimated_cost:     estimatedCost,
       efficiency,
+      cost_guard_hit:     costGuardHit,
     },
   })
 
-  return total
+  return leadsKept
 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

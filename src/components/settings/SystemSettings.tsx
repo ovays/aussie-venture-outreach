@@ -293,6 +293,31 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
             </div>
           </div>
 
+          {/* Daily Outscraper Limit */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
+            <div>
+              <p className="text-sm text-white">Daily Outscraper Limit ($)</p>
+              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Maximum Outscraper spend per day — pipeline stops when reached</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm" style={{ color: '#64748b' }}>$</span>
+                <input
+                  type="number"
+                  value={settings['daily_outscraper_limit'] ?? '1.00'}
+                  onChange={(e) => setSettings((p) => ({ ...p, daily_outscraper_limit: e.target.value }))}
+                  onBlur={(e) => updateSetting('daily_outscraper_limit', e.target.value)}
+                  min={0.10}
+                  max={50}
+                  step={0.10}
+                  className="w-full sm:w-24 px-3 py-2 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
+                  style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+                />
+              </div>
+              <SaveIndicator k="daily_outscraper_limit" />
+            </div>
+          </div>
+
           {/* Digest email */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
             <div>

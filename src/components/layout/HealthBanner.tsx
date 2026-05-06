@@ -58,6 +58,7 @@ export function HealthBanner() {
         const critical = isCritical(issue)
         const isAgentError = issue.type.startsWith('agent_error')
         const isSystemInactive = issue.type === 'system_inactive'
+        const isCostGuard = issue.type === 'cost_guard'
         return (
           <div
             key={issue.type}
@@ -76,7 +77,7 @@ export function HealthBanner() {
             )}
             <span className="flex-1 text-sm" style={{ color: critical ? '#fca5a5' : '#fdba74' }}>
               <span className="font-semibold">
-                {critical ? 'Pipeline Error' : isSystemInactive ? 'System Paused' : 'Warning'}
+                {critical ? (isCostGuard ? 'Cost Guard' : 'Pipeline Error') : isSystemInactive ? 'System Paused' : 'Warning'}
                 {issue.time ? ` · ${issue.time}` : ''}:{' '}
               </span>
               {isSystemInactive ? (
@@ -90,6 +91,17 @@ export function HealthBanner() {
                     Go to Settings
                   </Link>
                   {' '}to activate.
+                </>
+              ) : isCostGuard ? (
+                <>
+                  {issue.message}{' '}
+                  <Link
+                    href="/dashboard/settings"
+                    className="underline hover:no-underline font-semibold"
+                    style={{ color: '#f87171' }}
+                  >
+                    Adjust limit in Settings
+                  </Link>
                 </>
               ) : (
                 issue.message
