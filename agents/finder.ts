@@ -11,13 +11,16 @@ const INSTAGRAM_SKIP = new Set(['p', 'reel', 'reels', 'stories', 'explore', 'acc
 // Remaining categories fill whatever quota is left
 // {city} is replaced at runtime with the active suburb being searched
 const EMAIL_CATEGORIES = [
-  { name: 'Travel Agents',          query: 'travel agent {city}',     capped: true  },
-  { name: 'Tour Operators',         query: 'tour operator {city}',    capped: true  },
-  { name: 'Boutique Hotels',        query: 'boutique hotel {city}',   capped: true  },
-  { name: 'Beauty / Lash Studios',  query: 'beauty studio {city}',    capped: true  },
-  { name: 'Hair Salons',            query: 'hair salon {city}',       capped: false },
-  { name: 'Spas / Massage Studios', query: 'day spa {city}',          capped: false },
-  { name: 'Halal Restaurants',      query: 'halal restaurant {city}', capped: false },
+  // High yield — search first, larger batch
+  { name: 'Travel Agents',          query: 'travel agent {city}',     capped: true,  batchSize: 5 },
+  { name: 'Tour Operators',         query: 'tour operator {city}',    capped: true,  batchSize: 5 },
+  // Medium yield
+  { name: 'Boutique Hotels',        query: 'boutique hotel {city}',   capped: true,  batchSize: 3 },
+  { name: 'Beauty / Lash Studios',  query: 'beauty studio {city}',    capped: true,  batchSize: 3 },
+  // Low yield — only reached if quota not filled
+  { name: 'Hair Salons',            query: 'hair salon {city}',       capped: false, batchSize: 3 },
+  { name: 'Spas / Massage Studios', query: 'day spa {city}',          capped: false, batchSize: 3 },
+  { name: 'Halal Restaurants',      query: 'halal restaurant {city}', capped: false, batchSize: 3 },
 ]
 
 // DM categories: leads queued for manual Instagram outreach (no Outscraper)
@@ -375,7 +378,7 @@ export async function runFinderAgent(): Promise<number> {
           if (costGuardHit) break
 
           // Cost guard — check before every Outscraper call
-          const currentRunEstimate = callCount * 10 * 0.003
+          const currentRunEstimate = totalResultsFetched * 0.003
           if (spentToday + currentRunEstimate >= DAILY_OUTSCRAPER_LIMIT) {
             logger.warn('finder', 'Cost guard triggered', { limit: DAILY_OUTSCRAPER_LIMIT, spentToday, estimate: currentRunEstimate })
             await supabase.from('activity_log').insert({
@@ -390,7 +393,7 @@ export async function runFinderAgent(): Promise<number> {
           let results
           try {
             callCount++
-            results = await searchBusinesses(query, 10, skip)
+            results = await searchBusinesses(query, category.batchSize, skip)
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error)
             if (msg.includes('402')) throw error  // balance exhausted — abort pipeline
@@ -488,7 +491,7 @@ export async function runFinderAgent(): Promise<number> {
 
           if (categoryEmailCount >= categoryLimit) break
 
-          if (results.length < 10) {
+          if (results.length < category.batchSize) {
             exhaustedThisQuery = true
             break
           }
@@ -499,7 +502,7 @@ export async function runFinderAgent(): Promise<number> {
             break
           }
 
-          skip += 10
+          skip += category.batchSize
         }
 
         if (exhaustedThisQuery) {
@@ -595,6 +598,12 @@ export async function runFinderAgent(): Promise<number> {
   const leadsKept     = emailCount + dmCount
   const estimatedCost = (totalResultsFetched * 0.003).toFixed(4)
   const efficiency    = `${leadsKept}/${totalResultsFetched} results used`
+  const efficiencyPct = totalResultsFetched > 0 ? ((leadsKept / totalResultsFetched) * 100).toFixed(1) : '0.0'
+
+  logger.info('finder', `Outscraper results fetched: ${totalResultsFetched}`)
+  logger.info('finder', `Leads kept: ${leadsKept}`)
+  logger.info('finder', `Efficiency: ${leadsKept}/${totalResultsFetched} (${efficiencyPct}%)`)
+  logger.info('finder', `Estimated Outscraper cost: $${estimatedCost}`)
 
   logger.info('finder', 'Run complete', {
     emailLeads: emailCount,
