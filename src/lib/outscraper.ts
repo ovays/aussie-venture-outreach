@@ -1,3 +1,5 @@
+import { withRetry } from './retry'
+
 export interface OutscraperResult {
   name: string
   address: string
@@ -63,7 +65,7 @@ async function rateLimitedFetch(url: string, headers: Record<string, string>): P
     outscraperCallWindowStart = Date.now()
   }
   outscraperCallCount++
-  return fetch(url, { headers })
+  return withRetry(() => fetch(url, { headers }), { maxAttempts: 3, baseDelayMs: 2000 })
 }
 
 async function pollResults(resultsUrl: string, headers: Record<string, string>): Promise<OutscraperResult[]> {

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import TopBar from '@/components/layout/TopBar'
 import { KanbanBoard } from '@/components/pipeline/KanbanBoard'
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 
 export const revalidate = 30
 
@@ -17,7 +18,9 @@ export default async function PipelinePage() {
   return (
     <div className="flex flex-col h-full">
       <TopBar title="Pipeline" />
-      <KanbanBoard leads={leads ?? []} />
+      <ErrorBoundary label="KanbanBoard">
+        <KanbanBoard leads={leads ?? []} />
+      </ErrorBoundary>
     </div>
   )
 }

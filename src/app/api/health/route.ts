@@ -162,6 +162,26 @@ export async function GET() {
     // skip
   }
 
+  // 8. Dead letter queue — unresolved failures in last 24h
+  try {
+    const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
+    const { count: dlqCount } = await supabase
+      .from('dead_letter_queue')
+      .select('*', { count: 'exact', head: true })
+      .eq('resolved', false)
+      .gte('created_at', since24h)
+
+    if ((dlqCount ?? 0) > 0) {
+      issues.push({
+        type: 'dead_letter',
+        message: `${dlqCount} failed operation${dlqCount === 1 ? '' : 's'} in dead-letter queue — review in Settings`,
+        severity: 'warning',
+      })
+    }
+  } catch {
+    // skip — table may not exist yet
+  }
+
   return NextResponse.json({
     healthy: issues.length === 0,
     issues,

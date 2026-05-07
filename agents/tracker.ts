@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
+import { logger } from '@/lib/logger'
 
 export async function handleEmailReply(leadId: string): Promise<void> {
   const supabase = createServiceClient()
@@ -29,6 +30,8 @@ export async function handleEmailReply(leadId: string): Promise<void> {
     description: `Reply received from ${lead.business_name}`,
     metadata: {},
   })
+
+  logger.info('tracker', `Reply received from ${lead.business_name}`, { lead_id: leadId })
 }
 
 export async function handleEmailBounce(leadId: string, emailId: string): Promise<void> {
@@ -42,6 +45,8 @@ export async function handleEmailBounce(leadId: string, emailId: string): Promis
     description: `Email bounced for lead ${leadId}`,
     metadata: { email_id: emailId },
   })
+
+  logger.info('tracker', `Email bounced`, { lead_id: leadId, email_id: emailId })
 }
 
 export async function sendDailyDigest(): Promise<void> {
@@ -213,11 +218,11 @@ ${(agentErrors ?? []).length > 0 ? `<h3 style="color: #f87171;">🚨 Pipeline Er
     },
   })
 
-  console.log('Daily digest sent')
+  logger.info('tracker', 'Daily digest sent', { to: digestEmail })
 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    console.error('[tracker] Fatal error in sendDailyDigest:', error)
+    logger.error('tracker', 'Fatal error in sendDailyDigest', { error: message, stack: error instanceof Error ? error.stack : null })
     await supabase.from('activity_log').insert({
       event_type: 'agent_error',
       description: `Agent failed: ${message}`,

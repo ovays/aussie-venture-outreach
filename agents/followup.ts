@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
 import { textToHtml } from '@/lib/utils'
+import { logger } from '@/lib/logger'
 
 export async function runFollowUpAgent(): Promise<void> {
   const supabase = createServiceClient()
@@ -13,7 +14,7 @@ export async function runFollowUpAgent(): Promise<void> {
     .single()
 
   if (systemSetting?.value !== 'true') {
-    console.log('System is paused. Follow-up agent skipped.')
+    logger.info('followup', 'System paused - skipped')
     return
   }
 
@@ -38,7 +39,7 @@ export async function runFollowUpAgent(): Promise<void> {
     .eq('status', 'contacted')
 
   if (!contactedLeads?.length) {
-    console.log('No contacted leads to follow up')
+    logger.info('followup', 'No contacted leads to follow up')
     return
   }
 
@@ -69,6 +70,7 @@ export async function runFollowUpAgent(): Promise<void> {
         description: `Lead marked as dead: ${lead.business_name} (${daysSince} days no reply)`,
         metadata: { days_since: daysSince },
       })
+      logger.info('followup', `Marked dead: ${lead.business_name}`, { daysSince })
       markedDead++
       continue
     }
@@ -123,6 +125,7 @@ Aussie Venture`
         metadata: { days_since: daysSince },
       })
 
+      logger.info('followup', `Follow-up 2 sent: ${lead.business_name}`, { daysSince })
       followUp2Sent++
       continue
     }
@@ -178,6 +181,7 @@ hello@aussieventure.com`
         metadata: { days_since: daysSince },
       })
 
+      logger.info('followup', `Follow-up 1 sent: ${lead.business_name}`, { daysSince })
       followUp1Sent++
     }
   }
@@ -188,11 +192,11 @@ hello@aussieventure.com`
     metadata: { follow_up_1_sent: followUp1Sent, follow_up_2_sent: followUp2Sent, marked_dead: markedDead },
   })
 
-  console.log(`Follow-up agent done. FU1: ${followUp1Sent}, FU2: ${followUp2Sent}, Dead: ${markedDead}`)
+  logger.info('followup', 'Done', { followUp1Sent, followUp2Sent, markedDead })
 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    console.error('[followup] Fatal error:', error)
+    logger.error('followup', 'Fatal error', { error: message, stack: error instanceof Error ? error.stack : null })
     await supabase.from('activity_log').insert({
       event_type: 'agent_error',
       description: `Agent failed: ${message}`,

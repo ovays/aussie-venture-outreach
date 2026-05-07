@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { searchBusinesses } from '@/lib/outscraper'
+import { logger } from '@/lib/logger'
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
 const MAILTO_REGEX = /href=["']mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi
@@ -199,10 +200,10 @@ async function getDailyOutscraperSpend(supabase: ReturnType<typeof createService
 // ── DM Queue cleanup ─────────────────────────────────────────────────────────
 
 async function cleanupDmQueue(supabase: ReturnType<typeof createServiceClient>): Promise<void> {
-  console.log('[finder] Cleaning up invalid DM queue entries...')
+  logger.info('finder', 'Cleaning up DM queue entries')
 
   const { error: fbErr } = await supabase.from('dm_queue').delete().eq('platform', 'facebook')
-  if (fbErr) console.error('[finder] Cleanup Facebook delete error:', fbErr.message)
+  if (fbErr) logger.error('finder', 'DM cleanup Facebook delete error', { error: fbErr.message })
 
   const invalidValues = ['Not found', 'Not mentioned', 'N/A', 'None', 'null', 'Unknown']
   for (const val of invalidValues) {
@@ -226,10 +227,10 @@ async function cleanupDmQueue(supabase: ReturnType<typeof createServiceClient>):
       }
     }
     if (toDelete.length) {
-      console.log(`[finder] Removing ${toDelete.length} duplicate DM queue entries`)
+      logger.info('finder', `Removing ${toDelete.length} duplicate DM queue entries`)
       await supabase.from('dm_queue').delete().in('id', toDelete)
     } else {
-      console.log('[finder] DM queue is clean — no duplicates found')
+      logger.info('finder', 'DM queue clean — no duplicates')
     }
   }
 }
@@ -247,7 +248,7 @@ export async function runFinderAgent(): Promise<number> {
     .single()
 
   if (systemSetting?.value !== 'true') {
-    console.log('System is paused - Finder agent skipped')
+    logger.info('finder', 'System paused - skipped')
     return 0
   }
 
@@ -264,9 +265,9 @@ export async function runFinderAgent(): Promise<number> {
   const DAILY_OUTSCRAPER_LIMIT = parseFloat(dailyOutscraperLimitRow.data?.value ?? '1.00')
   const cappedLimit            = Math.floor(EMAIL_TARGET / 4)
 
-  console.log(`[finder] Targets: ${EMAIL_TARGET} email, ${DM_TARGET} DM, ${TOTAL_TARGET} total`)
-  console.log(`[finder] Per-category cap (first 4): ${cappedLimit}`)
-  console.log(`[finder] Daily cost limit: $${DAILY_OUTSCRAPER_LIMIT}`)
+  logger.info('finder', 'Targets', { emailTarget: EMAIL_TARGET, dmTarget: DM_TARGET, totalTarget: TOTAL_TARGET })
+  logger.info('finder', `Per-category cap: ${cappedLimit}`)
+  logger.info('finder', `Daily cost limit: $${DAILY_OUTSCRAPER_LIMIT}`)
 
   // FIX 1: read active_cities from settings — source of truth for which cities to search
   const { data: activeCitySetting } = await supabase
@@ -280,7 +281,7 @@ export async function runFinderAgent(): Promise<number> {
     .map((c: string) => c.trim())
     .filter(Boolean) ?? ['Sydney']
 
-  console.log('[finder] Active cities:', activeCities)
+  logger.info('finder', 'Active cities', { cities: activeCities })
 
   // Load active suburbs for active cities only — both filters must be satisfied
   const { data: suburbData } = await supabase
@@ -305,7 +306,7 @@ export async function runFinderAgent(): Promise<number> {
     if (!cityAreas[city]?.length) cityAreas[city] = [city]
   }
 
-  console.log(`[finder] Suburbs loaded: ${Object.values(cityAreas).flat().length} active suburbs`)
+  logger.info('finder', `Suburbs loaded: ${Object.values(cityAreas).flat().length} active suburbs`)
 
   // Load exhausted queries (cleanup expired first)
   await supabase.from('exhausted_queries').delete().lt('expires_at', new Date().toISOString())
@@ -314,11 +315,11 @@ export async function runFinderAgent(): Promise<number> {
     .select('query')
     .gt('expires_at', new Date().toISOString())
   const exhaustedSet = new Set((exhaustedData ?? []).map((r) => r.query))
-  console.log(`[finder] Exhausted queries cached: ${exhaustedSet.size} (skipped for 3 days)`)
+  logger.info('finder', `Exhausted queries cached: ${exhaustedSet.size}`)
 
   // Today's prior Outscraper spend
   const spentToday = await getDailyOutscraperSpend(supabase)
-  console.log(`[finder] Prior spend today: $${spentToday.toFixed(4)}`)
+  logger.info('finder', `Prior spend today: $${spentToday.toFixed(4)}`)
 
   const seenQueries = new Set<string>()
   let costGuardHit = false
@@ -331,7 +332,7 @@ export async function runFinderAgent(): Promise<number> {
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // PHASE 1 — EMAIL LEADS
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  console.log('\n[finder] ═══ PHASE 1: Email Leads ═══')
+  logger.info('finder', 'Phase 1: Email Leads')
 
   for (const category of EMAIL_CATEGORIES) {
     if (emailCount >= EMAIL_TARGET) break
@@ -340,7 +341,7 @@ export async function runFinderAgent(): Promise<number> {
 
     const categoryLimit = category.capped ? cappedLimit : EMAIL_TARGET - emailCount
     let categoryEmailCount = 0
-    console.log(`\n[finder] Category: ${category.name} (limit: ${categoryLimit})`)
+    logger.info('finder', `Category: ${category.name}`, { limit: categoryLimit })
 
     citySuburbLoop:
     for (const [city, suburbs] of Object.entries(cityAreas)) {
@@ -356,11 +357,11 @@ export async function runFinderAgent(): Promise<number> {
 
         // Check and guard BEFORE seenQueries.add — API call only happens after add
         if (seenQueries.has(query)) {
-          console.log(`[finder] Skip duplicate query: "${query}"`)
+          logger.info('finder', `Skip duplicate query: ${query}`)
           continue
         }
         if (exhaustedSet.has(query)) {
-          console.log(`[finder] Skip exhausted query: "${query}"`)
+          logger.info('finder', `Skip exhausted query: ${query}`)
           continue
         }
         seenQueries.add(query)
@@ -376,7 +377,7 @@ export async function runFinderAgent(): Promise<number> {
           // Cost guard — check before every Outscraper call
           const currentRunEstimate = callCount * 10 * 0.003
           if (spentToday + currentRunEstimate >= DAILY_OUTSCRAPER_LIMIT) {
-            console.log(`[finder] COST GUARD: Daily limit $${DAILY_OUTSCRAPER_LIMIT} reached — stopping`)
+            logger.warn('finder', 'Cost guard triggered', { limit: DAILY_OUTSCRAPER_LIMIT, spentToday, estimate: currentRunEstimate })
             await supabase.from('activity_log').insert({
               event_type:  'cost_guard_triggered',
               description: `Daily Outscraper limit $${DAILY_OUTSCRAPER_LIMIT} reached`,
@@ -393,7 +394,12 @@ export async function runFinderAgent(): Promise<number> {
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error)
             if (msg.includes('402')) throw error  // balance exhausted — abort pipeline
-            console.error(`[finder] Search error for "${query}":`, error)
+            logger.error('finder', `Search error: ${query}`, { error: msg })
+            await supabase.from('dead_letter_queue').insert({
+              operation: 'outscraper_search',
+              payload: { query, skip },
+              error: msg,
+            })
             break
           }
           totalResultsFetched += results.length
@@ -409,18 +415,18 @@ export async function runFinderAgent(): Promise<number> {
             const rawWebsite = result.website || null
 
             if (isIrrelevant(name)) {
-              console.log(`❌ Skip: ${name} — irrelevant business type`)
+              logger.info('finder', `Skip irrelevant: ${name}`)
               continue
             }
 
             if (await isAlreadyInDB(supabase, name, city, result.phone)) {
-              console.log(`❌ Skip: ${name} — already in DB`)
+              logger.info('finder', `Skip duplicate: ${name}`)
               continue
             }
 
             // Business whose website IS an Instagram page has no real web presence for email
             if (rawWebsite && INSTAGRAM_REGEX.test(rawWebsite)) {
-              console.log(`❌ Skip: ${name} — website is Instagram (no email possible)`)
+              logger.info('finder', `Skip Instagram website: ${name}`)
               continue
             }
 
@@ -441,7 +447,7 @@ export async function runFinderAgent(): Promise<number> {
 
             if (foundEmail) {
               if (!isValidBusinessEmail(foundEmail, name)) {
-                console.log(`❌ Skip: ${name} — junk email: ${foundEmail}`)
+                logger.info('finder', `Skip junk email: ${name}`, { email: foundEmail })
                 continue
               }
 
@@ -461,14 +467,14 @@ export async function runFinderAgent(): Promise<number> {
               })
 
               if (error) {
-                console.error(`[finder] Insert failed for "${name}": ${error.message}`)
+                logger.error('finder', `Insert failed: ${name}`, { error: error.message })
                 continue
               }
 
               emailCount++
               categoryEmailCount++
               newLeadsThisBatch++
-              console.log(`✅ Email: ${name} → ${foundEmail} (source: ${emailSource})`)
+              logger.info('finder', `Email lead: ${name}`, { email: foundEmail, source: emailSource })
 
               await supabase.from('activity_log').insert({
                 event_type:  'lead_found',
@@ -476,7 +482,7 @@ export async function runFinderAgent(): Promise<number> {
                 metadata:    { category: category.name, city, email: foundEmail, source: emailSource, type: 'email' },
               })
             } else {
-              console.log(`❌ Skip: ${name} — no email found`)
+              logger.info('finder', `No email: ${name}`)
             }
           }
 
@@ -488,7 +494,7 @@ export async function runFinderAgent(): Promise<number> {
           }
 
           if (newLeadsThisBatch <= 1) {
-            console.log(`[finder] Low yield: "${query}" — only ${newLeadsThisBatch} leads from 10 results`)
+            logger.info('finder', `Low yield: ${query}`, { newLeads: newLeadsThisBatch })
             exhaustedThisQuery = true
             break
           }
@@ -514,13 +520,13 @@ export async function runFinderAgent(): Promise<number> {
     if (costGuardHit) break
   }
 
-  console.log(`\n[finder] Phase 1 complete: ${emailCount}/${EMAIL_TARGET} email leads`)
+  logger.info('finder', 'Phase 1 complete', { emailCount, target: EMAIL_TARGET })
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // PHASE 2 — MANUAL INSTAGRAM DM QUEUE
   // No Outscraper calls — queue existing leads for manual Instagram outreach
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  console.log('\n[finder] ═══ PHASE 2: Instagram DM Queue (free) ═══')
+  logger.info('finder', 'Phase 2: Instagram DM Queue (free)')
 
   await cleanupDmQueue(supabase)
 
@@ -567,12 +573,12 @@ export async function runFinderAgent(): Promise<number> {
     })
 
     if (error) {
-      console.error(`[finder] DM queue insert failed for "${lead.business_name}": ${error.message}`)
+      logger.error('finder', `DM queue insert failed: ${lead.business_name}`, { error: error.message })
       continue
     }
 
     dmCount++
-    console.log(`📱 DM queued: ${lead.business_name} (search @${suggestedHandle} on Instagram)`)
+    logger.info('finder', `DM queued: ${lead.business_name}`, { handle: suggestedHandle })
 
     await supabase.from('activity_log').insert({
       event_type:  'lead_found',
@@ -581,7 +587,7 @@ export async function runFinderAgent(): Promise<number> {
     })
   }
 
-  console.log(`[finder] Phase 2: queued ${dmCount} businesses for manual Instagram outreach (no Outscraper calls)`)
+  logger.info('finder', 'Phase 2 complete', { dmCount, target: DM_TARGET })
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // SUMMARY
@@ -590,11 +596,16 @@ export async function runFinderAgent(): Promise<number> {
   const estimatedCost = (totalResultsFetched * 0.003).toFixed(4)
   const efficiency    = `${leadsKept}/${totalResultsFetched} results used`
 
-  console.log(`\nPhase 1: ${emailCount}/${EMAIL_TARGET} email leads`)
-  console.log(`Phase 2: ${dmCount}/${DM_TARGET} DM leads queued (manual Instagram)`)
-  console.log(`Outscraper calls: ${callCount} | Results fetched: ${totalResultsFetched}`)
-  console.log(`Estimated cost: $${estimatedCost} | Efficiency: ${efficiency}`)
-  if (costGuardHit) console.log(`⚠️  Run stopped early by cost guard ($${DAILY_OUTSCRAPER_LIMIT} daily limit)`)
+  logger.info('finder', 'Run complete', {
+    emailLeads: emailCount,
+    dmLeads: dmCount,
+    outscraperCalls: callCount,
+    resultsFetched: totalResultsFetched,
+    estimatedCost,
+    efficiency,
+    costGuardHit,
+  })
+  if (costGuardHit) logger.warn('finder', `Run stopped by cost guard ($${DAILY_OUTSCRAPER_LIMIT} daily limit)`)
 
   await supabase.from('activity_log').insert({
     event_type:  'finder_complete',
@@ -618,7 +629,7 @@ export async function runFinderAgent(): Promise<number> {
 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    console.error('[finder] Fatal error:', error)
+    logger.error('finder', 'Fatal error', { error: message, stack: error instanceof Error ? error.stack : null })
     const isBalanceError = message.includes('402')
     await supabase.from('activity_log').insert({
       event_type: 'agent_error',

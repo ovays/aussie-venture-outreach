@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
+import { checkRateLimit } from '@/lib/rateLimit'
+
+const patchLeadSchema = z.object({
+  id: z.string().uuid(),
+}).catchall(z.unknown())
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
+  const { allowed } = checkRateLimit(`leads:${ip}`, 60)
+  if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+
   const supabase = await createClient()
   const { searchParams } = new URL(request.url)
 
@@ -32,10 +42,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const supabase = await createClient()
-  const body = await request.json() as { id: string; [key: string]: unknown }
+  const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
+  const { allowed } = checkRateLimit(`leads:${ip}`, 60)
+  if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
-  const { id, ...updates } = body
+  const supabase = await createClient()
+  const raw = await request.json()
+
+  const parsed = patchLeadSchema.safeParse(raw)
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid request body', issues: parsed.error.issues }, { status: 400 })
+  }
+
+  const { id, ...updates } = parsed.data
 
   const { data, error } = await supabase
     .from('leads')

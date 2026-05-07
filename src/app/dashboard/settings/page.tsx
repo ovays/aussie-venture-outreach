@@ -33,7 +33,9 @@ export default async function SettingsPage() {
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
 
-  const [{ data: settings }, { data: categories }, { data: usageEvents }, { data: suburbRows }] = await Promise.all([
+  const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
+
+  const [{ data: settings }, { data: categories }, { data: usageEvents }, { data: suburbRows }, { count: dlqCount }] = await Promise.all([
     supabase.from('settings').select('*').order('key'),
     supabase.from('categories').select('*').order('name'),
     supabase
@@ -47,6 +49,11 @@ export default async function SettingsPage() {
       .select('id, city, suburb, active')
       .order('city')
       .order('suburb'),
+    supabase
+      .from('dead_letter_queue')
+      .select('*', { count: 'exact', head: true })
+      .eq('resolved', false)
+      .gte('created_at', since24h),
   ])
 
   // Group suburbs by city
@@ -109,6 +116,13 @@ export default async function SettingsPage() {
     <div>
       <TopBar title="Settings" />
       <div className="p-6 space-y-6 max-w-4xl">
+        {(dlqCount ?? 0) > 0 && (
+          <Card>
+            <div style={{ color: '#fbbf24', fontSize: '14px' }}>
+              ⚠ {dlqCount} failed operation{dlqCount === 1 ? '' : 's'} in dead-letter queue (last 24h). Check pipeline logs for details.
+            </div>
+          </Card>
+        )}
         <Card>
           <SystemSettings initialSettings={settings ?? []} usageData={usageData} />
         </Card>

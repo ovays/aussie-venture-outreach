@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { extractWebsiteData, agenticEmailSearch } from '@/lib/claude'
+import { logger } from '@/lib/logger'
 
 // ── Mailto-first email extraction (same logic as finder.ts) ─────────────────
 
@@ -55,11 +56,11 @@ async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>
     .eq('status', 'bounced')
 
   if (!bouncedEmails?.length) {
-    console.log('[researcher] No bounced emails to fix')
+    logger.info('researcher', 'No bounced emails to fix')
     return
   }
 
-  console.log(`[researcher] Found ${bouncedEmails.length} bounced email(s) — attempting to re-extract`)
+  logger.info('researcher', `Found ${bouncedEmails.length} bounced email(s) — attempting to re-extract`)
 
   for (const emailRecord of bouncedEmails) {
     const lead = emailRecord.leads as unknown as { id: string; email: string | null; website: string | null; business_name: string } | null
@@ -78,7 +79,7 @@ async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>
 
       if (!newEmail || newEmail === lead.email) continue
 
-      console.log(`[researcher] Fixed bounced email for ${lead.business_name}: ${lead.email} → ${newEmail}`)
+      logger.info('researcher', `Fixed bounced email for ${lead.business_name}`, { old: lead.email, new: newEmail })
 
       await supabase.from('leads').update({ email: newEmail }).eq('id', lead.id)
       await supabase.from('emails').update({ status: 'pending_send' }).eq('id', emailRecord.id)
@@ -90,7 +91,7 @@ async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>
         metadata: { old_email: lead.email, new_email: newEmail },
       })
     } catch (err) {
-      console.error(`[researcher] Error fixing bounced email for lead_id=${emailRecord.lead_id}:`, err)
+      logger.error('researcher', `Error fixing bounced email for lead`, { lead_id: emailRecord.lead_id, error: String(err) })
     }
   }
 }
@@ -106,7 +107,7 @@ export async function runResearcherAgent(): Promise<number> {
     .single()
 
   if (systemSetting?.value !== 'true') {
-    console.log('System is paused - Researcher agent skipped')
+    logger.info('researcher', 'System paused - skipped')
     return 0
   }
 
@@ -118,10 +119,10 @@ export async function runResearcherAgent(): Promise<number> {
     .select('*')
     .eq('status', 'new')
 
-  console.log(`[researcher] Found ${leads?.length ?? 0} leads with status=new`)
+  logger.info('researcher', `Found ${leads?.length ?? 0} leads with status=new`)
 
   if (!leads?.length) {
-    console.log('[researcher] Nothing to process')
+    logger.info('researcher', 'Nothing to process')
     return 0
   }
 
@@ -130,7 +131,7 @@ export async function runResearcherAgent(): Promise<number> {
   const methodCounts: Record<string, number> = {}
 
   for (const lead of leads) {
-    console.log(`[researcher] Lead: "${lead.business_name}" | existing email: ${lead.email ?? 'NONE'} | website: ${lead.website ?? 'NONE'}`)
+    logger.info('researcher', `Lead: "${lead.business_name}"`, { email: lead.email ?? 'NONE', website: lead.website ?? 'NONE' })
 
     try {
       let websiteText = ''
@@ -144,7 +145,7 @@ export async function runResearcherAgent(): Promise<number> {
           rawHtml = await fetchRawHtml(lead.website)
           websiteText = rawHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 5000)
         } catch {
-          console.log(`[researcher] Could not fetch website for "${lead.business_name}"`)
+          logger.info('researcher', `Could not fetch website for "${lead.business_name}"`)
         }
       }
 
@@ -155,13 +156,13 @@ export async function runResearcherAgent(): Promise<number> {
           foundEmail = mailtoEmail
           emailMethod = 'mailto_link'
           emailsFound++
-          console.log(`[researcher] Found email via mailto: for "${lead.business_name}": ${mailtoEmail}`)
+          logger.info('researcher', `Found email via mailto for "${lead.business_name}"`, { email: mailtoEmail })
         }
       }
 
       // Agentic email search — only if mailto didn't find anything and we have website text
       if (!foundEmail && lead.website && websiteText) {
-        console.log(`[researcher] Starting agentic email search for "${lead.business_name}"`)
+        logger.info('researcher', `Starting agentic email search for "${lead.business_name}"`)
 
         const result = await agenticEmailSearch({
           business_name: lead.business_name,
@@ -173,9 +174,9 @@ export async function runResearcherAgent(): Promise<number> {
         if (result.email) {
           foundEmail = result.email
           emailsFound++
-          console.log(`[researcher] Found email via ${result.method} in ${result.rounds} round(s): ${result.email}`)
+          logger.info('researcher', `Found email via ${result.method} in ${result.rounds} round(s)`, { email: result.email })
         } else {
-          console.log(`[researcher] No email found for "${lead.business_name}" after ${result.rounds} round(s)`)
+          logger.info('researcher', `No email found for "${lead.business_name}" after ${result.rounds} round(s)`)
         }
 
         emailMethod = result.method
@@ -221,7 +222,7 @@ export async function runResearcherAgent(): Promise<number> {
         .eq('id', lead.id)
 
       if (updateErr) {
-        console.error(`[researcher] Lead update failed for "${lead.business_name}": ${updateErr.message}`)
+        logger.error('researcher', `Lead update failed for "${lead.business_name}"`, { error: updateErr.message })
       }
 
       // Learning log — record method, rounds, outcome for future analysis
@@ -240,7 +241,7 @@ export async function runResearcherAgent(): Promise<number> {
 
       processed++
     } catch (error) {
-      console.error(`[researcher] Exception for "${lead.business_name}":`, error)
+      logger.error('researcher', `Exception for "${lead.business_name}"`, { error: String(error) })
 
       await supabase.from('activity_log').insert({
         event_type: 'researcher_error',
@@ -254,9 +255,7 @@ export async function runResearcherAgent(): Promise<number> {
     }
   }
 
-  console.log(`[researcher] Updated ${processed} leads to status=researched`)
-  console.log(`[researcher] Done: ${processed} leads processed, ${emailsFound} emails found`)
-  console.log(`[researcher] Email method breakdown:`, methodCounts)
+  logger.info('researcher', `Done: ${processed} leads processed, ${emailsFound} emails found`, { methodCounts })
 
   await supabase.from('activity_log').insert({
     event_type: 'researcher_complete',
@@ -268,7 +267,7 @@ export async function runResearcherAgent(): Promise<number> {
 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    console.error('[researcher] Fatal error:', error)
+    logger.error('researcher', 'Fatal error', { error: message, stack: error instanceof Error ? error.stack : null })
     await supabase.from('activity_log').insert({
       event_type: 'agent_error',
       description: `Agent failed: ${message}`,

@@ -6,6 +6,7 @@ import { RevenueChart } from '@/components/dashboard/RevenueChart'
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed'
 import { DailyActivity } from '@/components/dashboard/DailyActivity'
 import { Card } from '@/components/ui/Card'
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { formatCurrency } from '@/lib/utils'
 
 export const revalidate = 60
@@ -133,7 +134,9 @@ export default async function DashboardPage() {
         {/* Revenue Chart */}
         <Card>
           <h3 className="text-sm font-semibold mb-4 text-white">Weekly Revenue (Last 12 Weeks)</h3>
-          <RevenueChart data={weeklyRevenue} />
+          <ErrorBoundary label="RevenueChart">
+            <RevenueChart data={weeklyRevenue} />
+          </ErrorBoundary>
         </Card>
 
         {/* Daily Activity */}

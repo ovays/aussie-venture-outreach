@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
+import { checkRateLimit } from '@/lib/rateLimit'
 
-export async function GET(): Promise<NextResponse> {
+const patchSettingSchema = z.object({
+  key: z.string().min(1),
+  value: z.string(),
+})
+
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
+  const { allowed } = checkRateLimit(`settings:${ip}`, 30)
+  if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+
   const supabase = await createClient()
 
   const { data, error } = await supabase.from('settings').select('*').order('key')
@@ -14,13 +25,24 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
+  const { allowed } = checkRateLimit(`settings:${ip}`, 30)
+  if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+
   const supabase = await createClient()
-  const body = await request.json() as { key: string; value: string }
+  const raw = await request.json()
+
+  const parsed = patchSettingSchema.safeParse(raw)
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid request body', issues: parsed.error.issues }, { status: 400 })
+  }
+
+  const { key, value } = parsed.data
 
   const { data, error } = await supabase
     .from('settings')
-    .update({ value: body.value, updated_at: new Date().toISOString() })
-    .eq('key', body.key)
+    .update({ value, updated_at: new Date().toISOString() })
+    .eq('key', key)
     .select()
     .single()
 

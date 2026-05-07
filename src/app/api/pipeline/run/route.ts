@@ -1,10 +1,17 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { tasks, auth } from '@trigger.dev/sdk/v3'
+import { checkRateLimit } from '@/lib/rateLimit'
 import type { dailyPipelineJob } from '../../../../../trigger/daily-pipeline'
 
 export const maxDuration = 30
 
-export async function POST() {
+export async function POST(request: NextRequest) {
+  const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
+  const { allowed } = checkRateLimit(`pipeline:${ip}`, 3)
+  if (!allowed) {
+    return NextResponse.json({ error: 'Rate limit exceeded — max 3 triggers per minute' }, { status: 429 })
+  }
+
   try {
     // TRIGGER_SECRET_KEY_PROD targets production when running locally (where TRIGGER_SECRET_KEY is a dev key).
     // On Vercel, set TRIGGER_SECRET_KEY to the prod key and omit TRIGGER_SECRET_KEY_PROD.

@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { withRetry } from './retry'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -24,7 +25,7 @@ async function rateLimitedCall<T>(fn: () => Promise<T>): Promise<T> {
     claudeCallWindowStart = Date.now()
   }
   claudeCallCount++
-  return fn()
+  return withRetry(fn, { maxAttempts: 2, baseDelayMs: 2000 })
 }
 
 function getBrandDescription(category: string): string {

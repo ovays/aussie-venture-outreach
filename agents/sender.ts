@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
+import { logger } from '@/lib/logger'
 
 export async function runSenderAgent(): Promise<{ sent: number; failed: number }> {
   const supabase = createServiceClient()
@@ -11,10 +12,10 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .eq('key', 'system_active')
     .single()
 
-  console.log(`[sender] system_active = "${systemSetting?.value}"`)
+  logger.info('sender', `system_active = "${systemSetting?.value}"`)
 
   if (systemSetting?.value !== 'true') {
-    console.log('[sender] System is paused - Sender agent skipped')
+    logger.info('sender', 'System paused - skipped')
     return { sent: 0, failed: 0 }
   }
 
@@ -25,21 +26,21 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .single()
 
   const dailyLimit = parseInt(limitSetting?.value ?? '50', 10)
-  console.log(`[sender] daily_email_limit = ${dailyLimit}`)
+  logger.info('sender', `daily_email_limit = ${dailyLimit}`)
 
   // Diagnostic: count total pending_send emails before applying limit
   const { count: pendingCount } = await supabase
     .from('emails')
     .select('*', { count: 'exact', head: true })
     .eq('status', 'pending_send')
-  console.log(`[sender] emails with status=pending_send: ${pendingCount ?? 0}`)
+  logger.info('sender', `emails with status=pending_send: ${pendingCount ?? 0}`)
 
   // Diagnostic: count leads with email_ready status
   const { count: emailReadyCount } = await supabase
     .from('leads')
     .select('*', { count: 'exact', head: true })
     .eq('status', 'email_ready')
-  console.log(`[sender] leads with status=email_ready: ${emailReadyCount ?? 0}`)
+  logger.info('sender', `leads with status=email_ready: ${emailReadyCount ?? 0}`)
 
   // Diagnostic: count email_ready leads that actually have an email address
   const { count: emailReadyWithEmail } = await supabase
@@ -47,7 +48,7 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .select('*', { count: 'exact', head: true })
     .eq('status', 'email_ready')
     .not('email', 'is', null)
-  console.log(`[sender] email_ready leads with a real email address: ${emailReadyWithEmail ?? 0}`)
+  logger.info('sender', `email_ready leads with a real email: ${emailReadyWithEmail ?? 0}`)
 
   const { data: pendingEmails } = await supabase
     .from('emails')
@@ -55,10 +56,10 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .eq('status', 'pending_send')
     .limit(dailyLimit)
 
-  console.log(`[sender] fetched ${pendingEmails?.length ?? 0} pending emails to process`)
+  logger.info('sender', `fetched ${pendingEmails?.length ?? 0} pending emails to process`)
 
   if (!pendingEmails?.length) {
-    console.log('[sender] No pending emails to send — emails table has no pending_send rows')
+    logger.info('sender', 'No pending emails — emails table has no pending_send rows')
     return { sent: 0, failed: 0 }
   }
 
@@ -71,13 +72,28 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     const lead = emailRecord.leads as { email: string | null; business_name: string } | null
 
     if (!lead?.email) {
-      console.log(`[sender] #${i + 1}/${total} SKIP — no email address for lead_id=${emailRecord.lead_id}`)
+      logger.info('sender', `#${i + 1}/${total} SKIP — no email address for lead`, { lead_id: emailRecord.lead_id })
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
       failed++
       continue
     }
 
-    console.log(`[sender] #${i + 1}/${total} Sending to: ${lead.email} (${lead.business_name}) subject: "${emailRecord.subject}"`)
+    // Idempotency: skip if this lead already has a successfully sent email
+    const { data: alreadySent } = await supabase
+      .from('emails')
+      .select('id')
+      .eq('lead_id', emailRecord.lead_id)
+      .eq('status', 'sent')
+      .neq('id', emailRecord.id)
+      .limit(1)
+
+    if (alreadySent?.length) {
+      logger.warn('sender', `Idempotency skip: already sent to lead`, { lead_id: emailRecord.lead_id })
+      await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
+      continue
+    }
+
+    logger.info('sender', `#${i + 1}/${total} Sending to ${lead.email} (${lead.business_name})`, { subject: emailRecord.subject })
 
     try {
       const result = await sendEmail({
@@ -89,7 +105,7 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
       })
 
       if (result) {
-        console.log(`[sender] #${i + 1}/${total} SUCCESS — resend_id=${result.id}`)
+        logger.info('sender', `#${i + 1}/${total} SUCCESS`, { resend_id: result.id, to: lead.email })
 
         await supabase.from('emails').update({
           status: 'sent',
@@ -108,9 +124,15 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
 
         sent++
       } else {
-        console.error(`[sender] #${i + 1}/${total} FAILED — sendEmail returned null for ${lead.email} (Resend error logged above)`)
+        logger.error('sender', `#${i + 1}/${total} FAILED — sendEmail returned null`, { to: lead.email })
 
         await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
+
+        await supabase.from('dead_letter_queue').insert({
+          operation: 'send_email',
+          payload: { lead_id: emailRecord.lead_id, email: lead.email, subject: emailRecord.subject, email_id: emailRecord.id },
+          error: 'Resend API returned null/error',
+        })
 
         await supabase.from('activity_log').insert({
           event_type: 'email_failed',
@@ -122,8 +144,16 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
         failed++
       }
     } catch (error) {
-      console.error(`[sender] #${i + 1}/${total} EXCEPTION for ${lead.email}:`, error)
+      logger.error('sender', `#${i + 1}/${total} EXCEPTION for ${lead.email}`, { error: String(error) })
+
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
+
+      await supabase.from('dead_letter_queue').insert({
+        operation: 'send_email',
+        payload: { lead_id: emailRecord.lead_id, email: lead.email, subject: emailRecord.subject, email_id: emailRecord.id },
+        error: String(error),
+      })
+
       await supabase.from('activity_log').insert({
         event_type: 'sender_error',
         lead_id: emailRecord.lead_id,
@@ -140,12 +170,12 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     metadata: { sent, failed },
   })
 
-  console.log(`Sender agent done - ${sent} sent, ${failed} failed`)
+  logger.info('sender', 'Done', { sent, failed })
   return { sent, failed }
 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    console.error('[sender] Fatal error:', error)
+    logger.error('sender', 'Fatal error', { error: message, stack: error instanceof Error ? error.stack : null })
     await supabase.from('activity_log').insert({
       event_type: 'agent_error',
       description: `Agent failed: ${message}`,
