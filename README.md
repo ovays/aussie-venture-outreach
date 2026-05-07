@@ -9,25 +9,22 @@
 ![Outscraper](https://img.shields.io/badge/Outscraper-Google%20Maps-red)
 ![Resend](https://img.shields.io/badge/Resend-Email%20API-blue)
 
-> **~$14/month operational cost · $0.016 per lead · 56x–94x ROI per closed deal**
-
 ---
 
-## What Is This?
+## Overview
 
-A production-deployed, fully autonomous multi-agent AI pipeline that enables content creators to monetise their audience through automated B2B outreach. The system runs daily without human intervention — discovering local businesses via Google Maps, extracting verified contact information using an agentic multi-turn web crawler (Claude Haiku), generating hyper-personalised outreach emails via LLM (Claude Sonnet 4.6), delivering them through Resend, and managing the complete sales lifecycle from lead discovery to revenue close. A full CRM admin panel (Next.js 16 + Supabase) provides real-time visibility across every stage of the pipeline.
+A production-deployed, fully autonomous multi-agent AI pipeline built with Next.js 16, TypeScript, and Supabase. Six specialised agents — Finder, Researcher, Writer, Sender, Follow-up, and Tracker — are orchestrated via a finite-state-machine lead lifecycle, with each agent reading its input state from the database, doing work, and writing its output state back. No agent calls another directly. Scheduling runs on Trigger.dev v3 (bypassing Vercel's function timeout ceiling); Claude Haiku 4.5 handles all structured-extraction tasks and Claude Sonnet 4.6 handles all generation tasks. A full CRM admin panel built in Next.js 16 with Supabase Realtime provides end-to-end pipeline visibility.
 
 ---
 
 ## Key Engineering Achievements
 
-- **6-agent agentic pipeline** with zero manual intervention — agents are fully decoupled, coordinated exclusively through a 9-state finite-state-machine lead lifecycle (no direct agent-to-agent calls)
-- **Multi-turn agentic email extraction** — Researcher agent uses Claude Haiku in a genuine agentic loop (up to 3 rounds): reasons across homepage → `/contact` → web search, deciding each next action dynamically rather than following a fixed script
-- **Two-phase lead discovery** — Phase 1 targets email-findable categories (empirically validated 70% hit rate on travel agents); Phase 2 sources Instagram DM targets from existing DB records at zero Outscraper cost
-- **Cost-aware progressive fetching** — fetches 10 results at a time with query deduplication (`seenQueries` Set), 3-day exhaustion caching (`exhausted_queries` table), and a configurable daily spend guard; reduces Outscraper API costs by ~80% vs naive implementation
-- **Haiku-vs-Sonnet model routing** — Claude Haiku 4.5 for all structured extraction tasks (speed + cost), Claude Sonnet 4.6 for all generative tasks (quality directly impacts reply rate and revenue)
-- **RAG-ready architecture** — reply rates and email variants stored in DB; retrieval-augmented generation can inject top-performing past emails as few-shot examples into Writer prompts at inference time
-- **Full CRM admin panel** — Kanban pipeline, email log with resend-from-panel, deal tracking, revenue analytics, system health monitoring (Next.js 16 + Supabase Realtime)
+- **6-agent autonomous pipeline** — fully decoupled agents coordinated exclusively through a 9-state finite-state-machine (`new → researched → email_ready → contacted → replied → negotiating → closed / dead / dm_queued`); no direct inter-agent calls, no message queues
+- **Agentic multi-turn email extraction** — Researcher agent runs a genuine agentic loop (up to 3 rounds): Claude Haiku analyses page content, decides the next action (`fetch_url` / `search_google` / `found` / `not_found`), executes it, then loops — not prompt chaining
+- **Two-phase lead discovery** — Phase 1 runs Outscraper searches against email-yielding categories (empirically validated 70% hit rate on travel/hospitality); Phase 2 sources DM targets from existing DB records at zero API cost
+- **Cost-aware progressive fetching** — fetches 10 results at a time, stops when quota is met; combines a `seenQueries` Set (checked before every API call) with a 3-day exhaustion cache in `exhausted_queries` table to eliminate redundant searches
+- **Full CRM admin panel** — Kanban pipeline board, lead detail panel with inline email edit and resend, email log, DM queue, deal tracker, revenue chart, and a real-time health banner that surfaces agent errors and stale runs
+- **Haiku-vs-Sonnet model routing** — extraction tasks routed to Haiku 4.5 (speed, cost, structured JSON output); generation tasks routed to Sonnet 4.6 (writing quality directly affects reply rate)
 
 ---
 
@@ -80,91 +77,167 @@ A production-deployed, fully autonomous multi-agent AI pipeline that enables con
 ### Lead Lifecycle — Finite State Machine
 
 ```
-Outscraper → [new] → Researcher → [researched] → Writer ─┬─ [email_ready] → Sender → [contacted]
-                                                          └─ [dm_queued] → manual Instagram DM
-
-[contacted] ──► reply received → [negotiating] → [closed]
-            └── no reply → day 7 follow-up → day 14 follow-up → day 21 → [dead]
+                         ┌──────────────────────────────────────────┐
+                         │            Finder Agent                   │
+                         └───────────────────┬──────────────────────┘
+                                             │
+                                          [new]
+                                             │
+                         ┌───────────────────▼──────────────────────┐
+                         │          Researcher Agent                 │
+                         │    Claude Haiku agentic loop (3 rounds)   │
+                         └───────────────────┬──────────────────────┘
+                                             │
+                                      [researched]
+                                             │
+                            ┌────────────────┴───────────────┐
+                            │                                │
+                       has email                      Instagram only
+                            │                                │
+                     [email_ready]                    [dm_queued]
+                            │                                │
+                       Sender Agent                   Manual DM send
+                            │
+                      [contacted]
+                            │
+               ┌────────────┴────────────┐
+               │                         │
+          reply received              no reply
+               │                         │
+         [negotiating]             day 7: follow-up 1
+               │                   day 14: follow-up 2
+           [closed]                day 21: [dead]
 ```
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology | Role |
-|-------|-----------|------|
-| **Framework** | Next.js 16, TypeScript | Admin panel + API routes |
-| **Database** | Supabase (PostgreSQL + RLS + Realtime) | Lead store, settings, audit log |
-| **AI — Extraction** | Claude Haiku 4.5 | Agentic email search, website data extraction |
-| **AI — Generation** | Claude Sonnet 4.6 | Outreach email writing, DM writing |
-| **Job Scheduling** | Trigger.dev v3 | Long-running cron pipeline (no 60s timeout) |
-| **Email Delivery** | Resend | Send + webhook reply/bounce tracking |
-| **Business Data** | Outscraper | Google Maps search with contact fields |
-| **Hosting** | Vercel | Zero-config Next.js deployment |
-| **UI** | React 19, Tailwind CSS v4, Recharts | Dashboard components + revenue charts |
+| Layer | Technology |
+|-------|-----------|
+| **Framework** | Next.js 16 (App Router), TypeScript |
+| **Database** | Supabase — PostgreSQL, Row-Level Security, Realtime |
+| **AI — Extraction** | Claude Haiku 4.5 (structured JSON, agentic reasoning) |
+| **AI — Generation** | Claude Sonnet 4.6 (outreach email and DM writing) |
+| **Job Scheduling** | Trigger.dev v3 (long-running cron, live log streaming) |
+| **Email Delivery** | Resend (send + webhook reply/bounce tracking) |
+| **Business Data** | Outscraper (Google Maps search with contact fields) |
+| **Hosting** | Vercel |
+| **UI** | React 19, Tailwind CSS v4, Recharts |
 
 ---
 
-## Cost Model
-
-| Service | Monthly Usage | Cost |
-|---------|--------------|------|
-| Outscraper | ~80 results/day × 30 × $0.003 | ~$7.20 |
-| Claude Sonnet 4.6 | 30 emails/day × $0.007 × 30 days | ~$6.30 |
-| Claude Haiku 4.5 | 30 extractions/day × $0.001 × 30 days | ~$0.90 |
-| Resend | 900 emails/month (free tier: 3,000) | **$0** |
-| Trigger.dev | ~90 runs/month (free tier: 10,000) | **$0** |
-| Supabase | Free tier | **$0** |
-| Vercel | Free tier | **$0** |
-| **Total** | | **~$14.40/month** |
+## Project Structure
 
 ```
-Cost per lead:    $0.016   |   Average deal value: $300–$500
-Cost per deal:    ~$0.53   |   ROI per deal:        56x–94x
+.
+├── agents/                     # Six autonomous agents
+│   ├── finder.ts               # Lead discovery via Google Maps + cost control
+│   ├── researcher.ts           # Agentic multi-turn contact enrichment
+│   ├── writer.ts               # LLM outreach email + DM generation
+│   ├── sender.ts               # Email delivery via Resend
+│   ├── followup.ts             # Timed follow-up cadence + dead-lead cleanup
+│   ├── tracker.ts              # Webhook processing + daily digest
+│   └── enricher.ts             # Website data extraction helper
+│
+├── trigger/                    # Trigger.dev scheduled jobs
+│   ├── daily-pipeline.ts       # 20:00 AEST — runs all 6 agents sequentially
+│   ├── followup-job.ts         # 09:00 AEST — follow-up cadence
+│   └── digest-job.ts           # 08:00 AEST — daily summary email
+│
+├── src/
+│   ├── app/
+│   │   ├── api/                # Next.js route handlers
+│   │   │   ├── leads/          # CRUD + [id]/resend
+│   │   │   ├── pipeline/run/   # Manual pipeline trigger
+│   │   │   ├── health/         # System health check
+│   │   │   ├── settings/       # Runtime config
+│   │   │   └── webhooks/resend/ # Inbound reply/bounce handler
+│   │   └── dashboard/          # CRM pages (leads, pipeline, email-log, deals, settings)
+│   │
+│   ├── components/
+│   │   ├── leads/              # LeadsTable, LeadDetailPanel (edit email, resend)
+│   │   ├── pipeline/           # KanbanBoard, KanbanCard
+│   │   ├── dashboard/          # StatsCard, RevenueChart, ActivityFeed
+│   │   ├── layout/             # Sidebar, HealthBanner, TopBar
+│   │   └── ui/                 # Badge, Button, Card, Modal, Toggle, ...
+│   │
+│   └── lib/
+│       ├── claude.ts           # Anthropic SDK — extraction + generation calls
+│       ├── outscraper.ts       # Google Maps search + result deduplication
+│       ├── resend.ts           # Email send wrapper
+│       └── supabase/           # Client + server Supabase instances
+│
+├── scripts/                    # Read-only test scripts (never write to DB)
+│   ├── test-travel-emails.ts
+│   ├── test-hotel-emails.ts
+│   ├── test-email-extract.ts
+│   └── ...
+│
+└── supabase/migrations/        # Schema migrations (run in order)
+    ├── 001_initial_schema.sql
+    ├── 004_city_suburbs.sql
+    └── 005_exhausted_queries.sql
 ```
 
 ---
 
-## Quick Start
+## Setup
+
+### Prerequisites
+
+Six services required — all have free tiers:
+
+| Service | Purpose |
+|---------|---------|
+| [Supabase](https://supabase.com) | Database + auth |
+| [Anthropic](https://console.anthropic.com) | Claude API |
+| [Resend](https://resend.com) | Email delivery |
+| [Outscraper](https://outscraper.com) | Google Maps data |
+| [Trigger.dev](https://trigger.dev) | Job scheduling |
+| [Vercel](https://vercel.com) | Hosting |
+
+### Environment Variables
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+ANTHROPIC_API_KEY=
+RESEND_API_KEY=
+RESEND_WEBHOOK_SECRET=
+OUTSCRAPER_API_KEY=
+TRIGGER_SECRET_KEY=
+NEXT_PUBLIC_APP_URL=
+ADMIN_EMAIL=
+```
+
+### Install and Run
 
 ```bash
-# 1. Clone and install
-git clone https://github.com/ovays/aussie-venture-outreach
 npm install
+cp .env.example .env.local   # fill in API keys
 
-# 2. Set environment variables
-cp .env.example .env.local
-# Fill in: SUPABASE_*, ANTHROPIC_API_KEY, RESEND_API_KEY, OUTSCRAPER_API_KEY, TRIGGER_SECRET_KEY
-
-# 3. Run database migrations (Supabase SQL Editor)
+# Run database migrations in Supabase SQL Editor
 # supabase/migrations/001_initial_schema.sql → 005_exhausted_queries.sql
 
-# 4. Start local dev
-npm run dev
-
-# 5. Deploy pipeline jobs to Trigger.dev (separate from Vercel deploy)
-npm run deploy:trigger
+npm run dev                  # local dev server
+npm run deploy:trigger       # deploy pipeline jobs to Trigger.dev
 ```
 
-**Required services** (all have free tiers): [Supabase](https://supabase.com) · [Resend](https://resend.com) · [Outscraper](https://outscraper.com) · [Anthropic](https://console.anthropic.com) · [Trigger.dev](https://trigger.dev) · [Vercel](https://vercel.com)
-
-> **Note:** Every time agent code changes, run `npm run deploy:trigger` separately — Vercel only deploys the Next.js app; Trigger.dev jobs run on separate infrastructure.
+> **Note:** `npm run deploy:trigger` must be run separately after every agent code change. Vercel deploys the Next.js app; Trigger.dev jobs run on separate infrastructure.
 
 ---
 
-## Documentation
+## Full Technical Documentation
 
-See **[DOCUMENTATION.md](./DOCUMENTATION.md)** for complete technical documentation including:
+**[DOCUMENTATION.md](./DOCUMENTATION.md)** — complete technical reference including:
 
-- Full agent architecture and responsibilities
-- Agentic researcher pattern explained
-- LLM model routing rationale (Haiku vs Sonnet)
-- Database schema and ERD
-- Cost engineering techniques
+- Agent responsibilities and implementation details
+- Agentic researcher pattern (multi-turn reasoning loop)
+- LLM model routing rationale and token budget design
+- Database schema and entity relationships
+- Cost engineering techniques and optimisation decisions
 - Architecture decision records
 - Troubleshooting guide
-- Multi-creator SaaS roadmap
-
----
-
-*Built May 2026 · Next.js 16 · TypeScript · Supabase · Claude AI · Trigger.dev · Vercel*
+- Roadmap (RAG-based email quality improvement, reply intelligence, multi-tenant SaaS)
