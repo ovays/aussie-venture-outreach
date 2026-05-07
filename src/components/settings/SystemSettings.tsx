@@ -297,14 +297,14 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
             <div>
               <p className="text-sm text-white">Daily Outscraper Limit ($)</p>
-              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Maximum Outscraper spend per day — pipeline stops when reached</p>
+              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Maximum Outscraper spend per day in USD. Pipeline stops when reached. Normal daily cost is ~$0.50. Set to $2.00 for safety margin.</p>
             </div>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5">
                 <span className="text-sm" style={{ color: '#64748b' }}>$</span>
                 <input
                   type="number"
-                  value={settings['daily_outscraper_limit'] ?? '1.00'}
+                  value={settings['daily_outscraper_limit'] ?? '2.00'}
                   onChange={(e) => setSettings((p) => ({ ...p, daily_outscraper_limit: e.target.value }))}
                   onBlur={(e) => updateSetting('daily_outscraper_limit', e.target.value)}
                   min={0.10}

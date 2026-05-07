@@ -167,12 +167,23 @@ async function isAlreadyInDB(
 // ── Daily spend helper ───────────────────────────────────────────────────────
 
 async function getDailyOutscraperSpend(supabase: ReturnType<typeof createServiceClient>): Promise<number> {
-  const todayStr = new Date().toISOString().slice(0, 10)
+  // Compute midnight Sydney time as a UTC timestamp.
+  // The server (Trigger.dev) runs in UTC — using toISOString().slice(0,10) gives the UTC
+  // date which can be yesterday in Sydney (UTC+10/+11), causing false "already spent" reads.
+  const now = new Date()
+  const sydneyDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(now)
+  // Dynamic offset handles both AEST (+10) and AEDT (+11)
+  const offsetMs =
+    new Date(now.toLocaleString('en-US', { timeZone: 'Australia/Sydney' })).getTime() -
+    new Date(now.toLocaleString('en-US', { timeZone: 'UTC' })).getTime()
+  // Midnight Sydney expressed as UTC: take midnight of the Sydney date string (as UTC) then subtract the offset
+  const todayStart = new Date(new Date(`${sydneyDate}T00:00:00Z`).getTime() - offsetMs)
+
   const { data } = await supabase
     .from('activity_log')
     .select('metadata')
     .eq('event_type', 'finder_complete')
-    .gte('created_at', `${todayStr}T00:00:00.000Z`)
+    .gte('created_at', todayStart.toISOString())
 
   return (data ?? []).reduce((sum, row) => {
     const meta = row.metadata as { estimated_cost?: string | number } | null

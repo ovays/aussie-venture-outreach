@@ -107,14 +107,14 @@ export async function GET() {
     // skip
   }
 
-  // 6. Cost guard triggered in last 25 hours
+  // 6. Cost guard triggered in last 2 hours only — avoids stale banners from yesterday's run
   try {
-    const since25h = new Date(Date.now() - 25 * 3_600_000).toISOString()
+    const since2h = new Date(Date.now() - 2 * 3_600_000).toISOString()
     const { data: costGuard } = await supabase
       .from('activity_log')
       .select('created_at, metadata')
       .eq('event_type', 'cost_guard_triggered')
-      .gte('created_at', since25h)
+      .gte('created_at', since2h)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()

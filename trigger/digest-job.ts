@@ -1,11 +1,11 @@
 import { schedules } from '@trigger.dev/sdk/v3'
 import { sendDailyDigest } from '../agents/tracker'
 
-// Runs daily at 8:00am AEST
+// Runs daily at 10:30am AEST — after pipeline (8am) and followup-job (9am) both complete
 export const digestJob = schedules.task({
   id: 'digest-job',
   cron: {
-    pattern: '0 8 * * *',
+    pattern: '30 10 * * *',
     timezone: 'Australia/Sydney',
   },
   maxDuration: 300,

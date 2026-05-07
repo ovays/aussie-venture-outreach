@@ -11,5 +11,5 @@ CREATE POLICY "Authenticated users have full access" ON exhausted_queries FOR AL
 CREATE POLICY "Service role bypass" ON exhausted_queries FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 INSERT INTO settings (key, value, description)
-VALUES ('daily_outscraper_limit', '1.00', 'Maximum Outscraper spend per day in USD — pipeline stops when reached')
+VALUES ('daily_outscraper_limit', '2.00', 'Maximum Outscraper spend per day in USD. Pipeline stops when reached. Normal daily cost is ~$0.50. Set to $2.00 for safety margin.')
 ON CONFLICT (key) DO NOTHING;
