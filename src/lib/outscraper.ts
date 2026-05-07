@@ -89,6 +89,10 @@ async function pollResults(resultsUrl: string, headers: Record<string, string>):
   return []
 }
 
+// maps/search-v3 is the current recommended endpoint.
+// maps/search (v2) uses the same params but may have different pricing — switch ENDPOINT to test.
+const ENDPOINT = 'maps/search-v3'
+
 export async function searchBusinesses(query: string, limit = 20, skip = 0): Promise<OutscraperResult[]> {
   const cleanKey = (process.env.OUTSCRAPER_API_KEY ?? '').replace(/[^\x20-\x7E]/g, '').trim()
 
@@ -101,13 +105,13 @@ export async function searchBusinesses(query: string, limit = 20, skip = 0): Pro
 
   if (skip > 0) params.set('skip', String(skip))
 
-  const url = `https://api.app.outscraper.com/maps/search-v3?${params}`
+  const url = `https://api.app.outscraper.com/${ENDPOINT}?${params}`
 
 const headers: Record<string, string> = {
   'X-API-KEY': cleanKey,
 }
 
-  console.log(`Outscraper search: "${query}"`)
+  console.log(`Outscraper [${ENDPOINT}] search: "${query}"`)
 
   try {
     const response = await rateLimitedFetch(url, headers)

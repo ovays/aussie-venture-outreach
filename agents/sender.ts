@@ -170,7 +170,10 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     metadata: { sent, failed },
   })
 
+  // Haiku writing (~$0.001/email) + Resend API (free tier / ~$0.0001/email)
+  const estimatedCost = (sent * 0.0011).toFixed(4)
   logger.info('sender', 'Done', { sent, failed })
+  logger.info('sender', `Total pipeline cost estimate: $${estimatedCost} (Haiku writing + Resend; see finder log for Outscraper cost)`)
   return { sent, failed }
 
   } catch (error) {

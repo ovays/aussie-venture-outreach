@@ -88,6 +88,12 @@ export async function runWriterAgent(): Promise<void> {
   let dmsQueued = 0
   let deadCount = 0
 
+  // Template cache: one Claude call per category/contentType/city per run (~7 calls instead of ~40)
+  type EmailTemplate = { subject: string; body: string; templateName: string; templateSuburb: string }
+  const templateCache = new Map<string, EmailTemplate>()
+  let cacheHits = 0
+  let cacheMisses = 0
+
   for (const lead of leads) {
     const hasEmail = !!lead.email
     const hasInstagram = !!lead.instagram_handle  // Instagram only — no Facebook
@@ -118,16 +124,39 @@ export async function runWriterAgent(): Promise<void> {
 
       if (hasEmail) {
         // ── Email path ──────────────────────────────────────────────────────
-        const emailResult = await writeOutreachEmail({
-          business_name: lead.business_name,
-          category: lead.category_name,
-          suburb: lead.suburb ?? '',
-          city: lead.city,
-          website: lead.website ?? '',
-          description: lead.description ?? '',
-          services: lead.services ?? '',
-          content_type: contentType,
-        })
+        const cacheKey = `${lead.category_name}_${contentType}_${lead.city}`
+        const cached = templateCache.get(cacheKey)
+        let emailResult: { subject: string; body: string }
+
+        if (cached) {
+          // Reuse cached template: replace previous business name + suburb with this lead's
+          const newName = lead.business_name
+          const newSuburb = lead.suburb ?? ''
+          emailResult = {
+            subject: cached.subject.replaceAll(cached.templateName, newName),
+            body: cached.templateSuburb
+              ? cached.body.replaceAll(cached.templateName, newName).replaceAll(cached.templateSuburb, newSuburb)
+              : cached.body.replaceAll(cached.templateName, newName),
+          }
+          cacheHits++
+        } else {
+          emailResult = await writeOutreachEmail({
+            business_name: lead.business_name,
+            category: lead.category_name,
+            suburb: lead.suburb ?? '',
+            city: lead.city,
+            website: lead.website ?? '',
+            description: lead.description ?? '',
+            services: lead.services ?? '',
+            content_type: contentType,
+          })
+          templateCache.set(cacheKey, {
+            ...emailResult,
+            templateName: lead.business_name,
+            templateSuburb: lead.suburb ?? '',
+          })
+          cacheMisses++
+        }
 
         logger.info('writer', `Email written for "${lead.business_name}"`, { subject: emailResult.subject })
 
@@ -216,12 +245,24 @@ export async function runWriterAgent(): Promise<void> {
     }
   }
 
+  const totalClaudeCalls = cacheMisses + cacheHits
+  const writingCost = (cacheMisses * 0.001).toFixed(4)
   logger.info('writer', 'Done', { emailsQueued, dmsQueued, deadCount })
+  logger.info('writer', `Claude calls made: ${totalClaudeCalls} (cached: ${cacheHits}, fresh: ${cacheMisses})`)
+  logger.info('writer', `Estimated writing cost: $${writingCost}`)
 
   await supabase.from('activity_log').insert({
     event_type: 'writer_complete',
     description: `Writer complete: ${emailsQueued} emails, ${dmsQueued} DMs, ${deadCount} dead`,
-    metadata: { emails_queued: emailsQueued, dms_queued: dmsQueued, dead_count: deadCount, total_processed: processed },
+    metadata: {
+      emails_queued: emailsQueued,
+      dms_queued: dmsQueued,
+      dead_count: deadCount,
+      total_processed: processed,
+      claude_calls_fresh: cacheMisses,
+      claude_calls_cached: cacheHits,
+      estimated_writing_cost: writingCost,
+    },
   })
 
   } catch (error) {

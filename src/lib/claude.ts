@@ -113,7 +113,7 @@ export async function writeOutreachEmail(params: {
 }): Promise<{ subject: string; body: string }> {
   const response = await rateLimitedCall(() =>
     anthropic.messages.create({
-      model: SONNET_MODEL,
+      model: HAIKU_MODEL,
       max_tokens: 400,
       messages: [
         {
@@ -361,7 +361,7 @@ export async function writeOutreachDM(params: {
 
   const response = await rateLimitedCall(() =>
     anthropic.messages.create({
-      model: SONNET_MODEL,
+      model: HAIKU_MODEL,
       max_tokens: 200,
       messages: [
         {
