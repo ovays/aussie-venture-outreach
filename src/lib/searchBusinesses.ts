@@ -64,6 +64,13 @@ export async function searchBusinesses(
   const withinBudget = googleSpend < googleLimit
   const useGoogle = primaryApi === 'google_maps' && hasGoogleKey && withinBudget && skip === 0
 
+  // Debug: log routing decision so Trigger.dev logs show exactly why an API was chosen
+  console.log(`[search] query="${query}" skip=${skip}`)
+  console.log(`[search] primary_search_api="${primaryApi}" (from DB setting)`)
+  console.log(`[search] GOOGLE_MAPS_API_KEY set: ${hasGoogleKey}`)
+  console.log(`[search] google_spend=$${googleSpend.toFixed(4)} limit=$${googleLimit} withinBudget=${withinBudget}`)
+  console.log(`[search] useGoogle=${useGoogle} → will use: ${useGoogle ? 'Google Maps' : primaryApi === 'google_maps' && !hasGoogleKey ? 'Outscraper (NO KEY IN ENV)' : 'Outscraper'}`)
+
   let results: OutscraperResult[]
   let apiUsed: ApiUsed
 
