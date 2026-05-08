@@ -144,21 +144,22 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
         failed++
       }
     } catch (error) {
-      logger.error('sender', `#${i + 1}/${total} EXCEPTION for ${lead.email}`, { error: String(error) })
+      const msg = error instanceof Error ? error.message : String(error)
+      logger.error('sender', `#${i + 1}/${total} EXCEPTION for ${lead.email}: ${msg}`)
 
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
 
       await supabase.from('dead_letter_queue').insert({
         operation: 'send_email',
         payload: { lead_id: emailRecord.lead_id, email: lead.email, subject: emailRecord.subject, email_id: emailRecord.id },
-        error: String(error),
+        error: msg,
       })
 
       await supabase.from('activity_log').insert({
-        event_type: 'sender_error',
+        event_type: 'agent_error',
         lead_id: emailRecord.lead_id,
-        description: `Exception sending to ${lead.business_name} (${lead.email})`,
-        metadata: { error: String(error), to: lead.email },
+        description: `Exception sending to ${lead.business_name} (${lead.email}): ${msg}`,
+        metadata: { error: msg, to: lead.email },
       })
       failed++
     }

@@ -241,13 +241,14 @@ export async function runResearcherAgent(): Promise<number> {
 
       processed++
     } catch (error) {
-      logger.error('researcher', `Exception for "${lead.business_name}"`, { error: String(error) })
+      const msg = error instanceof Error ? error.message : String(error)
+      logger.error('researcher', `Exception for "${lead.business_name}": ${msg}`)
 
       await supabase.from('activity_log').insert({
-        event_type: 'researcher_error',
+        event_type: 'agent_error',
         lead_id: lead.id,
-        description: `Error researching: ${lead.business_name}`,
-        metadata: { error: String(error) },
+        description: `Error researching: ${lead.business_name}: ${msg}`,
+        metadata: { error: msg },
       })
 
       // Mark researched anyway so the pipeline can continue

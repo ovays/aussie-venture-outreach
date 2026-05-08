@@ -407,6 +407,11 @@ export async function runFinderAgent(): Promise<number> {
               payload: { query, skip },
               error: msg,
             })
+            await supabase.from('activity_log').insert({
+              event_type: 'agent_error',
+              description: `Search error for query "${query}": ${msg}`,
+              metadata: { query, skip, error: msg },
+            })
             break
           }
           totalResultsFetched += results.length
@@ -509,14 +514,13 @@ export async function runFinderAgent(): Promise<number> {
             break
           }
 
-          if (results.length < category.batchSize) {
+          if (results.length <= 1) {
             exhaustedThisQuery = true
             break
           }
 
           if (newLeadsThisBatch <= 1) {
             logger.info('finder', `Low yield: ${query}`, { newLeads: newLeadsThisBatch })
-            exhaustedThisQuery = true
             break
           }
 

@@ -206,12 +206,13 @@ export async function runWriterAgent(): Promise<void> {
 
       processed++
     } catch (error) {
-      logger.error('writer', `Exception for "${lead.business_name}"`, { error: String(error) })
+      const msg = error instanceof Error ? error.message : String(error)
+      logger.error('writer', `Exception for "${lead.business_name}": ${msg}`)
       await supabase.from('activity_log').insert({
-        event_type: 'writer_error',
+        event_type: 'agent_error',
         lead_id: lead.id,
-        description: `Error writing for: ${lead.business_name}`,
-        metadata: { error: String(error) },
+        description: `Error writing for: ${lead.business_name}: ${msg}`,
+        metadata: { error: msg },
       })
     }
   }
