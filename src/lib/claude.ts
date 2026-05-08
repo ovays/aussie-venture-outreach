@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
+import Anthropic, { APIError } from '@anthropic-ai/sdk'
 import { withRetry } from './retry'
 
 const anthropic = new Anthropic({
@@ -11,6 +11,12 @@ const SONNET_MODEL = 'claude-sonnet-4-6'
 let claudeCallCount = 0
 let claudeCallWindowStart = Date.now()
 const CLAUDE_RATE_LIMIT = 20
+
+function is529Overload(err: unknown): boolean {
+  if (err instanceof APIError) return err.status === 529
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('529') || msg.toLowerCase().includes('overloaded')
+}
 
 async function rateLimitedCall<T>(fn: () => Promise<T>): Promise<T> {
   const now = Date.now()
@@ -25,7 +31,8 @@ async function rateLimitedCall<T>(fn: () => Promise<T>): Promise<T> {
     claudeCallWindowStart = Date.now()
   }
   claudeCallCount++
-  return withRetry(fn, { maxAttempts: 2, baseDelayMs: 2000 })
+  // 3 retries (4 total attempts) for 529 overload: delays ~1s, 2s, 4s
+  return withRetry(fn, { maxAttempts: 4, baseDelayMs: 1000, isRetryable: is529Overload })
 }
 
 function getBrandDescription(category: string): string {

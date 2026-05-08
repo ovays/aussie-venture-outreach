@@ -1,19 +1,19 @@
 export interface RetryOptions {
   maxAttempts: number
   baseDelayMs: number
+  isRetryable?: (err: unknown) => boolean
 }
 
 export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions): Promise<T> {
-  let lastError: unknown
   for (let attempt = 1; attempt <= opts.maxAttempts; attempt++) {
     try {
       return await fn()
     } catch (err) {
-      lastError = err
-      if (attempt < opts.maxAttempts) {
-        await new Promise(r => setTimeout(r, opts.baseDelayMs * Math.pow(2, attempt - 1)))
-      }
+      const isLast = attempt === opts.maxAttempts
+      const retryable = opts.isRetryable ? opts.isRetryable(err) : true
+      if (isLast || !retryable) throw err
+      await new Promise(r => setTimeout(r, opts.baseDelayMs * Math.pow(2, attempt - 1)))
     }
   }
-  throw lastError
+  throw new Error('withRetry: unreachable')
 }
