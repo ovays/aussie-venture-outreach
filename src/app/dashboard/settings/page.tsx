@@ -35,7 +35,7 @@ export default async function SettingsPage() {
 
   const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
 
-  const [{ data: settings }, { data: categories }, { data: usageEvents }, { data: suburbRows }, { count: dlqCount }] = await Promise.all([
+  const [{ data: settings }, { data: categories }, { data: usageEvents }, { data: suburbRows }, { count: dlqCount }, { count: searchCacheCount }] = await Promise.all([
     supabase.from('settings').select('*').order('key'),
     supabase.from('categories').select('*').order('name'),
     supabase
@@ -54,6 +54,10 @@ export default async function SettingsPage() {
       .select('*', { count: 'exact', head: true })
       .eq('resolved', false)
       .gte('created_at', since24h),
+    supabase
+      .from('search_cache')
+      .select('*', { count: 'exact', head: true })
+      .gt('expires_at', new Date().toISOString()),
   ])
 
   // Group suburbs by city
@@ -112,6 +116,8 @@ export default async function SettingsPage() {
     last7Days,
   }
 
+  const hasGoogleMapsKey = !!process.env.GOOGLE_MAPS_API_KEY
+
   return (
     <div>
       <TopBar title="Settings" />
@@ -124,7 +130,7 @@ export default async function SettingsPage() {
           </Card>
         )}
         <Card>
-          <SystemSettings initialSettings={settings ?? []} usageData={usageData} />
+          <SystemSettings initialSettings={settings ?? []} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} />
         </Card>
 
         <Card>

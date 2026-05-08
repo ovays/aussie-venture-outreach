@@ -8,6 +8,7 @@ const schema = z.object({
   RESEND_API_KEY: z.string().startsWith('re_'),
   OUTSCRAPER_API_KEY: z.string().min(1),
   TRIGGER_SECRET_KEY: z.string().min(1),
+  GOOGLE_MAPS_API_KEY: z.string().optional(),
   NEXT_PUBLIC_APP_URL: z.string().url().optional().default('http://localhost:3000'),
   ADMIN_EMAIL: z.string().email().optional(),
 })

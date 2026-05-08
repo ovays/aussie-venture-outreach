@@ -15,11 +15,13 @@ interface Setting {
 interface SystemSettingsProps {
   initialSettings: Setting[]
   usageData: OutscraperUsageData
+  hasGoogleMapsKey: boolean
+  searchCacheCount: number
 }
 
 const CITIES = ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide']
 
-export function SystemSettings({ initialSettings, usageData }: SystemSettingsProps) {
+export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, searchCacheCount }: SystemSettingsProps) {
   const [settings, setSettings] = useState<Record<string, string>>(
     Object.fromEntries(initialSettings.map((s) => [s.key, s.value]))
   )
@@ -398,6 +400,133 @@ export function SystemSettings({ initialSettings, usageData }: SystemSettingsPro
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Search API */}
+      <section>
+        <h3 className="text-base font-semibold text-white mb-4">Search API</h3>
+        <div className="space-y-4">
+          {/* Primary API selector */}
+          <div className="py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+            <p className="text-sm text-white mb-1">Primary API</p>
+            <p className="text-xs mb-3" style={{ color: '#64748b' }}>Which API to use for finding businesses. Google Maps is more accurate and cheaper; falls back to Outscraper automatically.</p>
+            <div className="flex gap-4">
+              {['google_maps', 'outscraper'].map((api) => (
+                <label key={api} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="primary_search_api"
+                    value={api}
+                    checked={settings['primary_search_api'] === api}
+                    onChange={() => updateSetting('primary_search_api', api)}
+                    className="accent-sky-500"
+                  />
+                  <span className="text-sm text-white">{api === 'google_maps' ? 'Google Maps' : 'Outscraper'}</span>
+                </label>
+              ))}
+              <SaveIndicator k="primary_search_api" />
+            </div>
+          </div>
+
+          {/* Google Maps spend */}
+          <div className="py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+            <p className="text-sm text-white mb-1">Google Maps this month</p>
+            {(() => {
+              const spend = parseFloat(settings['google_maps_spend_this_month'] ?? '0')
+              const limit = parseFloat(settings['google_maps_monthly_limit'] ?? '180')
+              const pct = Math.min(100, limit > 0 ? (spend / limit) * 100 : 0)
+              return (
+                <div className="space-y-2">
+                  <p className="text-xs" style={{ color: '#94a3b8' }}>${spend.toFixed(4)} / ${limit.toFixed(2)} limit</p>
+                  <div className="h-2 rounded-full overflow-hidden" style={{ background: '#1e2130' }}>
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${pct}%`,
+                        background: pct > 90 ? '#ef4444' : pct > 70 ? '#f59e0b' : '#0284c7',
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs" style={{ color: '#64748b' }}>{pct.toFixed(1)}% of monthly budget used</p>
+                </div>
+              )
+            })()}
+          </div>
+
+          {/* Cost per request */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
+            <div>
+              <p className="text-sm text-white">Cost per Google request ($)</p>
+              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Configurable — update if Google changes pricing</p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm" style={{ color: '#64748b' }}>$</span>
+              <input
+                type="number"
+                value={settings['google_maps_cost_per_request'] ?? '0.032'}
+                onChange={(e) => setSettings((p) => ({ ...p, google_maps_cost_per_request: e.target.value }))}
+                onBlur={(e) => updateSetting('google_maps_cost_per_request', e.target.value)}
+                step={0.001}
+                min={0}
+                className="w-24 px-3 py-2 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
+                style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+              />
+              <SaveIndicator k="google_maps_cost_per_request" />
+            </div>
+          </div>
+
+          {/* Monthly limit */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
+            <div>
+              <p className="text-sm text-white">Google Maps monthly limit ($)</p>
+              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Switch to Outscraper when spend exceeds this</p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm" style={{ color: '#64748b' }}>$</span>
+              <input
+                type="number"
+                value={settings['google_maps_monthly_limit'] ?? '180'}
+                onChange={(e) => setSettings((p) => ({ ...p, google_maps_monthly_limit: e.target.value }))}
+                onBlur={(e) => updateSetting('google_maps_monthly_limit', e.target.value)}
+                min={0}
+                step={10}
+                className="w-24 px-3 py-2 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
+                style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+              />
+              <SaveIndicator k="google_maps_monthly_limit" />
+            </div>
+          </div>
+
+          {/* Current status */}
+          <div className="py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+            <p className="text-sm text-white mb-2">Current status</p>
+            {(() => {
+              const primary = settings['primary_search_api'] ?? 'outscraper'
+              const spend = parseFloat(settings['google_maps_spend_this_month'] ?? '0')
+              const limit = parseFloat(settings['google_maps_monthly_limit'] ?? '180')
+              const overBudget = spend >= limit
+
+              if (primary === 'outscraper') {
+                return <p className="text-sm" style={{ color: '#94a3b8' }}>🔵 Outscraper active (manually selected)</p>
+              }
+              if (!hasGoogleMapsKey) {
+                return <p className="text-sm" style={{ color: '#f87171' }}>🔴 Google Maps key not configured — using Outscraper</p>
+              }
+              if (overBudget) {
+                return <p className="text-sm" style={{ color: '#fbbf24' }}>🟡 Outscraper fallback (Google Maps budget reached)</p>
+              }
+              return <p className="text-sm" style={{ color: '#4ade80' }}>🟢 Google Maps active</p>
+            })()}
+          </div>
+
+          {/* Cache info */}
+          <div className="py-3">
+            <p className="text-sm text-white mb-1">Search cache</p>
+            <p className="text-xs" style={{ color: '#94a3b8' }}>
+              {searchCacheCount} active {searchCacheCount === 1 ? 'entry' : 'entries'} — repeated searches reuse cached results for 7 days, saving API calls.
+            </p>
+          </div>
         </div>
       </section>
 

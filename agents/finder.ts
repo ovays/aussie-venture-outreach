@@ -1,5 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { searchBusinesses } from '@/lib/outscraper'
+import { searchBusinesses, type OutscraperResult } from '@/lib/searchBusinesses'
 import { logger } from '@/lib/logger'
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
@@ -327,10 +327,11 @@ export async function runFinderAgent(): Promise<number> {
   const seenQueries = new Set<string>()
   let costGuardHit = false
 
-  let emailCount          = 0
-  let dmCount             = 0
-  let callCount           = 0
-  let totalResultsFetched = 0
+  let emailCount               = 0
+  let dmCount                  = 0
+  let callCount                = 0
+  let totalResultsFetched      = 0
+  let outscraperResultsFetched = 0
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // PHASE 1 — EMAIL LEADS
@@ -378,7 +379,7 @@ export async function runFinderAgent(): Promise<number> {
           if (costGuardHit) break
 
           // Cost guard — check before every Outscraper call
-          const currentRunEstimate = totalResultsFetched * 0.003
+          const currentRunEstimate = outscraperResultsFetched * 0.003
           if (spentToday + currentRunEstimate >= DAILY_OUTSCRAPER_LIMIT) {
             logger.warn('finder', 'Cost guard triggered', { limit: DAILY_OUTSCRAPER_LIMIT, spentToday, estimate: currentRunEstimate })
             await supabase.from('activity_log').insert({
@@ -390,10 +391,13 @@ export async function runFinderAgent(): Promise<number> {
             break
           }
 
-          let results
+          let results: OutscraperResult[]
+          let apiUsed: string
           try {
             callCount++
-            results = await searchBusinesses(query, category.batchSize, skip)
+            const searchResult = await searchBusinesses(query, category.batchSize, supabase, skip)
+            results = searchResult.results
+            apiUsed = searchResult.apiUsed
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error)
             if (msg.includes('402')) throw error  // balance exhausted — abort pipeline
@@ -406,6 +410,9 @@ export async function runFinderAgent(): Promise<number> {
             break
           }
           totalResultsFetched += results.length
+          if (apiUsed === 'outscraper' || apiUsed === 'outscraper_fallback') {
+            outscraperResultsFetched += results.length
+          }
 
           let newLeadsThisBatch = 0
 
@@ -438,6 +445,11 @@ export async function runFinderAgent(): Promise<number> {
             if (result.email && isValidEmail(result.email)) {
               foundEmail  = result.email
               emailSource = 'outscraper'
+            }
+
+            if (!foundEmail && !rawWebsite) {
+              logger.info('finder', `Skip ${name} — no website, cannot extract email`)
+              continue
             }
 
             if (!foundEmail && rawWebsite) {
@@ -490,6 +502,12 @@ export async function runFinderAgent(): Promise<number> {
           }
 
           if (categoryEmailCount >= categoryLimit) break
+
+          // Google Maps and cache results are complete in one call — no pagination
+          if (apiUsed === 'google_maps' || apiUsed === 'cache') {
+            exhaustedThisQuery = true
+            break
+          }
 
           if (results.length < category.batchSize) {
             exhaustedThisQuery = true
@@ -596,11 +614,12 @@ export async function runFinderAgent(): Promise<number> {
   // SUMMARY
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   const leadsKept     = emailCount + dmCount
-  const estimatedCost = (totalResultsFetched * 0.003).toFixed(4)
+  const estimatedCost = (outscraperResultsFetched * 0.003).toFixed(4)
   const efficiency    = `${leadsKept}/${totalResultsFetched} results used`
   const efficiencyPct = totalResultsFetched > 0 ? ((leadsKept / totalResultsFetched) * 100).toFixed(1) : '0.0'
 
-  logger.info('finder', `Outscraper results fetched: ${totalResultsFetched}`)
+  logger.info('finder', `Outscraper results fetched: ${outscraperResultsFetched}`)
+  logger.info('finder', `Total results fetched (all APIs): ${totalResultsFetched}`)
   logger.info('finder', `Leads kept: ${leadsKept}`)
   logger.info('finder', `Efficiency: ${leadsKept}/${totalResultsFetched} (${efficiencyPct}%)`)
   logger.info('finder', `Estimated Outscraper cost: $${estimatedCost}`)
@@ -628,6 +647,7 @@ export async function runFinderAgent(): Promise<number> {
       outscraper_calls:   callCount,
       results_fetched:    totalResultsFetched,
       leads_kept:         leadsKept,
+      outscraper_results: outscraperResultsFetched,
       estimated_cost:     estimatedCost,
       efficiency,
       cost_guard_hit:     costGuardHit,
