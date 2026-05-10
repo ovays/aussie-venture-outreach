@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { NextResponse, type NextRequest } from 'next/server'
 
 const protectedPrefixes = ['/dashboard', '/api']
@@ -33,6 +34,41 @@ function unauthorized() {
 
 function forbidden() {
   return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
+}
+
+async function getLiveProfileRole(userId: string) {
+  const supabase = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    },
+  )
+
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('role, is_active')
+    .eq('id', userId)
+    .single()
+
+  if (error) {
+    console.log('Admin role check', {
+      userId,
+      role: null,
+      error: error.message,
+    })
+    return null
+  }
+
+  console.log('Admin role check', {
+    userId,
+    role: profile?.role,
+  })
+
+  return profile
 }
 
 export async function proxy(request: NextRequest) {
@@ -72,13 +108,9 @@ export async function proxy(request: NextRequest) {
     return pathname.startsWith('/api') ? unauthorized() : redirectToLogin(request)
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, is_active')
-    .eq('id', user.id)
-    .maybeSingle()
+  const profile = await getLiveProfileRole(user.id)
 
-  if (profile && !profile.is_active) {
+  if (!profile || !profile.is_active) {
     return pathname.startsWith('/api') ? unauthorized() : redirectToLogin(request)
   }
 

@@ -35,7 +35,9 @@
       "Bash(dir agents *)",
       "Bash(curl *)",
       "Bash(npx trigger.dev@4.4.4 run --help)",
-      "Bash(npx *)"
+      "Bash(npx *)",
+      "Bash(Select-String -Path \"C:\\\\agents\\\\aussie-venture-outreach\\\\.env.local\" -Pattern \"GOOGLE_MAPS\")",
+      "Bash(Select-Object -ExpandProperty Line)"
     ]
   }
 }

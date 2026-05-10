@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     email,
     password,
     email_confirm: true,
-    user_metadata: { full_name, role },
+    user_metadata: { full_name },
   })
 
   if (createError || !created.user) {
@@ -107,11 +107,8 @@ export async function PATCH(request: NextRequest) {
     authUpdates.ban_duration = is_active ? 'none' : '876000h'
   }
   if (password !== undefined) authUpdates.password = password
-  if (full_name !== undefined || role !== undefined) {
-    authUpdates.user_metadata = {
-      ...(full_name !== undefined ? { full_name } : {}),
-      ...(role !== undefined ? { role } : {}),
-    }
+  if (full_name !== undefined) {
+    authUpdates.user_metadata = { full_name }
   }
 
   if (Object.keys(authUpdates).length > 0) {

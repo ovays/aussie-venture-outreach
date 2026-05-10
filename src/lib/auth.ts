@@ -62,13 +62,22 @@ async function ensureProfile(user: { id: string; email?: string; user_metadata?:
   return data as Profile
 }
 
+async function fetchLiveProfile(user: { id: string; email?: string; user_metadata?: Record<string, unknown> }) {
+  const profile = await ensureProfile(user)
+  console.log('Admin role check', {
+    userId: user.id,
+    role: profile?.role,
+  })
+  return profile
+}
+
 export const getAuthContext = cache(async (): Promise<AuthContext | null> => {
   const supabase = await createClient()
   const { data: { user }, error } = await supabase.auth.getUser()
 
   if (error || !user) return null
 
-  const profile = await ensureProfile({
+  const profile = await fetchLiveProfile({
     id: user.id,
     email: user.email,
     user_metadata: user.user_metadata,

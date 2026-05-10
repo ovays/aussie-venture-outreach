@@ -52,7 +52,7 @@ BEGIN
     NEW.raw_user_meta_data ->> 'full_name',
     CASE
       WHEN admin_email IS NOT NULL AND lower(NEW.email) = lower(admin_email) THEN 'admin'
-      ELSE COALESCE(NULLIF(NEW.raw_user_meta_data ->> 'role', ''), 'member')
+      ELSE 'member'
     END,
     true
   )
