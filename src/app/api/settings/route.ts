@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/lib/rateLimit'
-import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 
 const patchSettingSchema = z.object({
   key: z.string().min(1),
@@ -10,9 +9,6 @@ const patchSettingSchema = z.object({
 })
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const auth = await requireApiAdmin()
-  if (isAuthErrorResponse(auth)) return auth
-
   const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
   const { allowed } = checkRateLimit(`settings:${ip}`, 30)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
@@ -29,9 +25,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const auth = await requireApiAdmin()
-  if (isAuthErrorResponse(auth)) return auth
-
   const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
   const { allowed } = checkRateLimit(`settings:${ip}`, 30)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })

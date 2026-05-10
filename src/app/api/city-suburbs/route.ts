@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 
 export async function GET() {
-  const auth = await requireApiAdmin()
-  if (isAuthErrorResponse(auth)) return auth
-
   const supabase = createServiceClient()
   const { data, error } = await supabase
     .from('city_suburbs')
@@ -25,9 +21,6 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireApiAdmin()
-  if (isAuthErrorResponse(auth)) return auth
-
   const supabase = createServiceClient()
   const { city, suburb } = await req.json() as { city: string; suburb: string }
 
@@ -42,9 +35,6 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await requireApiAdmin()
-  if (isAuthErrorResponse(auth)) return auth
-
   const supabase = createServiceClient()
   const { id, active } = await req.json() as { id: string; active: boolean }
 
@@ -58,9 +48,6 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const auth = await requireApiAdmin()
-  if (isAuthErrorResponse(auth)) return auth
-
   const supabase = createServiceClient()
   const { id } = await req.json() as { id: string }
 

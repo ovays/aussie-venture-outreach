@@ -24,7 +24,7 @@ const navItems = [
   { href: '/dashboard/pipeline',   label: 'Pipeline',  icon: GitBranch,       adminOnly: false },
   { href: '/dashboard/email-log',  label: 'Email Log', icon: Mail,            adminOnly: false },
   { href: '/dashboard/deals',      label: 'Deals',     icon: DollarSign,      adminOnly: false },
-  { href: '/dashboard/settings',   label: 'Settings',  icon: Settings,        adminOnly: true  },
+  { href: '/dashboard/settings',   label: 'Settings',  icon: Settings,        adminOnly: false },
   { href: '/dashboard/admin',      label: 'Admin',     icon: Shield,          adminOnly: true  },
 ]
 
