@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { requireAdmin } from '@/lib/auth'
 import TopBar from '@/components/layout/TopBar'
 import { SystemSettings } from '@/components/settings/SystemSettings'
 import { CategoriesTable } from '@/components/settings/CategoriesTable'
@@ -29,6 +30,7 @@ export interface OutscraperUsageData {
 }
 
 export default async function SettingsPage() {
+  await requireAdmin()
   const supabase = await createClient()
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()

@@ -13,6 +13,8 @@
 
 ## Overview
 
+> Secure internal multi-user AI operations platform with Supabase Auth, admin-created accounts, persistent email/password sessions, protected route handlers, RBAC, and a dedicated Admin dashboard for team user management.
+
 A production-deployed, fully autonomous multi-agent AI pipeline built with Next.js 16, TypeScript, and Supabase. Six specialised agents — Finder, Researcher, Writer, Sender, Follow-up, and Tracker — are orchestrated via a finite-state-machine lead lifecycle, with each agent reading its input state from the database, doing work, and writing its output state back. No agent calls another directly. Scheduling runs on Trigger.dev v3 (bypassing Vercel's function timeout ceiling); Claude Haiku 4.5 handles all structured-extraction tasks and Claude Sonnet 4.6 handles all generation tasks. A full CRM admin panel built in Next.js 16 with Supabase Realtime provides end-to-end pipeline visibility.
 
 ---
@@ -29,6 +31,20 @@ A production-deployed, fully autonomous multi-agent AI pipeline built with Next.
 ---
 
 ## Architecture
+
+### Authentication and RBAC
+
+Aussie Venture Outreach is private internal tooling. There is no public registration page, no OAuth, no magic links, and no self-service signup. Team access is controlled through Supabase Auth using email/password accounts created by an administrator.
+
+- `profiles` extends `auth.users` with `email`, `full_name`, `role`, `is_active`, and `created_at`
+- Roles are constrained to `admin` and `member`
+- `admin` users can manage users, settings, categories, limits, system toggles, and all outreach workflows
+- `member` users can operate the outreach system, manage leads, campaigns, pipeline, email logs, DM queues, and deals
+- Next.js 16 `proxy.ts` performs request-time session checks for dashboard and internal API routes
+- Server-side auth helpers validate active profiles and enforce admin-only access near route handlers and server-rendered pages
+- Supabase RLS remains enabled, with service-role access reserved for controlled server operations and admin account management
+
+The Admin area is a separate sidebar destination from Settings. Settings remains focused on app configuration, city/category controls, system limits, and pipeline toggles; Admin owns team identity and access management.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐

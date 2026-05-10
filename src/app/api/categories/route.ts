@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 
 export async function GET(): Promise<NextResponse> {
+  const auth = await requireApiAdmin()
+  if (isAuthErrorResponse(auth)) return auth
+
   const supabase = await createClient()
 
   const { data, error } = await supabase
@@ -17,6 +21,9 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const auth = await requireApiAdmin()
+  if (isAuthErrorResponse(auth)) return auth
+
   const supabase = await createClient()
   const body = await request.json() as Record<string, unknown>
 
@@ -34,6 +41,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  const auth = await requireApiAdmin()
+  if (isAuthErrorResponse(auth)) return auth
+
   const supabase = await createClient()
   const body = await request.json() as { id: string; [key: string]: unknown }
   const { id, ...updates } = body

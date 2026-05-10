@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
+import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 
 const TABLES = ['emails', 'dm_queue', 'follow_ups', 'activity_log', 'deals'] as const
 
 export async function POST() {
+  const auth = await requireApiAdmin()
+  if (isAuthErrorResponse(auth)) return auth
+
   try {
     const supabase = createServiceClient()
     const results: Record<string, string> = {}

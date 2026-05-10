@@ -11,23 +11,27 @@ import {
   Mail,
   DollarSign,
   Settings,
+  Shield,
   X,
 } from 'lucide-react'
 import { useSidebar } from './SidebarContext'
+import type { UserRole } from '@/lib/auth-types'
 
 const navItems = [
-  { href: '/dashboard',            label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/dashboard/leads',      label: 'Leads',     icon: Users           },
-  { href: '/dashboard/dm-queue',   label: 'DM Queue',  icon: MessageSquare   },
-  { href: '/dashboard/pipeline',   label: 'Pipeline',  icon: GitBranch       },
-  { href: '/dashboard/email-log',  label: 'Email Log', icon: Mail            },
-  { href: '/dashboard/deals',      label: 'Deals',     icon: DollarSign      },
-  { href: '/dashboard/settings',   label: 'Settings',  icon: Settings        },
+  { href: '/dashboard',            label: 'Dashboard', icon: LayoutDashboard, adminOnly: false },
+  { href: '/dashboard/leads',      label: 'Leads',     icon: Users,           adminOnly: false },
+  { href: '/dashboard/dm-queue',   label: 'DM Queue',  icon: MessageSquare,   adminOnly: false },
+  { href: '/dashboard/pipeline',   label: 'Pipeline',  icon: GitBranch,       adminOnly: false },
+  { href: '/dashboard/email-log',  label: 'Email Log', icon: Mail,            adminOnly: false },
+  { href: '/dashboard/deals',      label: 'Deals',     icon: DollarSign,      adminOnly: false },
+  { href: '/dashboard/settings',   label: 'Settings',  icon: Settings,        adminOnly: true  },
+  { href: '/dashboard/admin',      label: 'Admin',     icon: Shield,          adminOnly: true  },
 ]
 
-export default function Sidebar() {
+export default function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
   const { open, close } = useSidebar()
+  const visibleNavItems = navItems.filter((item) => !item.adminOnly || role === 'admin')
 
   // Close sidebar on route change (mobile nav)
   useEffect(() => { close() }, [pathname, close])
@@ -69,7 +73,7 @@ export default function Sidebar() {
         </div>
 
         <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
-          {navItems.map(({ href, label, icon: Icon }) => {
+          {visibleNavItems.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
             return (
               <Link

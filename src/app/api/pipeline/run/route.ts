@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { tasks, auth } from '@trigger.dev/sdk/v3'
 import { checkRateLimit } from '@/lib/rateLimit'
+import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 import type { dailyPipelineJob } from '../../../../../trigger/daily-pipeline'
 
 export const maxDuration = 30
 
 export async function POST(request: NextRequest) {
+  const apiAuth = await requireApiAdmin()
+  if (isAuthErrorResponse(apiAuth)) return apiAuth
+
   const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
   const { allowed } = checkRateLimit(`pipeline:${ip}`, 3)
   if (!allowed) {

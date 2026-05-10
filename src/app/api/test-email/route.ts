@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { writeOutreachEmail } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
 import { Resend } from 'resend'
+import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 
 const VISIT_ELIGIBLE = [
   'Halal Restaurants', 'Halal Cafes', 'Halal Bakeries / Dessert Shops',
@@ -40,6 +41,9 @@ function wrapInTemplate(innerHtml: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireApiAdmin()
+  if (isAuthErrorResponse(auth)) return auth
+
   try {
     const body = await req.json()
     const { action } = body
