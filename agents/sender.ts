@@ -23,11 +23,11 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
   const { data: limitSetting } = await supabase
     .from('settings')
     .select('value')
-    .eq('key', 'daily_new_outreach_limit')
+    .eq('key', 'daily_lead_limit')
     .single()
 
   const dailyLimit = parseInt(limitSetting?.value ?? '50', 10)
-  logger.info('sender', `daily_new_outreach_limit = ${dailyLimit}`)
+  logger.info('sender', `daily_lead_limit = ${dailyLimit}`)
 
   const today = getAnalyticsDayRange()
   const { count: sentToday } = await supabase
@@ -41,7 +41,7 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
   const remainingToday = Math.max(0, dailyLimit - (sentToday ?? 0))
   logger.info('sender', '[OUTREACH_SENT]', {
     new_outreach_sent_today: sentToday ?? 0,
-    daily_new_outreach_limit: dailyLimit,
+    daily_lead_limit: dailyLimit,
     remaining_new_outreach_capacity: remainingToday,
     today_range: today,
   })
@@ -193,7 +193,7 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
   await supabase.from('activity_log').insert({
     event_type: 'sender_complete',
     description: `Sender agent completed - ${sent} sent, ${failed} failed`,
-    metadata: { sent, failed, daily_new_outreach_limit: dailyLimit, sent_before_run: sentToday ?? 0 },
+    metadata: { sent, failed, daily_lead_limit: dailyLimit, sent_before_run: sentToday ?? 0 },
   })
 
   // Haiku writing (~$0.001/email) + Resend API (free tier / ~$0.0001/email)

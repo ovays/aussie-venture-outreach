@@ -2,11 +2,12 @@
 -- These settings keep new outreach and each follow-up stage from starving each other.
 
 INSERT INTO settings (key, value, description) VALUES
-  ('daily_new_outreach_limit', '40', 'Maximum new outreach emails to send per day'),
   ('daily_followup1_limit', '20', 'Maximum first follow-up emails to send per day'),
   ('daily_followup2_limit', '10', 'Maximum second follow-up emails to send per day'),
   ('daily_followup3_limit', '5', 'Maximum final follow-up emails to send per day')
 ON CONFLICT (key) DO NOTHING;
+
+DELETE FROM settings WHERE key = 'daily_new_outreach_limit';
 
 ALTER TABLE emails DROP CONSTRAINT IF EXISTS emails_type_check;
 ALTER TABLE emails ADD CONSTRAINT emails_type_check CHECK (

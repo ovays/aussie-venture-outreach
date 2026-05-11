@@ -277,12 +277,6 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
           {/* Email orchestration limits */}
           {[
             {
-              key: 'daily_new_outreach_limit',
-              label: 'Daily New Outreach Limit',
-              description: 'Max new outreach emails to send per day',
-              max: 500,
-            },
-            {
               key: 'daily_followup1_limit',
               label: 'Daily Follow-up 1 Limit',
               description: 'Max first follow-up emails to send per day',
