@@ -4,6 +4,7 @@ interface DailyRow {
   leadsFound: number
   emailsSent: number
   dmsQueued: number
+  followupsSent: number
 }
 
 interface DailyActivityProps {
@@ -16,7 +17,7 @@ export function DailyActivity({ rows }: DailyActivityProps) {
       <table className="w-full text-sm">
         <thead>
           <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
-            {['Date', 'Leads Found', 'Emails Sent', 'DMs Queued'].map((h) => (
+            {['Date', 'Leads Found', 'Emails Sent', 'DMs Queued', 'Follow-ups Sent'].map((h) => (
               <th
                 key={h}
                 className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider"
@@ -39,6 +40,9 @@ export function DailyActivity({ rows }: DailyActivityProps) {
               </td>
               <td className="px-4 py-2.5" style={{ color: row.dmsQueued > 0 ? '#f472b6' : '#64748b' }}>
                 {row.dmsQueued}
+              </td>
+              <td className="px-4 py-2.5" style={{ color: row.followupsSent > 0 ? '#a78bfa' : '#64748b' }}>
+                {row.followupsSent}
               </td>
             </tr>
           ))}

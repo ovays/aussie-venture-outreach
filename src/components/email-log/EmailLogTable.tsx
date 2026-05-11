@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { formatDate, formatDateTime } from '@/lib/utils'
+import type { DashboardMetrics } from '@/lib/analytics'
 
 interface EmailRecord {
   id: string
@@ -37,6 +38,7 @@ export function EmailLogTable() {
   const [selectedEmail, setSelectedEmail] = useState<EmailRecord | null>(null)
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
 
   const fetchEmails = useCallback(async () => {
     setLoading(true)
@@ -45,16 +47,17 @@ export function EmailLogTable() {
     if (statusFilter) params.set('status', statusFilter)
 
     const res = await fetch(`/api/email-log?${params}`)
-    const json = await res.json() as { data: EmailRecord[] }
+    const json = await res.json() as { data: EmailRecord[]; metrics?: DashboardMetrics }
     setEmails(json.data ?? [])
+    setMetrics(json.metrics ?? null)
     setLoading(false)
   }, [typeFilter, statusFilter])
 
   useEffect(() => { fetchEmails() }, [fetchEmails])
 
-  const totalSent = emails.filter((e) => e.status === 'sent').length
-  const totalReplied = emails.filter((e) => e.replied_at).length
-  const replyRate = totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0
+  const totalSent = metrics?.replyStats.totalSent ?? emails.filter((e) => e.status === 'sent').length
+  const totalReplied = metrics?.replyStats.totalReplies ?? emails.filter((e) => e.replied_at).length
+  const replyRate = metrics?.replyStats.replyRate ?? (totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0)
   const bounced = emails.filter((e) => e.status === 'bounced').length
   const bounceRate = totalSent > 0 ? Math.round((bounced / totalSent) * 100) : 0
 

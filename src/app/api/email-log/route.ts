@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getDashboardMetrics, logAnalyticsMetrics } from '@/lib/analytics'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const supabase = await createClient()
@@ -17,11 +18,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (type) query = query.eq('type', type)
   if (status) query = query.eq('status', status)
 
-  const { data, error, count } = await query
+  const [{ data, error, count }, metrics] = await Promise.all([
+    query,
+    getDashboardMetrics(supabase),
+  ])
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ data, count })
+  logAnalyticsMetrics('[EMAIL_LOG_METRICS]', {
+    range: metrics.todayEmailStats.range,
+    totalEmails: metrics.todayEmailStats.totalSent,
+    followups: metrics.followupStats.sentToday,
+    replies: metrics.replyStats.repliesToday,
+  })
+
+  return NextResponse.json({ data, count, metrics })
 }
