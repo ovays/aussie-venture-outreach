@@ -16,7 +16,7 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
   logger.info('sender', `system_active = "${systemSetting?.value}"`)
 
   if (systemSetting?.value !== 'true') {
-    logger.info('sender', 'System paused - skipped')
+    logger.info('sender', '[PIPELINE_STAGE] Sender exiting', { reason: 'system_paused', system_active: systemSetting?.value ?? null })
     return { sent: 0, failed: 0 }
   }
 
@@ -47,7 +47,12 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
   })
 
   if (remainingToday <= 0) {
-    logger.info('sender', 'New outreach email daily limit reached - sender skipped')
+    logger.info('sender', '[PIPELINE_STAGE] Sender exiting', {
+      reason: 'new_outreach_email_limit_reached',
+      daily_email_limit: dailyLimit,
+      initial_pitch_sent_today: sentToday ?? 0,
+      remaining_new_outreach_email_capacity: remainingToday,
+    })
     return { sent: 0, failed: 0 }
   }
 
@@ -84,7 +89,12 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
   logger.info('sender', `fetched ${pendingEmails?.length ?? 0} pending emails to process`)
 
   if (!pendingEmails?.length) {
-    logger.info('sender', 'No pending emails — emails table has no pending_send rows')
+    logger.info('sender', '[PIPELINE_STAGE] Sender exiting', {
+      reason: 'no_pending_initial_pitch_emails',
+      pending_send_emails: pendingCount ?? 0,
+      email_ready_leads: emailReadyCount ?? 0,
+      email_ready_with_email: emailReadyWithEmail ?? 0,
+    })
     return { sent: 0, failed: 0 }
   }
 
@@ -199,7 +209,7 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
   // Haiku writing (~$0.001/email) + Resend API (free tier / ~$0.0001/email)
   const estimatedCost = (sent * 0.0011).toFixed(4)
   logger.info('sender', '[OUTREACH_SENT]', { new_outreach_sent: sent })
-  logger.info('sender', 'Done', { sent, failed })
+  logger.info('sender', '[PIPELINE_STAGE] Sender complete', { sent, failed })
   logger.info('sender', `Total pipeline cost estimate: $${estimatedCost} (Haiku writing + Resend; see finder log for Outscraper cost)`)
   return { sent, failed }
 

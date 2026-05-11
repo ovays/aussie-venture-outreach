@@ -18,8 +18,9 @@ export const dailyPipelineJob = schedules.task({
     let leadsFound = 0
 
     try {
-      console.log("Step 1: Finder agent")
+      console.log("[PIPELINE_STAGE] Finder starting")
       leadsFound = await runFinderAgent()
+      console.log("[PIPELINE_STAGE] Finder complete", { leadsFound })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error("PIPELINE FAILED at Step 1 (Finder):", error)
@@ -27,8 +28,9 @@ export const dailyPipelineJob = schedules.task({
     }
 
     try {
-      console.log("Step 2: Researcher agent")
-      await runResearcherAgent()
+      console.log("[PIPELINE_STAGE] Researcher starting", { leadsFound })
+      const researched = await runResearcherAgent()
+      console.log("[PIPELINE_STAGE] Researcher complete", { researched })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error("PIPELINE FAILED at Step 2 (Researcher):", error)
@@ -36,8 +38,9 @@ export const dailyPipelineJob = schedules.task({
     }
 
     try {
-      console.log("Step 3: Writer agent")
+      console.log("[PIPELINE_STAGE] Writer starting")
       await runWriterAgent()
+      console.log("[PIPELINE_STAGE] Writer complete")
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error("PIPELINE FAILED at Step 3 (Writer):", error)
@@ -45,8 +48,9 @@ export const dailyPipelineJob = schedules.task({
     }
 
     try {
-      console.log("Step 4: Sender agent")
-      await runSenderAgent()
+      console.log("[PIPELINE_STAGE] Sender starting")
+      const senderResult = await runSenderAgent()
+      console.log("[PIPELINE_STAGE] Sender complete", senderResult)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error("PIPELINE FAILED at Step 4 (Sender):", error)
@@ -62,7 +66,7 @@ export const dailyPipelineJob = schedules.task({
       throw new Error(`Pipeline failed at Follow-up: ${message}`)
     }
 
-    console.log("Daily pipeline complete")
+    console.log("[PIPELINE_STAGE] Pipeline complete", { reason: "all_stages_finished", leadsFound })
     return { leadsFound }
   }
 })

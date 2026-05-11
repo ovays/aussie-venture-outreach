@@ -18,7 +18,7 @@ export async function runWriterAgent(): Promise<void> {
   logger.info('writer', `system_active = "${systemSetting?.value}"`, { err: settingErr?.message ?? 'none' })
 
   if (systemSetting?.value !== 'true') {
-    logger.info('writer', 'System paused — writer skipped')
+    logger.info('writer', '[PIPELINE_STAGE] Writer exiting', { reason: 'system_paused', system_active: systemSetting?.value ?? null })
     return
   }
 
@@ -74,7 +74,7 @@ export async function runWriterAgent(): Promise<void> {
   if (leadsErr) logger.error('writer', 'Error fetching researched leads', { error: leadsErr.message })
 
   if (!leads?.length) {
-    logger.info('writer', 'No researched leads found — nothing to process')
+    logger.info('writer', '[PIPELINE_STAGE] Writer exiting', { reason: 'no_researched_leads' })
     return
   }
 
@@ -217,7 +217,7 @@ export async function runWriterAgent(): Promise<void> {
     }
   }
 
-  logger.info('writer', 'Done', { emailsQueued, dmsQueued, deadCount })
+  logger.info('writer', '[PIPELINE_STAGE] Writer complete', { emailsQueued, dmsQueued, deadCount, totalProcessed: processed })
 
   await supabase.from('activity_log').insert({
     event_type: 'writer_complete',
