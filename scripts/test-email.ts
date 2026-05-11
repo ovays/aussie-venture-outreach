@@ -10,7 +10,7 @@ const bodyText = `Hey Taste of Istanbul,
 
 Came across you on Google while looking for great halal spots in Lakemba. Food looks amazing.
 
-I run Aussie Venture, an Australian food and lifestyle page with around 650 followers. We're building out our halal food content and would love to feature you.
+I run Aussie Venture, an Australian food and lifestyle page with around 650K+ followers. We're building out our halal food content and would love to feature you.
 
 Would love to come in and try the food - no cost at all, just a collab. Let me know if you're keen!
 
@@ -46,7 +46,7 @@ const html = `<!DOCTYPE html>
 
       <p style="margin:0 0 18px;">
         I run <strong>Aussie Venture</strong>, an Australian food and lifestyle page with around
-        <strong>650 followers</strong>. We're building out our halal food content and would love
+        <strong>650K+ followers</strong>. We're building out our halal food content and would love
         to feature you.
       </p>
 

@@ -53,12 +53,12 @@ function getCategoryPitch(category: string): string {
   const travel = ['Travel Agents', 'Tour Operators']
   const accommodation = ['Hotels / Resorts']
 
-  if (halalFood.includes(category)) return 'Owais creates halal food content for 650+ Australians and wants to collab with this business.'
-  if (beauty.includes(category)) return 'Owais creates lifestyle content for 650+ Australians and wants to collab with this business.'
-  if (wellness.includes(category)) return 'Owais creates lifestyle content for 650+ Australians and wants to collab with this business.'
-  if (travel.includes(category)) return 'Owais creates Australian travel content for 650+ Australians and wants to collab with this business.'
-  if (accommodation.includes(category)) return 'Owais creates Australian travel and lifestyle content for 650+ Australians and wants to collab with this property.'
-  return 'Owais creates Australian food, travel and lifestyle content for 650+ Australians and wants to collab with this business.'
+  if (halalFood.includes(category)) return 'Owais creates halal food content for 650K+ Australians and wants to collab with this business.'
+  if (beauty.includes(category)) return 'Owais creates lifestyle content for 650K+ Australians and wants to collab with this business.'
+  if (wellness.includes(category)) return 'Owais creates lifestyle content for 650K+ Australians and wants to collab with this business.'
+  if (travel.includes(category)) return 'Owais creates Australian travel content for 650K+ Australians and wants to collab with this business.'
+  if (accommodation.includes(category)) return 'Owais creates Australian travel and lifestyle content for 650K+ Australians and wants to collab with this property.'
+  return 'Owais creates Australian food, travel and lifestyle content for 650K+ Australians and wants to collab with this business.'
 }
 
 export async function extractWebsiteData(websiteContent: string): Promise<{
@@ -129,14 +129,14 @@ export async function writeOutreachEmail(params: {
 
 FACTS (only use these, never invent others):
 - Aussie Venture is a ${getBrandDescription(params.category)} with a national audience
-- 650+ followers across Facebook, Instagram and TikTok
+- 650K+ followers across Facebook, Instagram and TikTok
 
 Business: ${params.business_name}, ${params.suburb} ${params.city}
 Category: ${params.category}
 
 WHAT THE EMAIL MUST DO:
 1. Open with "Hey ${params.business_name},"
-2. Briefly introduce yourself and Aussie Venture — mention the 650+ followers once
+2. Briefly introduce yourself and Aussie Venture — mention the 650K+ followers once
 3. Say you'd love to work together or collab
 4. End with exactly: "Would you be keen to collab?"
 
@@ -181,7 +181,7 @@ Respond in JSON: { "subject": "...", "body": "..." }`,
   }
   return {
     subject: `Collab with Aussie Venture - ${params.business_name}`,
-    body: `Hey ${params.business_name},\n\nI run Aussie Venture, a ${getBrandDescription(params.category)} with 650+ followers across Facebook, Instagram and TikTok. Would love to work together.\n\nWould you be keen to collab?\n\nCheers,\nOwais\nAussie Venture\nhello@aussieventure.com\naussieventure.com\ninstagram.com/aussie.venture\ntiktok.com/@aussie.venture\nfacebook.com/AussieVenture\nfacebook.com/Sydneyventure`,
+    body: `Hey ${params.business_name},\n\nI run Aussie Venture, a ${getBrandDescription(params.category)} with 650K+ followers across Facebook, Instagram and TikTok. Would love to work together.\n\nWould you be keen to collab?\n\nCheers,\nOwais\nAussie Venture\nhello@aussieventure.com\naussieventure.com\ninstagram.com/aussie.venture\ntiktok.com/@aussie.venture\nfacebook.com/AussieVenture\nfacebook.com/Sydneyventure`,
   }
 }
 
@@ -373,7 +373,7 @@ export async function writeOutreachDM(params: {
       messages: [
         {
           role: 'user',
-          content: `You're Owais. You run Aussie Venture, an Australian food, travel and lifestyle brand with 650+ followers across Facebook, Instagram and TikTok. Write a short Instagram DM to this business.
+          content: `You're Owais. You run Aussie Venture, an Australian food, travel and lifestyle brand with 650K+ followers across Facebook, Instagram and TikTok. Write a short Instagram DM to this business.
 
 Business: ${params.business_name}, ${params.suburb} ${params.city}
 Category: ${params.category}
@@ -385,7 +385,7 @@ Rules:
 - Sound like a real person, not a brand
 - No em dashes, no bullet points, no corporate language
 - No "I wanted to reach out", no "I came across your page"
-- You may mention 650+ followers once if it adds credibility
+- You may mention 650K+ followers once if it adds credibility
 - NEVER mention free, no cost, no charge, or anything being free
 - NEVER say "paid collab" - use "sponsored feature" or "collab" instead
 - Never state a price
