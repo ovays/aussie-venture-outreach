@@ -11,9 +11,16 @@ interface EmailAnalyticsRow {
   id: string
   lead_id: string | null
   type: EmailType
+  status?: string | null
   sent_at: string | null
   replied_at: string | null
   leads?: { business_name: string } | { business_name: string }[] | null
+}
+
+interface ContactedFollowupLead {
+  id: string
+  status: string
+  emails?: EmailAnalyticsRow[] | null
 }
 
 export interface AnalyticsRange {
@@ -34,6 +41,10 @@ export interface TodayEmailStats {
   followUp3Sent: number
 }
 
+export interface TodayDmStats {
+  sentToday: number
+}
+
 export interface ReplyStats {
   totalContactedLeads: number
   positiveResponseLeads: number
@@ -46,6 +57,12 @@ export interface FollowupStats {
   sentToday: number
   totalSent: number
   pending: number
+  followUp1SentToday: number
+  followUp2SentToday: number
+  followUp3SentToday: number
+  pendingFollowUp1: number
+  pendingFollowUp2: number
+  pendingFollowUp3: number
 }
 
 export interface DailyActivityRow {
@@ -59,6 +76,7 @@ export interface DailyActivityRow {
 
 export interface DashboardMetrics {
   todayEmailStats: TodayEmailStats
+  todayDmStats: TodayDmStats
   replyStats: ReplyStats
   followupStats: FollowupStats
   dailyRows: DailyActivityRow[]
@@ -68,6 +86,7 @@ export interface DashboardMetrics {
 const FOLLOW_UP_TYPES: EmailType[] = ['follow_up_1', 'follow_up_2', 'follow_up_3']
 const POSITIVE_RESPONSE_STATUSES = ['replied', 'negotiating', 'interested', 'closed_won', 'closed']
 const CONTACTED_LEAD_STATUSES = ['contacted', 'replied', 'negotiating', 'interested', 'closed_won', 'closed', 'dead']
+const FOLLOWUP_PENDING_LEAD_STATUSES = ['contacted']
 
 function getZonedParts(date: Date, timeZone = ANALYTICS_TIMEZONE) {
   const parts = new Intl.DateTimeFormat('en-AU', {
@@ -188,6 +207,20 @@ export async function getTodayEmailStats(supabase: QueryClient, date = new Date(
   }
 }
 
+export async function getTodayDmStats(supabase: QueryClient, date = new Date()): Promise<TodayDmStats> {
+  const range = getAnalyticsDayRange(date)
+  const { count } = await supabase
+    .from('dm_queue')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'sent')
+    .gte('sent_at', range.start)
+    .lt('sent_at', range.end)
+
+  return {
+    sentToday: count ?? 0,
+  }
+}
+
 export async function getReplyStats(supabase: QueryClient, date = new Date()): Promise<ReplyStats> {
   const range = getAnalyticsDayRange(date)
   const [{ count: totalContactedLeads }, { count: positiveResponseLeads }, { count: repliesToday }] = await Promise.all([
@@ -223,7 +256,13 @@ export async function getReplyStats(supabase: QueryClient, date = new Date()): P
 
 export async function getFollowupStats(supabase: QueryClient, date = new Date()): Promise<FollowupStats> {
   const range = getAnalyticsDayRange(date)
-  const [{ count: sentToday }, { count: totalSent }, { count: pending }] = await Promise.all([
+  const [
+    { count: sentToday },
+    { count: totalSent },
+    { data: sentTodayByType },
+    { data: settingsRows },
+    { data: contactedLeads },
+  ] = await Promise.all([
     supabase
       .from('emails')
       .select('*', { count: 'exact', head: true })
@@ -236,13 +275,85 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
       .select('*', { count: 'exact', head: true })
       .eq('status', 'sent')
       .in('type', FOLLOW_UP_TYPES),
-    supabase.from('follow_ups').select('*', { count: 'exact', head: true }).eq('status', 'scheduled'),
+    supabase
+      .from('emails')
+      .select('type')
+      .eq('status', 'sent')
+      .in('type', FOLLOW_UP_TYPES)
+      .gte('sent_at', range.start)
+      .lt('sent_at', range.end),
+    supabase
+      .from('settings')
+      .select('key, value')
+      .in('key', ['follow_up_1_days', 'follow_up_2_days', 'dead_lead_days']),
+    supabase
+      .from('leads')
+      .select('id, status, emails(id, lead_id, type, status, sent_at, replied_at)')
+      .in('status', FOLLOWUP_PENDING_LEAD_STATUSES),
   ])
+
+  const settings: Record<string, number> = {}
+  for (const row of settingsRows ?? []) {
+    settings[row.key] = parseInt(row.value, 10)
+  }
+
+  const followUp1Days = settings['follow_up_1_days'] ?? 7
+  const followUp2Days = settings['follow_up_2_days'] ?? 14
+  const followUp3Days = settings['dead_lead_days'] ?? 21
+
+  let pendingFollowUp1 = 0
+  let pendingFollowUp2 = 0
+  let pendingFollowUp3 = 0
+
+  for (const lead of (contactedLeads ?? []) as ContactedFollowupLead[]) {
+    const emailsList = lead.emails ?? []
+    const initialEmail = emailsList.find((email) => email.type === 'initial_pitch' && email.sent_at)
+    if (!initialEmail?.sent_at) continue
+
+    const daysSince = Math.floor((date.getTime() - new Date(initialEmail.sent_at).getTime()) / DAY_MS)
+    const hasFollowUp1 = emailsList.some((email) => email.type === 'follow_up_1')
+    const hasFollowUp2 = emailsList.some((email) => email.type === 'follow_up_2')
+    const hasFollowUp3 = emailsList.some((email) => email.type === 'follow_up_3')
+
+    if (daysSince >= followUp3Days && hasFollowUp1 && hasFollowUp2 && !hasFollowUp3) {
+      pendingFollowUp3++
+    } else if (daysSince >= followUp2Days && hasFollowUp1 && !hasFollowUp2) {
+      pendingFollowUp2++
+    } else if (daysSince >= followUp1Days && !hasFollowUp1) {
+      pendingFollowUp1++
+    }
+  }
+
+  const followUp1SentToday = ((sentTodayByType ?? []) as Array<{ type: EmailType }>).filter(
+    (email) => email.type === 'follow_up_1'
+  ).length
+  const followUp2SentToday = ((sentTodayByType ?? []) as Array<{ type: EmailType }>).filter(
+    (email) => email.type === 'follow_up_2'
+  ).length
+  const followUp3SentToday = ((sentTodayByType ?? []) as Array<{ type: EmailType }>).filter(
+    (email) => email.type === 'follow_up_3'
+  ).length
+  const pending = pendingFollowUp1 + pendingFollowUp2 + pendingFollowUp3
+
+  console.log('[DASHBOARD_FOLLOWUP_METRICS]', {
+    fu1_sent_today: followUp1SentToday,
+    fu2_sent_today: followUp2SentToday,
+    fu3_sent_today: followUp3SentToday,
+    pending_fu1: pendingFollowUp1,
+    pending_fu2: pendingFollowUp2,
+    pending_fu3: pendingFollowUp3,
+  })
 
   return {
     sentToday: sentToday ?? 0,
     totalSent: totalSent ?? 0,
-    pending: pending ?? 0,
+    pending,
+    followUp1SentToday,
+    followUp2SentToday,
+    followUp3SentToday,
+    pendingFollowUp1,
+    pendingFollowUp2,
+    pendingFollowUp3,
   }
 }
 
@@ -287,8 +398,9 @@ export async function getDashboardMetrics(supabase: QueryClient, date = new Date
   const oldestWeekDateKey = shiftedSydneyDateKey(6, date)
   const weekStart = rangeForDateKey(oldestWeekDateKey).start
 
-  const [todayEmailStats, replyStats, followupStats, dailyRows, { count: emailsSentThisWeek }] = await Promise.all([
+  const [todayEmailStats, todayDmStats, replyStats, followupStats, dailyRows, { count: emailsSentThisWeek }] = await Promise.all([
     getTodayEmailStats(supabase, date),
+    getTodayDmStats(supabase, date),
     getReplyStats(supabase, date),
     getFollowupStats(supabase, date),
     getDailyActivityRows(supabase, 7, date),
@@ -302,6 +414,7 @@ export async function getDashboardMetrics(supabase: QueryClient, date = new Date
 
   return {
     todayEmailStats,
+    todayDmStats,
     replyStats,
     followupStats,
     dailyRows,

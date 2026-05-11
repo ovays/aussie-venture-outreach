@@ -94,6 +94,60 @@ export default async function DashboardPage() {
           />
         </div>
 
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <StatsCard
+            label="New Outreach Emails Sent Today"
+            value={analytics.todayEmailStats.initialSent}
+            sub="Initial pitches"
+            accent="#38bdf8"
+          />
+          <StatsCard
+            label="New DMs Sent Today"
+            value={analytics.todayDmStats.sentToday}
+            sub="Marked sent"
+            accent="#f472b6"
+          />
+          <StatsCard
+            label="Follow-up 1 Sent Today"
+            value={analytics.followupStats.followUp1SentToday}
+            sub="FU1"
+            accent="#a78bfa"
+          />
+          <StatsCard
+            label="Follow-up 2 Sent Today"
+            value={analytics.followupStats.followUp2SentToday}
+            sub="FU2"
+            accent="#c084fc"
+          />
+          <StatsCard
+            label="Follow-up 3 Sent Today"
+            value={analytics.followupStats.followUp3SentToday}
+            sub="FU3"
+            accent="#d8b4fe"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <StatsCard
+            label="Pending Follow-up 1"
+            value={analytics.followupStats.pendingFollowUp1}
+            sub="Eligible contacted leads"
+            accent="#a78bfa"
+          />
+          <StatsCard
+            label="Pending Follow-up 2"
+            value={analytics.followupStats.pendingFollowUp2}
+            sub="Eligible contacted leads"
+            accent="#c084fc"
+          />
+          <StatsCard
+            label="Pending Follow-up 3"
+            value={analytics.followupStats.pendingFollowUp3}
+            sub="Eligible contacted leads"
+            accent="#d8b4fe"
+          />
+        </div>
+
         <Card>
           <h3 className="text-sm font-semibold mb-3 text-white">Pipeline</h3>
           <PipelineSummary counts={pipelineCounts} />
@@ -124,10 +178,13 @@ export default async function DashboardPage() {
               <h3 className="text-sm font-semibold mb-3 text-white">Quick Stats</h3>
               <div className="space-y-3">
                 {[
-                  { label: 'Emails sent today', value: analytics.todayEmailStats.totalSent },
+                  { label: 'New outreach emails today', value: analytics.todayEmailStats.initialSent },
+                  { label: 'New DMs sent today', value: analytics.todayDmStats.sentToday },
                   { label: 'Follow-ups sent today', value: analytics.followupStats.sentToday },
+                  { label: 'FU1 / FU2 / FU3 today', value: `${analytics.followupStats.followUp1SentToday} / ${analytics.followupStats.followUp2SentToday} / ${analytics.followupStats.followUp3SentToday}` },
                   { label: 'Total follow-ups sent', value: analytics.followupStats.totalSent },
                   { label: 'Pending follow-ups', value: analytics.followupStats.pending },
+                  { label: 'Pending FU1 / FU2 / FU3', value: `${analytics.followupStats.pendingFollowUp1} / ${analytics.followupStats.pendingFollowUp2} / ${analytics.followupStats.pendingFollowUp3}` },
                   { label: 'Replies Today', value: analytics.replyStats.repliesToday },
                   { label: 'DMs in queue', value: pendingDMs?.length ?? 0 },
                   { label: 'Deals this month', value: dealsThisMonth?.length ?? 0 },
