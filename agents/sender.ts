@@ -56,6 +56,10 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     return { sent: 0, failed: 0 }
   }
 
+  const emailStatusesQueried = ['pending_send']
+  const emailTypesQueried = ['initial_pitch']
+  const leadStatusesQueried = ['email_ready']
+
   // Diagnostic: count total pending_send emails before applying limit
   const { count: pendingCount } = await supabase
     .from('emails')
@@ -78,20 +82,53 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .not('email', 'is', null)
   logger.info('sender', `email_ready leads with a real email: ${emailReadyWithEmail ?? 0}`)
 
-  const { data: pendingEmails } = await supabase
+  const { count: eligiblePendingCount, error: eligibleCountErr } = await supabase
     .from('emails')
-    .select('*, leads(email, business_name)')
+    .select('id, leads!inner(id)', { count: 'exact', head: true })
     .eq('status', 'pending_send')
     .eq('type', 'initial_pitch')
+    .eq('leads.status', 'email_ready')
+
+  if (eligibleCountErr) {
+    logger.error('sender', '[SENDER_QUERY] Eligible count failed', { error: eligibleCountErr.message })
+    throw eligibleCountErr
+  }
+
+  logger.info('sender', '[SENDER_QUERY]', {
+    statuses_queried: emailStatusesQueried,
+    email_types_queried: emailTypesQueried,
+    lead_statuses_queried: leadStatusesQueried,
+    pending_rows_found: eligiblePendingCount ?? 0,
+    pending_send_rows_all_types: pendingCount ?? 0,
+    email_ready_leads: emailReadyCount ?? 0,
+    email_ready_with_email: emailReadyWithEmail ?? 0,
+  })
+
+  const { data: pendingEmails, error: pendingEmailsErr } = await supabase
+    .from('emails')
+    .select('*, leads!inner(id, email, business_name, status)')
+    .eq('status', 'pending_send')
+    .eq('type', 'initial_pitch')
+    .eq('leads.status', 'email_ready')
     .order('created_at', { ascending: true })
     .limit(remainingToday)
 
+  if (pendingEmailsErr) {
+    logger.error('sender', '[SENDER_QUERY] Selection failed', { error: pendingEmailsErr.message })
+    throw pendingEmailsErr
+  }
+
   logger.info('sender', `fetched ${pendingEmails?.length ?? 0} pending emails to process`)
+  logger.info('sender', '[SENDER_SELECTION]', {
+    selected_email_ids: (pendingEmails ?? []).map((email) => email.id),
+    selected_lead_ids: (pendingEmails ?? []).map((email) => email.lead_id),
+  })
 
   if (!pendingEmails?.length) {
     logger.info('sender', '[PIPELINE_STAGE] Sender exiting', {
       reason: 'no_pending_initial_pitch_emails',
       pending_send_emails: pendingCount ?? 0,
+      eligible_pending_send_emails: eligiblePendingCount ?? 0,
       email_ready_leads: emailReadyCount ?? 0,
       email_ready_with_email: emailReadyWithEmail ?? 0,
     })
@@ -104,7 +141,7 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
 
   for (let i = 0; i < pendingEmails.length; i++) {
     const emailRecord = pendingEmails[i]
-    const lead = emailRecord.leads as { email: string | null; business_name: string } | null
+    const lead = emailRecord.leads as { id: string; email: string | null; business_name: string; status: string } | null
 
     if (!lead?.email) {
       logger.info('sender', `#${i + 1}/${total} SKIP — no email address for lead`, { lead_id: emailRecord.lead_id })
