@@ -210,6 +210,14 @@ export async function runFollowUpAgent(): Promise<void> {
       follow_up_3: Math.max(0, limits.follow_up_3 - sentBeforeRun.follow_up_3),
     } satisfies Record<FollowUpType, number>
 
+    logger.info('followup', '[FOLLOWUP_ALLOCATION]', {
+      fu1_allocation: remaining.follow_up_1,
+      fu2_allocation: remaining.follow_up_2,
+      fu3_allocation: remaining.follow_up_3,
+      limits,
+      sent_before_run: sentBeforeRun,
+    })
+
     const { data: contactedLeads } = await supabase
       .from('leads')
       .select('*, emails(id, type, subject, sent_at)')

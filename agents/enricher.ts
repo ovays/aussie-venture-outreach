@@ -155,11 +155,20 @@ export async function runEnricherAgent(): Promise<number> {
     supabase.from('settings').select('value').eq('key', 'daily_lead_limit').single(),
   ])
 
-  const EMAIL_TARGET = parseInt(emailLimitRow.data?.value ?? '30', 10)
-  const INSTA_TARGET = parseInt(dmLimitRow.data?.value ?? '10', 10)
+  const DAILY_EMAIL_LIMIT = parseInt(emailLimitRow.data?.value ?? '30', 10)
+  const DAILY_DM_LIMIT = parseInt(dmLimitRow.data?.value ?? '10', 10)
   const TOTAL_TARGET = parseInt(leadLimitRow.data?.value ?? '50', 10)
+  const EMAIL_TARGET = Math.min(DAILY_EMAIL_LIMIT, TOTAL_TARGET)
+  const INSTA_TARGET = Math.min(DAILY_DM_LIMIT, Math.max(0, TOTAL_TARGET - EMAIL_TARGET))
 
   console.log(`[enricher] Targets — email: ${EMAIL_TARGET}, instagram: ${INSTA_TARGET}, total: ${TOTAL_TARGET}`)
+  console.log('[NEW_OUTREACH_ALLOCATION]', {
+    daily_lead_limit: TOTAL_TARGET,
+    email_allocation: EMAIL_TARGET,
+    dm_allocation: INSTA_TARGET,
+    configured_daily_email_limit: DAILY_EMAIL_LIMIT,
+    configured_daily_dm_limit: DAILY_DM_LIMIT,
+  })
 
   // Read all 'new' leads, highest rated first
   const { data: pool } = await supabase

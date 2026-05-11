@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": ["../../../../../Users/owais/AppData/Local/npm-cache/_npx/f51a09bd0abf5f10/node_modules/@opentelemetry/resources/src/detectors/platform/node/machine-id/getMachineId-unsupported.ts"],
+  "mappings": ";;;;;;;;;;;;;;;;;AAgBA,QAAA,QAAA;AAEO,mBAAe,eAAY;AAChC,YAAA,KAAK,MAAM,iDAAiD;AAC5D,aAAO;IACT;AAHsB;AAAtB,YAAA,eAAA;;;",
+  "names": []
+}

@@ -262,13 +262,22 @@ export async function runFinderAgent(): Promise<number> {
     supabase.from('settings').select('value').eq('key', 'daily_outscraper_limit').single(),
   ])
 
-  const EMAIL_TARGET           = parseInt(emailLimitRow.data?.value ?? '30', 10)
-  const DM_TARGET              = parseInt(dmLimitRow.data?.value   ?? '10', 10)
+  const DAILY_EMAIL_LIMIT      = parseInt(emailLimitRow.data?.value ?? '30', 10)
+  const DAILY_DM_LIMIT         = parseInt(dmLimitRow.data?.value   ?? '10', 10)
   const TOTAL_TARGET           = parseInt(totalLimitRow.data?.value ?? '40', 10)
+  const EMAIL_TARGET           = Math.min(DAILY_EMAIL_LIMIT, TOTAL_TARGET)
+  const DM_TARGET              = Math.min(DAILY_DM_LIMIT, Math.max(0, TOTAL_TARGET - EMAIL_TARGET))
   const DAILY_OUTSCRAPER_LIMIT = parseFloat(dailyOutscraperLimitRow.data?.value ?? '1.00')
-  const cappedLimit            = Math.floor(EMAIL_TARGET / 4)
+  const cappedLimit            = EMAIL_TARGET > 0 ? Math.max(1, Math.ceil(EMAIL_TARGET / 4)) : 0
 
   logger.info('finder', 'Targets', { emailTarget: EMAIL_TARGET, dmTarget: DM_TARGET, totalTarget: TOTAL_TARGET })
+  logger.info('finder', '[NEW_OUTREACH_ALLOCATION]', {
+    daily_lead_limit: TOTAL_TARGET,
+    email_allocation: EMAIL_TARGET,
+    dm_allocation: DM_TARGET,
+    configured_daily_email_limit: DAILY_EMAIL_LIMIT,
+    configured_daily_dm_limit: DAILY_DM_LIMIT,
+  })
   logger.info('finder', `Per-category cap: ${cappedLimit}`)
   logger.info('finder', `Daily cost limit: $${DAILY_OUTSCRAPER_LIMIT}`)
 
