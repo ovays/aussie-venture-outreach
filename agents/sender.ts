@@ -104,15 +104,19 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     email_ready_with_email: emailReadyWithEmail ?? 0,
   })
 
-  const { data: pendingEmails, error: pendingEmailsErr } = await supabase
-    .from('emails')
-    .select('*, leads!inner(id, email, business_name, status)')
-    .eq('status', 'pending_send')
-    .eq('type', 'initial_pitch')
-    .eq('leads.status', 'email_ready')
-    .order('created_at', { ascending: true })
-    .limit(remainingToday)
+const { data: pendingEmailsRaw, error: pendingEmailsErr } = await supabase
+  .from('emails')
+  .select('*, leads!inner(id, email, business_name, status)')
+  .eq('status', 'pending_send')
+  .eq('type', 'initial_pitch')
+  .order('created_at', { ascending: true })
+  .limit(remainingToday * 5)
 
+  const pendingEmails = (pendingEmailsRaw || []).filter(
+  (email) => email.leads?.status === 'email_ready'
+)
+console.log("RAW PENDING", pendingEmailsRaw)
+console.log("FILTERED PENDING", pendingEmails)
   if (pendingEmailsErr) {
     logger.error('sender', '[SENDER_QUERY] Selection failed', { error: pendingEmailsErr.message })
     throw pendingEmailsErr
