@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/lib/rateLimit'
+import { SETTINGS_DEFAULTS, isSettingKey } from '@/lib/settingsDefaults'
 
 const patchSettingSchema = z.object({
-  key: z.string().min(1),
+  key: z.string().min(1).refine(isSettingKey, 'Unsupported setting key'),
   value: z.string(),
 })
 
@@ -20,6 +21,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  console.log('[SETTINGS_FETCH]', {
+    keys: (data ?? []).map((setting) => setting.key),
+    values: Object.fromEntries((data ?? []).map((setting) => [setting.key, setting.value])),
+  })
 
   return NextResponse.json({ data })
 }
@@ -38,11 +44,21 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   }
 
   const { key, value } = parsed.data
+  const defaults = SETTINGS_DEFAULTS[key]
+
+  console.log('[SETTINGS_SAVE]', {
+    keys: [key],
+    values: { [key]: value },
+  })
 
   const { data, error } = await supabase
     .from('settings')
-    .update({ value, updated_at: new Date().toISOString() })
-    .eq('key', key)
+    .upsert({
+      key,
+      value,
+      description: defaults.description,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'key' })
     .select()
     .single()
 

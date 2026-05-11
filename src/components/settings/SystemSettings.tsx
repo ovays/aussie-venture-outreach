@@ -61,15 +61,28 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
 
   async function updateSetting(key: string, value: string) {
     setSaving(key)
-    await fetch('/api/settings', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value }),
-    })
-    setSettings((prev) => ({ ...prev, [key]: value }))
-    setSaving(null)
-    setSaved(key)
-    setTimeout(() => setSaved(null), 2000)
+    console.log('[SETTINGS_SAVE]', { keys: [key], values: { [key]: value } })
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      })
+      const json = await res.json() as { data?: Setting; error?: string }
+      if (!res.ok) throw new Error(json.error ?? `Settings save failed (${res.status})`)
+
+      setSettings((prev) => ({ ...prev, [key]: json.data?.value ?? value }))
+      setSaved(key)
+      setTimeout(() => setSaved(null), 2000)
+    } catch (error) {
+      console.error('[SETTINGS_SAVE]', {
+        keys: [key],
+        values: { [key]: value },
+        error: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setSaving(null)
+    }
   }
 
   function getNum(key: string): number {

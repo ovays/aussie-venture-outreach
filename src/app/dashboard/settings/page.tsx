@@ -4,6 +4,7 @@ import { SystemSettings } from '@/components/settings/SystemSettings'
 import { CategoriesTable } from '@/components/settings/CategoriesTable'
 import { CitySuburbs } from '@/components/settings/CitySuburbs'
 import { Card } from '@/components/ui/Card'
+import { withDefaultSettings } from '@/lib/settingsDefaults'
 
 export const revalidate = 0
 
@@ -117,6 +118,12 @@ export default async function SettingsPage() {
   }
 
   const hasGoogleMapsKey = !!process.env.GOOGLE_MAPS_API_KEY
+  const settingsWithDefaults = withDefaultSettings(settings ?? [])
+
+  console.log('[SETTINGS_FETCH]', {
+    keys: settingsWithDefaults.map((setting) => setting.key),
+    values: Object.fromEntries(settingsWithDefaults.map((setting) => [setting.key, setting.value])),
+  })
 
   return (
     <div>
@@ -130,7 +137,7 @@ export default async function SettingsPage() {
           </Card>
         )}
         <Card>
-          <SystemSettings initialSettings={settings ?? []} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} />
+          <SystemSettings initialSettings={settingsWithDefaults} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} />
         </Card>
 
         <Card>
