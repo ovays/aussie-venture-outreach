@@ -366,8 +366,22 @@ export async function runFinderAgent(): Promise<number> {
         if (categoryEmailCount >= categoryLimit) break citySuburbLoop
         if (costGuardHit) break citySuburbLoop
 
-        const query = category.query.replace('{city}', suburb)
+        const queryTemplates = [
+          "{base}",
+          "best {base}",
+          "{base} near me",
+          "{base} in {city}",
+          "{base} services {city}",
+        ]
 
+        const baseQuery = category.query.replace('{city}', suburb)
+
+        const template =
+          queryTemplates[Math.floor(Math.random() * queryTemplates.length)]
+
+        const query = template
+          .replace("{base}", baseQuery)
+          .replace("{city}", suburb)
         // Check and guard BEFORE seenQueries.add — API call only happens after add
         if (seenQueries.has(query)) {
           logger.info('finder', `Skip duplicate query: ${query}`)
