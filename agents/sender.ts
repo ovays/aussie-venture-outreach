@@ -46,15 +46,7 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     today_range: today,
   })
 
-  if (remainingToday <= 0) {
-    logger.info('sender', '[PIPELINE_STAGE] Sender exiting', {
-      reason: 'new_outreach_email_limit_reached',
-      daily_email_limit: dailyLimit,
-      initial_pitch_sent_today: sentToday ?? 0,
-      remaining_new_outreach_email_capacity: remainingToday,
-    })
-    return { sent: 0, failed: 0 }
-  }
+
 
   const emailStatusesQueried = ['pending_send']
   const emailTypesQueried = ['initial_pitch']
@@ -110,7 +102,7 @@ const { data: pendingEmailsRaw, error: pendingEmailsErr } = await supabase
   .eq('status', 'pending_send')
   .eq('type', 'initial_pitch')
   .order('created_at', { ascending: true })
-  .limit(remainingToday * 5)
+.limit(100)
 
   const pendingEmails = (pendingEmailsRaw || []).filter(
   (email) => email.leads?.status === 'email_ready'
@@ -172,13 +164,14 @@ console.log("FILTERED PENDING", pendingEmails)
     logger.info('sender', `#${i + 1}/${total} Sending to ${lead.email} (${lead.business_name})`, { subject: emailRecord.subject })
 
     try {
-      const result = await sendEmail({
-        to: lead.email,
-        subject: emailRecord.subject,
-        html: emailRecord.body_html,
-        text: emailRecord.body_text,
-        leadId: emailRecord.lead_id,
-      })
+const result = await sendEmail({
+    to: lead.email,
+    subject: emailRecord.subject,
+    html: emailRecord.body_html,
+    text: emailRecord.body_text,
+    leadId: emailRecord.lead_id,
+  })
+
 
       if (result) {
         logger.info('sender', `#${i + 1}/${total} SUCCESS`, { resend_id: result.id, to: lead.email })

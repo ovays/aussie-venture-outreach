@@ -301,6 +301,7 @@ export async function runFinderAgent(): Promise<number> {
     .select('city, suburb')
     .eq('active', true)
     .in('city', activeCities)
+    .order('last_used_at', { ascending: true, nullsFirst: true })
     .order('city')
     .order('suburb')
 
@@ -419,6 +420,12 @@ export async function runFinderAgent(): Promise<number> {
           try {
             callCount++
             const searchResult = await searchBusinesses(query, category.batchSize, supabase, skip)
+            await supabase
+              .from('city_suburbs')
+              .update({ last_used_at: new Date().toISOString() })
+              .eq('active', true)
+              .eq('city', city)
+              .eq('suburb', suburb)
             results = searchResult.results
             apiUsed = searchResult.apiUsed
           } catch (error) {
