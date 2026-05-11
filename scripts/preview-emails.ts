@@ -60,14 +60,14 @@ function buildPrompt(sample: typeof SAMPLES[0]): string {
 
 FACTS (only use these, never invent others):
 - Aussie Venture is a ${brandDesc} with a national audience
-- 500K+ followers across Facebook, Instagram and TikTok
+- 650K+ followers across Facebook, Instagram and TikTok
 
 Business: ${sample.business_name}, ${sample.suburb} ${sample.city}
 Category: ${sample.category}
 
 WHAT THE EMAIL MUST DO:
 1. Open with "Hey ${sample.business_name},"
-2. Briefly introduce yourself and Aussie Venture — mention the 500K+ followers once
+2. Briefly introduce yourself and Aussie Venture — mention the 650K+ followers once
 3. Say you'd love to work together or collab
 4. End with exactly: "Would you be keen to collab?"
 

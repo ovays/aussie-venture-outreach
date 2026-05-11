@@ -60,7 +60,7 @@ function getCategoryPitch(category: string, contentType: string): string {
   const accommodation = ['Hotels / Resorts']
 
   if (halalFood.includes(category)) {
-    return `Owais is building halal food content and wants to visit the restaurant, experience the food and put together a sponsored feature for his 500K+ audience across Facebook, Instagram and TikTok. He is offering sponsored exposure, not asking for a favour.
+    return `Owais is building halal food content and wants to visit the restaurant, experience the food and put together a sponsored feature for his 650+ audience across Facebook, Instagram and TikTok. He is offering sponsored exposure, not asking for a favour.
 
 NEVER say: free meal, free visit, free anything, no cost, no charge
 NEVER say: paid collab
@@ -68,7 +68,7 @@ DO say: sponsored feature or content partnership
 DO say: I'd love to come in, experience the food and put together a sponsored feature for my audience`
   }
   if (beauty.includes(category)) {
-    return `Owais creates lifestyle content for 500K+ Australians across Facebook, Instagram and TikTok and is offering a sponsored feature or content partnership to this business. He is selling media space, not asking for a favour.
+    return `Owais creates lifestyle content for 650+ Australians across Facebook, Instagram and TikTok and is offering a sponsored feature or content partnership to this business. He is selling media space, not asking for a favour.
 
 NEVER say: free, no cost, no charge
 NEVER say: paid collab
@@ -76,7 +76,7 @@ DO say: sponsored feature, sponsored post, or content partnership
 DO say: we create lifestyle content and would love to put together a sponsored feature`
   }
   if (wellness.includes(category)) {
-    return `Owais creates lifestyle content for 500K+ Australians across Facebook, Instagram and TikTok and is offering a sponsored feature or content partnership to this wellness business. He is selling media space, not asking for a favour.
+    return `Owais creates lifestyle content for 650+ Australians across Facebook, Instagram and TikTok and is offering a sponsored feature or content partnership to this wellness business. He is selling media space, not asking for a favour.
 
 NEVER say: free, no cost, no charge
 NEVER say: paid collab
@@ -84,7 +84,7 @@ DO say: sponsored feature, sponsored post, or content partnership
 DO say: we create lifestyle content and would love to put together a sponsored feature`
   }
   if (travel.includes(category)) {
-    return `Owais creates Australian travel content for 500K+ Australians across Facebook, Instagram and TikTok and is offering a sponsored post, sponsored feature, or content partnership to this travel business. He is selling media space, not asking for a favour.
+    return `Owais creates Australian travel content for 650+ Australians across Facebook, Instagram and TikTok and is offering a sponsored post, sponsored feature, or content partnership to this travel business. He is selling media space, not asking for a favour.
 
 NEVER say: free, no cost, no charge
 NEVER say: paid collab
@@ -92,7 +92,7 @@ DO say: sponsored feature, sponsored post, or content partnership
 DO say: we create Australian travel content and would love to put together a sponsored feature or content partnership`
   }
   if (accommodation.includes(category)) {
-    return `Owais creates Australian travel and lifestyle content for 500K+ Australians across Facebook, Instagram and TikTok and is offering to feature this property in a sponsored post or content partnership. He is selling media space, not asking for a favour.
+    return `Owais creates Australian travel and lifestyle content for 650+ Australians across Facebook, Instagram and TikTok and is offering to feature this property in a sponsored post or content partnership. He is selling media space, not asking for a favour.
 
 NEVER say: free stay, free anything, no cost, no charge
 NEVER say: paid collab
@@ -100,8 +100,8 @@ DO say: sponsored feature, sponsored post, or content partnership
 DO say: we create Australian travel content and would love to feature the property in a sponsored post`
   }
   return contentType === 'visit'
-    ? `Owais wants to visit, experience what they offer and put together a sponsored feature for his 500K+ audience across Facebook, Instagram and TikTok.`
-    : `Owais creates Australian lifestyle content for 500K+ Australians across Facebook, Instagram and TikTok and is offering a sponsored feature or content partnership to this business.`
+    ? `Owais wants to visit, experience what they offer and put together a sponsored feature for his 650+ audience across Facebook, Instagram and TikTok.`
+    : `Owais creates Australian lifestyle content for 650+ Australians across Facebook, Instagram and TikTok and is offering a sponsored feature or content partnership to this business.`
 }
 
 function buildPrompt(sample: typeof SAMPLES[0]): string {
@@ -112,7 +112,7 @@ FACTS about Aussie Venture (only state these, never invent others):
 - Australian food, travel and lifestyle brand
 - Based in Sydney
 - Creates content about food, travel and lifestyle in Australia
-- 500K+ followers across Facebook, Instagram and TikTok
+- 650+ followers across Facebook, Instagram and TikTok
 - Instagram: @aussie.venture | Facebook: facebook.com/AussieVenture
 - Website: aussieventure.com
 
@@ -129,7 +129,7 @@ HARD RULES - break any of these and the email is wrong:
 - No em dashes (no — character, ever, anywhere)
 - No bullet points in the body
 - No corporate language: "leverage", "synergy", "reach out", "touch base", "I wanted to", "opportunity", "I hope this finds you well", "I came across"
-- You may mention "500K+ followers across Facebook, Instagram and TikTok" once if it adds credibility - never invent any other numbers
+- You may mention "650+ followers across Facebook, Instagram and TikTok" once if it adds credibility - never invent any other numbers
 - Never say what the audience "always asks for" or what content "performs best" - we don't know that
 - No lists of deliverables ("photos, reels, captions") - just say "create content" or "put something together"
 - NEVER mention free meals, free visits, free stays, or anything being free or at no cost
