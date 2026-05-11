@@ -18,6 +18,7 @@ const EVENT_ICONS: Record<string, string> = {
   reply_received: '🔥',
   follow_up_1_sent: '📬',
   follow_up_2_sent: '📬',
+  follow_up_3_sent: '📬',
   lead_marked_dead: '💀',
   deal_closed: '✅',
   digest_sent: '📰',

@@ -5,7 +5,7 @@ type QueryClient = {
   from: (table: string) => any
 }
 
-type EmailType = 'initial_pitch' | 'follow_up_1' | 'follow_up_2'
+type EmailType = 'initial_pitch' | 'follow_up_1' | 'follow_up_2' | 'follow_up_3'
 
 interface EmailAnalyticsRow {
   id: string
@@ -31,13 +31,15 @@ export interface TodayEmailStats {
   followupsSent: number
   followUp1Sent: number
   followUp2Sent: number
+  followUp3Sent: number
 }
 
 export interface ReplyStats {
-  totalSent: number
-  totalReplies: number
+  totalContactedLeads: number
+  positiveResponseLeads: number
   repliesToday: number
   replyRate: number
+  statusesCounted: string[]
 }
 
 export interface FollowupStats {
@@ -63,7 +65,9 @@ export interface DashboardMetrics {
   emailsSentThisWeek: number
 }
 
-const FOLLOW_UP_TYPES: EmailType[] = ['follow_up_1', 'follow_up_2']
+const FOLLOW_UP_TYPES: EmailType[] = ['follow_up_1', 'follow_up_2', 'follow_up_3']
+const POSITIVE_RESPONSE_STATUSES = ['replied', 'negotiating', 'interested', 'closed_won', 'closed']
+const CONTACTED_LEAD_STATUSES = ['contacted', 'replied', 'negotiating', 'interested', 'closed_won', 'closed', 'dead']
 
 function getZonedParts(date: Date, timeZone = ANALYTICS_TIMEZONE) {
   const parts = new Intl.DateTimeFormat('en-AU', {
@@ -169,7 +173,8 @@ export async function getTodayEmailStats(supabase: QueryClient, date = new Date(
   const emails = (data ?? []) as EmailAnalyticsRow[]
   const followUp1Sent = emails.filter((email) => email.type === 'follow_up_1').length
   const followUp2Sent = emails.filter((email) => email.type === 'follow_up_2').length
-  const followupsSent = followUp1Sent + followUp2Sent
+  const followUp3Sent = emails.filter((email) => email.type === 'follow_up_3').length
+  const followupsSent = followUp1Sent + followUp2Sent + followUp3Sent
 
   return {
     range,
@@ -179,14 +184,15 @@ export async function getTodayEmailStats(supabase: QueryClient, date = new Date(
     followupsSent,
     followUp1Sent,
     followUp2Sent,
+    followUp3Sent,
   }
 }
 
 export async function getReplyStats(supabase: QueryClient, date = new Date()): Promise<ReplyStats> {
   const range = getAnalyticsDayRange(date)
-  const [{ count: totalSent }, { count: totalReplies }, { count: repliesToday }] = await Promise.all([
-    supabase.from('emails').select('*', { count: 'exact', head: true }).eq('status', 'sent'),
-    supabase.from('emails').select('*', { count: 'exact', head: true }).not('replied_at', 'is', null),
+  const [{ count: totalContactedLeads }, { count: positiveResponseLeads }, { count: repliesToday }] = await Promise.all([
+    supabase.from('leads').select('*', { count: 'exact', head: true }).in('status', CONTACTED_LEAD_STATUSES),
+    supabase.from('leads').select('*', { count: 'exact', head: true }).in('status', POSITIVE_RESPONSE_STATUSES),
     supabase
       .from('emails')
       .select('*', { count: 'exact', head: true })
@@ -195,14 +201,23 @@ export async function getReplyStats(supabase: QueryClient, date = new Date()): P
       .lt('replied_at', range.end),
   ])
 
-  const sent = totalSent ?? 0
-  const replies = totalReplies ?? 0
+  const contacted = totalContactedLeads ?? 0
+  const positive = positiveResponseLeads ?? 0
+  const replyRate = contacted > 0 ? Math.round((positive / contacted) * 100) : 0
+
+  console.log('[REPLY_RATE_DEBUG]', {
+    total_contacted_leads: contacted,
+    positive_response_leads: positive,
+    statuses_counted: POSITIVE_RESPONSE_STATUSES,
+    final_percentage: replyRate,
+  })
 
   return {
-    totalSent: sent,
-    totalReplies: replies,
+    totalContactedLeads: contacted,
+    positiveResponseLeads: positive,
     repliesToday: repliesToday ?? 0,
-    replyRate: sent > 0 ? Math.round((replies / sent) * 100) : 0,
+    replyRate,
+    statusesCounted: POSITIVE_RESPONSE_STATUSES,
   }
 }
 

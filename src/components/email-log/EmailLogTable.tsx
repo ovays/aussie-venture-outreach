@@ -8,7 +8,7 @@ import type { DashboardMetrics } from '@/lib/analytics'
 
 interface EmailRecord {
   id: string
-  type: 'initial_pitch' | 'follow_up_1' | 'follow_up_2'
+  type: 'initial_pitch' | 'follow_up_1' | 'follow_up_2' | 'follow_up_3'
   subject: string
   body_html: string
   body_text: string
@@ -23,6 +23,7 @@ const TYPE_LABELS: Record<string, string> = {
   initial_pitch: 'Initial',
   follow_up_1: 'Follow-up 1',
   follow_up_2: 'Follow-up 2',
+  follow_up_3: 'Follow-up 3',
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -55,8 +56,8 @@ export function EmailLogTable() {
 
   useEffect(() => { fetchEmails() }, [fetchEmails])
 
-  const totalSent = metrics?.replyStats.totalSent ?? emails.filter((e) => e.status === 'sent').length
-  const totalReplied = metrics?.replyStats.totalReplies ?? emails.filter((e) => e.replied_at).length
+  const totalSent = metrics?.replyStats.totalContactedLeads ?? emails.filter((e) => e.status === 'sent').length
+  const totalReplied = metrics?.replyStats.positiveResponseLeads ?? emails.filter((e) => e.replied_at).length
   const replyRate = metrics?.replyStats.replyRate ?? (totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0)
   const bounced = emails.filter((e) => e.status === 'bounced').length
   const bounceRate = totalSent > 0 ? Math.round((bounced / totalSent) * 100) : 0
@@ -66,8 +67,8 @@ export function EmailLogTable() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 md:p-5 border-b" style={{ borderColor: '#2a2d3e' }}>
         {[
-          { label: 'Total Sent',   value: totalSent,        color: '#38bdf8' },
-          { label: 'Total Replied', value: totalReplied,    color: '#4ade80' },
+          { label: 'Contacted Leads', value: totalSent,        color: '#38bdf8' },
+          { label: 'Positive Replies', value: totalReplied,    color: '#4ade80' },
           { label: 'Reply Rate',   value: `${replyRate}%`,  color: '#a78bfa' },
           { label: 'Bounce Rate',  value: `${bounceRate}%`, color: '#f87171' },
         ].map(({ label, value, color }) => (
@@ -90,6 +91,7 @@ export function EmailLogTable() {
           <option value="initial_pitch">Initial</option>
           <option value="follow_up_1">Follow-up 1</option>
           <option value="follow_up_2">Follow-up 2</option>
+          <option value="follow_up_3">Follow-up 3</option>
         </select>
 
         <select

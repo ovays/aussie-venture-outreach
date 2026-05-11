@@ -83,7 +83,7 @@ export default async function DashboardPage() {
           <StatsCard
             label="Reply Rate"
             value={`${analytics.replyStats.replyRate}%`}
-            sub={`${analytics.replyStats.totalReplies} of ${analytics.replyStats.totalSent} sent emails`}
+            sub={`${analytics.replyStats.positiveResponseLeads} of ${analytics.replyStats.totalContactedLeads} contacted leads`}
             accent="#4ade80"
           />
           <StatsCard
@@ -128,7 +128,7 @@ export default async function DashboardPage() {
                   { label: 'Follow-ups sent today', value: analytics.followupStats.sentToday },
                   { label: 'Total follow-ups sent', value: analytics.followupStats.totalSent },
                   { label: 'Pending follow-ups', value: analytics.followupStats.pending },
-                  { label: 'Replies received today', value: analytics.replyStats.repliesToday },
+                  { label: 'Replies Today', value: analytics.replyStats.repliesToday },
                   { label: 'DMs in queue', value: pendingDMs?.length ?? 0 },
                   { label: 'Deals this month', value: dealsThisMonth?.length ?? 0 },
                 ].map(({ label, value }) => (

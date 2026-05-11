@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
 import { logger } from '@/lib/logger'
+import { getAnalyticsDayRange } from '@/lib/analytics'
 
 export async function runSenderAgent(): Promise<{ sent: number; failed: number }> {
   const supabase = createServiceClient()
@@ -22,11 +23,33 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
   const { data: limitSetting } = await supabase
     .from('settings')
     .select('value')
-    .eq('key', 'daily_email_limit')
+    .eq('key', 'daily_new_outreach_limit')
     .single()
 
   const dailyLimit = parseInt(limitSetting?.value ?? '50', 10)
-  logger.info('sender', `daily_email_limit = ${dailyLimit}`)
+  logger.info('sender', `daily_new_outreach_limit = ${dailyLimit}`)
+
+  const today = getAnalyticsDayRange()
+  const { count: sentToday } = await supabase
+    .from('emails')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'sent')
+    .eq('type', 'initial_pitch')
+    .gte('sent_at', today.start)
+    .lt('sent_at', today.end)
+
+  const remainingToday = Math.max(0, dailyLimit - (sentToday ?? 0))
+  logger.info('sender', '[OUTREACH_SENT]', {
+    new_outreach_sent_today: sentToday ?? 0,
+    daily_new_outreach_limit: dailyLimit,
+    remaining_new_outreach_capacity: remainingToday,
+    today_range: today,
+  })
+
+  if (remainingToday <= 0) {
+    logger.info('sender', 'New outreach daily limit reached - sender skipped')
+    return { sent: 0, failed: 0 }
+  }
 
   // Diagnostic: count total pending_send emails before applying limit
   const { count: pendingCount } = await supabase
@@ -54,7 +77,9 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .from('emails')
     .select('*, leads(email, business_name)')
     .eq('status', 'pending_send')
-    .limit(dailyLimit)
+    .eq('type', 'initial_pitch')
+    .order('created_at', { ascending: true })
+    .limit(remainingToday)
 
   logger.info('sender', `fetched ${pendingEmails?.length ?? 0} pending emails to process`)
 
@@ -168,11 +193,12 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
   await supabase.from('activity_log').insert({
     event_type: 'sender_complete',
     description: `Sender agent completed - ${sent} sent, ${failed} failed`,
-    metadata: { sent, failed },
+    metadata: { sent, failed, daily_new_outreach_limit: dailyLimit, sent_before_run: sentToday ?? 0 },
   })
 
   // Haiku writing (~$0.001/email) + Resend API (free tier / ~$0.0001/email)
   const estimatedCost = (sent * 0.0011).toFixed(4)
+  logger.info('sender', '[OUTREACH_SENT]', { new_outreach_sent: sent })
   logger.info('sender', 'Done', { sent, failed })
   logger.info('sender', `Total pipeline cost estimate: $${estimatedCost} (Haiku writing + Resend; see finder log for Outscraper cost)`)
   return { sent, failed }

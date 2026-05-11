@@ -3,6 +3,7 @@ import { runFinderAgent } from "../agents/finder"
 import { runResearcherAgent } from "../agents/researcher"
 import { runWriterAgent } from "../agents/writer"
 import { runSenderAgent } from "../agents/sender"
+import { runFollowUpAgent } from "../agents/followup"
 
 export const dailyPipelineJob = schedules.task({
   id: "daily-pipeline",
@@ -50,6 +51,15 @@ export const dailyPipelineJob = schedules.task({
       const message = error instanceof Error ? error.message : String(error)
       console.error("PIPELINE FAILED at Step 4 (Sender):", error)
       throw new Error(`Pipeline failed at Sender: ${message}`)
+    }
+
+    try {
+      console.log("Step 5: Follow-up agent")
+      await runFollowUpAgent()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error("PIPELINE FAILED at Step 5 (Follow-up):", error)
+      throw new Error(`Pipeline failed at Follow-up: ${message}`)
     }
 
     console.log("Daily pipeline complete")

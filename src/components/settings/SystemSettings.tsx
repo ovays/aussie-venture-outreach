@@ -274,6 +274,54 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
             </div>
           </div>
 
+          {/* Email orchestration limits */}
+          {[
+            {
+              key: 'daily_new_outreach_limit',
+              label: 'Daily New Outreach Limit',
+              description: 'Max new outreach emails to send per day',
+              max: 500,
+            },
+            {
+              key: 'daily_followup1_limit',
+              label: 'Daily Follow-up 1 Limit',
+              description: 'Max first follow-up emails to send per day',
+              max: 500,
+            },
+            {
+              key: 'daily_followup2_limit',
+              label: 'Daily Follow-up 2 Limit',
+              description: 'Max second follow-up emails to send per day',
+              max: 500,
+            },
+            {
+              key: 'daily_followup3_limit',
+              label: 'Daily Follow-up 3 Limit',
+              description: 'Max final follow-up emails to send per day',
+              max: 500,
+            },
+          ].map(({ key, label, description, max }) => (
+            <div key={key} className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
+              <div>
+                <p className="text-sm text-white">{label}</p>
+                <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>{description}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={getNum(key)}
+                  onChange={(e) => setSettings((p) => ({ ...p, [key]: e.target.value }))}
+                  onBlur={(e) => updateSetting(key, e.target.value)}
+                  min={0}
+                  max={max}
+                  className="w-full sm:w-24 px-3 py-2 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
+                  style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+                />
+                <SaveIndicator k={key} />
+              </div>
+            </div>
+          ))}
+
           {/* DM limit */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
             <div>
