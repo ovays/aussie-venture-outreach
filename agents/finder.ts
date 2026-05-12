@@ -10,28 +10,72 @@ const INSTAGRAM_SKIP = new Set(['p', 'reel', 'reels', 'stories', 'explore', 'acc
 // Phase 1 — first 4 categories are capped at EMAIL_TARGET/4 each to ensure variety
 // Remaining categories fill whatever quota is left
 // {city} is replaced at runtime with the active suburb being searched
-const EMAIL_CATEGORIES = [
-  // High yield — search first, larger batch
-  { name: 'Travel Agents',          query: 'travel agent {city}',     capped: true,  batchSize: 5 },
-  { name: 'Tour Operators',         query: 'tour operator {city}',    capped: true,  batchSize: 5 },
-  // Medium yield
-  { name: 'Boutique Hotels',        query: 'boutique hotel {city}',   capped: true,  batchSize: 3 },
-  { name: 'Beauty / Lash Studios',  query: 'beauty studio {city}',    capped: true,  batchSize: 3 },
-  // Low yield — only reached if quota not filled
-  { name: 'Hair Salons',            query: 'hair salon {city}',       capped: false, batchSize: 3 },
-  { name: 'Spas / Massage Studios', query: 'day spa {city}',          capped: false, batchSize: 3 },
-  { name: 'Halal Restaurants',      query: 'halal restaurant {city}', capped: false, batchSize: 3 },
-]
+export type FinderEmailCategory = {
+  id: string
+  name: string
+  queries: string[]
+  capped: boolean
+  batchSize: number
+}
 
-// DM categories: leads queued for manual Instagram outreach (no Outscraper)
-const DM_CATEGORY_NAMES = ['Halal Restaurants', 'Halal Cafes', 'Halal Bakeries', 'Nail Salons']
+type FinderCategoryRow = {
+  id: string
+  name: string
+  search_keywords: string[] | null
+  status: string | null
+}
 
+// Finder categories are loaded from the categories table.
 const CITY_STATE: Record<string, string> = {
   Sydney:    'NSW',
   Melbourne: 'VIC',
   Brisbane:  'QLD',
   Perth:     'WA',
   Adelaide:  'SA',
+}
+
+export async function loadFinderCategories(
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<FinderEmailCategory[]> {
+  const { data, error } = await supabase
+    .from('categories')
+    .select('id, name, search_keywords, status')
+    .eq('status', 'active')
+    .order('created_at', { ascending: true })
+    .order('name')
+
+  if (error) throw new Error(`Failed to load finder categories: ${error.message}`)
+
+  return ((data ?? []) as FinderCategoryRow[])
+    .map((category, index) => ({
+      id: category.id,
+      name: category.name,
+      queries: category.search_keywords?.filter(Boolean) ?? [],
+      capped: index < 4,
+      batchSize: index < 2 ? 5 : 3,
+    }))
+    .filter((category) => category.queries.length > 0)
+}
+
+export async function loadFinderCategoryDebugSnapshot(
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<{
+  finderCategories: FinderEmailCategory[]
+  disabledCategories: FinderCategoryRow[]
+}> {
+  const [finderCategories, disabledResult] = await Promise.all([
+    loadFinderCategories(supabase),
+    supabase
+      .from('categories')
+      .select('id, name, search_keywords, status')
+      .neq('status', 'active')
+      .order('name'),
+  ])
+
+  return {
+    finderCategories,
+    disabledCategories: (disabledResult.data ?? []) as FinderCategoryRow[],
+  }
 }
 
 // ── Email filtering ──────────────────────────────────────────────────────────
@@ -281,6 +325,24 @@ export async function runFinderAgent(): Promise<number> {
   logger.info('finder', `Per-category cap: ${cappedLimit}`)
   logger.info('finder', `Daily cost limit: $${DAILY_OUTSCRAPER_LIMIT}`)
 
+  const categoryDebug = await loadFinderCategoryDebugSnapshot(supabase)
+  const finderCategories = categoryDebug.finderCategories
+  const activeFinderCategoryNames = finderCategories.map((category) => category.name)
+  logger.info('finder', '[DEBUG_CATEGORY_FILTER] ACTIVE FINDER CATEGORIES FROM DB', {
+    categories: finderCategories.map((category) => ({
+      name: category.name,
+      queries: category.queries,
+      capped: category.capped,
+      batchSize: category.batchSize,
+    })),
+  })
+  logger.info('finder', '[DEBUG_CATEGORY_FILTER] Admin disabled categories', {
+    categories: categoryDebug.disabledCategories.map((category) => ({
+      name: category.name,
+      status: category.status,
+    })),
+  })
+
   // FIX 1: read active_cities from settings — source of truth for which cities to search
   const { data: activeCitySetting } = await supabase
     .from('settings')
@@ -348,7 +410,7 @@ export async function runFinderAgent(): Promise<number> {
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   logger.info('finder', 'Phase 1: Email Leads')
 
-  for (const category of EMAIL_CATEGORIES) {
+  for (const category of finderCategories) {
     if (emailCount >= EMAIL_TARGET) break
     if (emailCount + dmCount >= TOTAL_TARGET) break
     if (costGuardHit) break
@@ -367,6 +429,12 @@ export async function runFinderAgent(): Promise<number> {
         if (categoryEmailCount >= categoryLimit) break citySuburbLoop
         if (costGuardHit) break citySuburbLoop
 
+        for (const keyword of category.queries) {
+          if (emailCount >= EMAIL_TARGET) break citySuburbLoop
+          if (emailCount + dmCount >= TOTAL_TARGET) break citySuburbLoop
+          if (categoryEmailCount >= categoryLimit) break citySuburbLoop
+          if (costGuardHit) break citySuburbLoop
+
         const queryTemplates = [
           "{base}",
           "best {base}",
@@ -375,14 +443,16 @@ export async function runFinderAgent(): Promise<number> {
           "{base} services {city}",
         ]
 
-        const baseQuery = category.query.replace('{city}', suburb)
+        const baseQuery = keyword
+          .replaceAll('{suburb}', suburb)
+          .replaceAll('{city}', city)
 
         const template =
           queryTemplates[Math.floor(Math.random() * queryTemplates.length)]
 
         const query = template
           .replace("{base}", baseQuery)
-          .replace("{city}", suburb)
+          .replace("{city}", city)
         // Check and guard BEFORE seenQueries.add — API call only happens after add
         if (seenQueries.has(query)) {
           logger.info('finder', `Skip duplicate query: ${query}`)
@@ -569,6 +639,7 @@ export async function runFinderAgent(): Promise<number> {
         }
 
         if (costGuardHit) break citySuburbLoop
+        }
       }
       if (costGuardHit) break
     }
@@ -592,15 +663,17 @@ export async function runFinderAgent(): Promise<number> {
   const alreadyQueued = new Set((existingDms ?? []).map((r) => r.lead_id))
 
   // Find leads in DM categories with no email — not yet queued, in active cities
-  const { data: dmCandidates } = await supabase
-    .from('leads')
-    .select('id, business_name, category_name, city, state')
-    .in('category_name', DM_CATEGORY_NAMES)
-    .is('email', null)
-    .eq('status', 'new')
-    .in('city', activeCities)
-    .order('created_at', { ascending: false })
-    .limit(DM_TARGET * 3)
+  const { data: dmCandidates } = activeFinderCategoryNames.length
+    ? await supabase
+      .from('leads')
+      .select('id, business_name, category_name, city, state')
+      .in('category_name', activeFinderCategoryNames)
+      .is('email', null)
+      .eq('status', 'new')
+      .in('city', activeCities)
+      .order('created_at', { ascending: false })
+      .limit(DM_TARGET * 3)
+    : { data: [] }
 
   for (const lead of dmCandidates ?? []) {
     if (dmCount >= DM_TARGET) break

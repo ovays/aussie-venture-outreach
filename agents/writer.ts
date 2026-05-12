@@ -3,6 +3,11 @@ import { writeOutreachEmail, writeOutreachDM } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
 import { logger } from '@/lib/logger'
 
+type CategoryStatusRow = {
+  name: string
+  status: string | null
+}
+
 export async function runWriterAgent(): Promise<void> {
   logger.info('writer', 'Writer agent starting')
 
@@ -30,6 +35,19 @@ export async function runWriterAgent(): Promise<void> {
     .single()
 
   const dailyDmLimit = parseInt(dmLimitSetting?.value ?? '10', 10)
+
+  const { data: categoryRows } = await supabase
+    .from('categories')
+    .select('name, status')
+    .order('name')
+  const categoryStatusByName = new Map(
+    ((categoryRows ?? []) as CategoryStatusRow[]).map((category) => [category.name, category.status])
+  )
+
+  logger.info('writer', '[DEBUG_CATEGORY_FILTER] Writer active category filtering', {
+    filtersByActiveCategoryStatus: false,
+    note: 'Writer fetches researched leads by lead status only; category status is logged for diagnostics.',
+  })
 
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
@@ -81,6 +99,31 @@ export async function runWriterAgent(): Promise<void> {
   logger.info('writer', `${leads.length} researched leads`, {
     withEmail: leads.filter(l => l.email).length,
     instagramOnly: leads.filter(l => !l.email && l.instagram_handle).length,
+  })
+
+  const researchedByCategory = leads.reduce<Record<string, {
+    count: number
+    withEmail: number
+    instagramOnly: number
+    categoryStatus: string | null
+  }>>((groups, lead) => {
+    const categoryName = lead.category_name ?? '(missing category)'
+    if (!groups[categoryName]) {
+      groups[categoryName] = {
+        count: 0,
+        withEmail: 0,
+        instagramOnly: 0,
+        categoryStatus: categoryStatusByName.get(categoryName) ?? null,
+      }
+    }
+    groups[categoryName].count++
+    if (lead.email) groups[categoryName].withEmail++
+    if (!lead.email && lead.instagram_handle) groups[categoryName].instagramOnly++
+    return groups
+  }, {})
+
+  logger.info('writer', '[DEBUG_CATEGORY_FILTER] Researched leads grouped by category', {
+    categories: researchedByCategory,
   })
 
   let processed = 0
