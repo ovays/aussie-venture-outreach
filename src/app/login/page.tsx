@@ -58,8 +58,8 @@ function LoginForm() {
           <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-lg bg-sky-500/15 text-sky-300">
             <LockKeyhole size={20} />
           </div>
-          <h1 className="text-2xl font-bold text-white mb-1">Aussie Venture</h1>
-          <p className="text-sm" style={{ color: '#94a3b8' }}>Secure AI operations workspace</p>
+          <h1 className="text-2xl font-bold text-white mb-1">ReachAgent</h1>
+          <p className="text-sm" style={{ color: '#94a3b8' }}>Secure outreach automation workspace</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -72,7 +72,7 @@ function LoginForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              placeholder="hello@aussieventure.com"
+              placeholder="admin@company.com"
               className="w-full px-4 py-2.5 rounded-lg text-white placeholder-gray-500 outline-none focus:ring-2 focus:ring-sky-500"
               style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
             />

@@ -5,7 +5,7 @@ async function fetchPage(url: string): Promise<string> {
   const timeoutId = setTimeout(() => controller.abort(), 10000)
   try {
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AussieVentureBot/1.0)' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)' },
       signal: controller.signal,
     })
     clearTimeout(timeoutId)

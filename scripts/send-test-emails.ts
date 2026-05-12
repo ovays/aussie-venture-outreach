@@ -189,7 +189,7 @@ function bodyToHtml(text: string, label: string): string {
     <!-- Footer -->
     <div style="background:#f8fafc;padding:14px 32px;border-top:1px solid #e5e7eb;margin-top:16px;">
       <p style="margin:0;font-size:11px;color:#9ca3af;text-align:center;">
-        Test send from Aussie Venture Outreach System &nbsp;·&nbsp; <a href="https://aussieventure.com" style="color:#9ca3af;">aussieventure.com</a>
+        Test send from ReachAgent
       </p>
     </div>
 

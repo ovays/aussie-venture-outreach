@@ -221,7 +221,7 @@ async function fetchPageText(url: string): Promise<string> {
   try {
     const normalised = url.startsWith('http') ? url : `https://${url}`
     const res = await fetch(normalised, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AussieVentureBot/1.0)' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)' },
       signal: AbortSignal.timeout(10_000),
     })
     const html = await res.text()
@@ -235,7 +235,7 @@ async function searchWeb(query: string): Promise<string> {
   try {
     const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; AussieVentureBot/1.0)',
+        'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)',
         Accept: 'text/html',
       },
       signal: AbortSignal.timeout(10_000),

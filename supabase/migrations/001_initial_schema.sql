@@ -1,4 +1,4 @@
--- Aussie Venture Outreach System — Initial Schema
+-- ReachAgent — Initial Schema
 -- Run this in your Supabase SQL editor
 
 -- Table: categories

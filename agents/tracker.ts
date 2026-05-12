@@ -160,7 +160,7 @@ ${(agentErrors ?? []).length > 0 ? `\nPIPELINE ERRORS (${(agentErrors ?? []).len
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0f1117; color: #e2e8f0;">
-<h2 style="color: #38bdf8;">Aussie Venture Outreach: Daily Summary</h2>
+<h2 style="color: #38bdf8;">ReachAgent: Daily Summary</h2>
 <p style="color: #94a3b8;">${date}</p>
 <p>Morning Owais!</p>
 <p>Here's what happened today:</p>
@@ -187,7 +187,7 @@ ${(agentErrors ?? []).length > 0 ? `<h3 style="color: #f87171;">Pipeline Errors 
 
     await sendEmail({
       to: digestEmail,
-      subject: `Aussie Venture Outreach: Daily Summary ${date}`,
+      subject: `ReachAgent: Daily Summary ${date}`,
       html,
       text: body,
       leadId: 'digest',

@@ -1,5 +1,6 @@
 {
-  "name": "aussie-venture-outreach",
+  "name": "reachagent",
+  "description": "AI-powered outreach automation system",
   "version": "0.1.0",
   "private": true,
   "scripts": {

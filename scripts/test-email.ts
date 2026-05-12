@@ -69,7 +69,7 @@ const html = `<!DOCTYPE html>
     <!-- Footer -->
     <div style="background:#f8fafc;padding:14px 32px;border-top:1px solid #e5e7eb;">
       <p style="margin:0;font-size:11px;color:#9ca3af;text-align:center;">
-        Test email from Aussie Venture Outreach System
+        Test email from ReachAgent
       </p>
     </div>
 

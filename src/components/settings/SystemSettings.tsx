@@ -621,7 +621,7 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
       <section>
         <h3 className="text-base font-semibold text-white mb-1">Test Email</h3>
         <p className="text-xs mb-4" style={{ color: '#64748b' }}>
-          Generate and preview a real outreach email for any business type and city, then send it to hello@aussieventure.com.
+          Generate and preview a real outreach email for any business type and city, then send it to the configured test inbox.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
@@ -723,7 +723,7 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
             {/* Action bar */}
             <div className="flex items-center gap-3 px-4 py-3 border-t" style={{ borderColor: '#2a2d3e', background: '#1a1d2e' }}>
               {testSent ? (
-                <span className="text-sm text-green-400">Email sent to hello@aussieventure.com ✓</span>
+                <span className="text-sm text-green-400">Email sent to the configured test inbox ✓</span>
               ) : (
                 <>
                   <Button

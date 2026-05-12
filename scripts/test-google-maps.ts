@@ -30,7 +30,7 @@ async function fetchPage(url: string): Promise<string> {
   try {
     const norm = url.startsWith('http') ? url : `https://${url}`
     const res = await fetch(norm, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AussieVentureBot/1.0)' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)' },
       signal: AbortSignal.timeout(7000),
     })
     return await res.text()

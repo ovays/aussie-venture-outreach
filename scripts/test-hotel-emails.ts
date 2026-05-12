@@ -32,7 +32,7 @@ async function fetchHtml(url: string): Promise<{ html: string; status: number }>
   try {
     const normalised = url.startsWith('http') ? url : `https://${url}`
     const res = await fetch(normalised, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AussieVentureBot/1.0)' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)' },
       signal: controller.signal,
     })
     clearTimeout(timeoutId)

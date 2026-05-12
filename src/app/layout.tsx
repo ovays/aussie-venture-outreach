@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Aussie Venture Outreach',
-  description: 'Automated outreach pipeline for Aussie Venture',
+  title: 'ReachAgent',
+  description: 'AI-powered outreach automation system',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
