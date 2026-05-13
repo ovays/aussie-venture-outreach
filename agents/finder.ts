@@ -1,6 +1,11 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { searchBusinesses, type OutscraperResult } from '@/lib/searchBusinesses'
 import { logger } from '@/lib/logger'
+import {
+  addLeadToDedupeIndex,
+  checkLeadDedupe,
+  fetchPipelineDedupeIndex,
+} from '@/lib/deduplication'
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
 const MAILTO_REGEX = /href=["']mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi
@@ -396,6 +401,12 @@ export async function runFinderAgent(): Promise<number> {
   const spentToday = await getDailyOutscraperSpend(supabase)
   logger.info('finder', `Prior spend today: $${spentToday.toFixed(4)}`)
 
+  const dedupeIndex = await fetchPipelineDedupeIndex(supabase)
+  logger.info('finder', '[DEBUG_DEDUPLICATION] Pipeline dedupe index loaded', {
+    emails: dedupeIndex.byEmail.size,
+    root_domains: dedupeIndex.byRootDomain.size,
+  })
+
   const seenQueries = new Set<string>()
   let costGuardHit = false
 
@@ -571,7 +582,29 @@ export async function runFinderAgent(): Promise<number> {
                 continue
               }
 
-              const { error } = await supabase.from('leads').insert({
+              const dedupeDecision = checkLeadDedupe(foundEmail, dedupeIndex)
+              if (dedupeDecision.duplicate) {
+                const duplicateMeta = {
+                  candidate_business_name: name,
+                  candidate_email: dedupeDecision.email,
+                  root_domain: dedupeDecision.rootDomain,
+                  existing_lead_id: dedupeDecision.match.id,
+                  existing_business_name: dedupeDecision.match.businessName,
+                  existing_email: dedupeDecision.match.email,
+                  existing_status: dedupeDecision.match.status,
+                  skipped_reason: dedupeDecision.reason,
+                }
+                logger.info('finder', dedupeDecision.reason, duplicateMeta)
+                if (dedupeDecision.reason === 'DUPLICATE_EMAIL_SKIPPED') {
+                  logger.info('finder', '[DEBUG_DEDUPLICATION] duplicate email detected', duplicateMeta)
+                } else {
+                  logger.info('finder', '[DEBUG_DEDUPLICATION] duplicate domain detected', duplicateMeta)
+                }
+                logger.info('finder', '[DEBUG_DEDUPLICATION] lead skipped reason', duplicateMeta)
+                continue
+              }
+
+              const { data: insertedLead, error } = await supabase.from('leads').insert({
                 business_name:        name,
                 category_name:        category.name,
                 city:                 city,
@@ -584,11 +617,15 @@ export async function runFinderAgent(): Promise<number> {
                 google_reviews_count: result.reviews || null,
                 status:               'new',
                 outreach_channel:     'email',
-              })
+              }).select('id, business_name, email, status').single()
 
               if (error) {
                 logger.error('finder', `Insert failed: ${name}`, { error: error.message })
                 continue
+              }
+
+              if (insertedLead) {
+                addLeadToDedupeIndex(dedupeIndex, insertedLead)
               }
 
               emailCount++

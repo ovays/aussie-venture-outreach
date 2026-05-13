@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { writeOutreachEmail, writeOutreachDM } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
 import { logger } from '@/lib/logger'
+import { checkLeadDedupe, fetchPipelineDedupeIndex } from '@/lib/deduplication'
 
 type CategoryStatusRow = {
   name: string
@@ -101,6 +102,12 @@ export async function runWriterAgent(): Promise<void> {
     instagramOnly: leads.filter(l => !l.email && l.instagram_handle).length,
   })
 
+  const dedupeIndex = await fetchPipelineDedupeIndex(supabase)
+  logger.info('writer', '[DEBUG_DEDUPLICATION] Pipeline dedupe index loaded', {
+    emails: dedupeIndex.byEmail.size,
+    root_domains: dedupeIndex.byRootDomain.size,
+  })
+
   const researchedByCategory = leads.reduce<Record<string, {
     count: number
     withEmail: number
@@ -130,6 +137,7 @@ export async function runWriterAgent(): Promise<void> {
   let emailsQueued = 0
   let dmsQueued = 0
   let deadCount = 0
+  let duplicateSkipped = 0
 
   for (const lead of leads) {
     const hasEmail = !!lead.email
@@ -160,6 +168,38 @@ export async function runWriterAgent(): Promise<void> {
       const contentType = (isSydney && VISIT_ELIGIBLE.includes(lead.category_name)) ? 'visit' : 'remote'
 
       if (hasEmail) {
+        const dedupeDecision = checkLeadDedupe(lead.email, dedupeIndex, lead.id)
+        if (dedupeDecision.duplicate) {
+          const duplicateMeta = {
+            candidate_lead_id: lead.id,
+            candidate_business_name: lead.business_name,
+            candidate_email: dedupeDecision.email,
+            root_domain: dedupeDecision.rootDomain,
+            existing_lead_id: dedupeDecision.match.id,
+            existing_business_name: dedupeDecision.match.businessName,
+            existing_email: dedupeDecision.match.email,
+            existing_status: dedupeDecision.match.status,
+            skipped_reason: dedupeDecision.reason,
+          }
+
+          logger.info('writer', dedupeDecision.reason, duplicateMeta)
+          if (dedupeDecision.reason === 'DUPLICATE_EMAIL_SKIPPED') {
+            logger.info('writer', '[DEBUG_DEDUPLICATION] duplicate email detected', duplicateMeta)
+          } else {
+            logger.info('writer', '[DEBUG_DEDUPLICATION] duplicate domain detected', duplicateMeta)
+          }
+          logger.info('writer', '[DEBUG_DEDUPLICATION] lead skipped reason', duplicateMeta)
+
+          await supabase.from('activity_log').insert({
+            event_type: dedupeDecision.reason,
+            lead_id: lead.id,
+            description: `Duplicate skipped before email queueing: ${lead.business_name}`,
+            metadata: duplicateMeta,
+          })
+
+          duplicateSkipped++
+          continue
+        }
         // ── Email path ──────────────────────────────────────────────────────
         const emailResult = await writeOutreachEmail({
           business_name: lead.business_name,
@@ -260,7 +300,7 @@ export async function runWriterAgent(): Promise<void> {
     }
   }
 
-  logger.info('writer', '[PIPELINE_STAGE] Writer complete', { emailsQueued, dmsQueued, deadCount, totalProcessed: processed })
+  logger.info('writer', '[PIPELINE_STAGE] Writer complete', { emailsQueued, dmsQueued, deadCount, duplicateSkipped, totalProcessed: processed })
 
   await supabase.from('activity_log').insert({
     event_type: 'writer_complete',
@@ -269,6 +309,7 @@ export async function runWriterAgent(): Promise<void> {
       emails_queued: emailsQueued,
       dms_queued: dmsQueued,
       dead_count: deadCount,
+      duplicate_skipped: duplicateSkipped,
       total_processed: processed,
     },
   })
