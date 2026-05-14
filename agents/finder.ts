@@ -600,7 +600,7 @@ export async   function findEmailForBusiness(rawWebsite: string, businessName: s
       homepageHtml = html
     }
 
-    websiteText += `\n${html}`
+    websiteText += `\n${stripHtml(html).slice(0, 3000)}`
 
     const pageEmails = extractEmailsFromHtml(html)
 
@@ -1102,9 +1102,9 @@ export async function runFinderAgent(): Promise<number> {
   // PHASE 1 — EMAIL LEADS
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // Safety limits: prevent runaway searching when leads are scarce
-  const MAX_BUSINESSES_PROCESSED = 1000
-  const MAX_QUERIES_EXECUTED     = 200
-  const MAX_RUNTIME_MS           = 90 * 60 * 1000
+  const MAX_BUSINESSES_PROCESSED = 300
+  const MAX_QUERIES_EXECUTED = 80
+  const MAX_RUNTIME_MS = 45 * 60 * 1000
   const runStartTime             = Date.now()
   let businessesProcessed = 0
   let safetyLimitHit      = false
