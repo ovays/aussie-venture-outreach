@@ -18,6 +18,8 @@ interface Lead {
   website: string | null
   instagram_handle: string | null
   google_rating: number | null
+  halal_confidence_score: number | null
+  halal_reasons: string[] | null
   status: string
   deal_value: number | null
   deal_type: string | null
@@ -30,11 +32,44 @@ interface Lead {
   services: string | null
 }
 
-const STATUS_OPTIONS = ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'closed', 'dead']
+const STATUS_OPTIONS = ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'closed', 'closed_manual', 'dead']
 const CITIES = ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide']
 
 interface LeadsTableProps {
   initialStatus?: string
+}
+
+function HalalConfidenceBadge({ score }: { score: number | null }) {
+  if (score == null) return <span style={{ color: '#64748b' }}>—</span>
+  const label = `${score}%`
+  if (score >= 80) {
+    return (
+      <span
+        className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+        style={{ background: 'rgba(74,222,128,0.12)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' }}
+      >
+        {label}
+      </span>
+    )
+  }
+  if (score >= 40) {
+    return (
+      <span
+        className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+        style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.2)' }}
+      >
+        {label}
+      </span>
+    )
+  }
+  return (
+    <span
+      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+      style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)' }}
+    >
+      {label}
+    </span>
+  )
 }
 
 export function LeadsTable({ initialStatus }: LeadsTableProps) {
@@ -137,6 +172,7 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
               <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Contact</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Status</th>
               <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Rating</th>
+              <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Halal</th>
               <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Added</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>Actions</th>
             </tr>
@@ -144,11 +180,11 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center" style={{ color: '#64748b' }}>Loading...</td>
+                <td colSpan={9} className="px-4 py-12 text-center" style={{ color: '#64748b' }}>Loading...</td>
               </tr>
             ) : leads.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center" style={{ color: '#64748b' }}>No leads found</td>
+                <td colSpan={9} className="px-4 py-12 text-center" style={{ color: '#64748b' }}>No leads found</td>
               </tr>
             ) : (
               leads.map((lead) => (
@@ -182,6 +218,9 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
                         {lead.google_rating}
                       </span>
                     ) : <span style={{ color: '#64748b' }}>—</span>}
+                  </td>
+                  <td className="hidden md:table-cell px-4 py-3">
+                    <HalalConfidenceBadge score={lead.halal_confidence_score} />
                   </td>
                   <td className="hidden md:table-cell px-4 py-3 text-xs" style={{ color: '#64748b' }}>{formatDate(lead.created_at)}</td>
                   <td className="px-4 py-3">

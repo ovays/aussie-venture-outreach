@@ -37,7 +37,9 @@
       "Bash(npx trigger.dev@4.4.4 run --help)",
       "Bash(npx *)",
       "Bash(Select-String -Path \"C:\\\\agents\\\\aussie-venture-outreach\\\\.env.local\" -Pattern \"GOOGLE_MAPS\")",
-      "Bash(Select-Object -ExpandProperty Line)"
+      "Bash(Select-Object -ExpandProperty Line)",
+      "Bash(Get-ChildItem -Path \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\" -Recurse -Include \"*.tsx\", \"*.ts\")",
+      "Bash(Select-Object -ExpandProperty FullName)"
     ]
   }
 }

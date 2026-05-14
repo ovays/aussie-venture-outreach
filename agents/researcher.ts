@@ -1,6 +1,11 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { extractWebsiteData, agenticEmailSearch } from '@/lib/claude'
 import { logger } from '@/lib/logger'
+import {
+  HALAL_QUALIFICATION_THRESHOLD,
+  isHalalFilterCategory,
+  scoreHalalQualification,
+} from '@/lib/halalQualification'
 
 // ── Mailto-first email extraction (same logic as finder.ts) ─────────────────
 
@@ -160,6 +165,54 @@ export async function runResearcherAgent(): Promise<number> {
         }
       }
 
+      // If Finder already scored this lead, trust it — skip requalification entirely.
+      const finderQualified =
+        isHalalFilterCategory(lead.category_name) &&
+        lead.halal_confidence_score != null
+
+      if (finderQualified) {
+        logger.info('researcher', 'RESEARCHER_SKIPPED_REQUALIFICATION', {
+          lead_id: lead.id,
+          business_name: lead.business_name,
+          category: lead.category_name,
+          halal_confidence_score: lead.halal_confidence_score,
+          threshold: HALAL_QUALIFICATION_THRESHOLD,
+        })
+      }
+
+      // Cheap halal-confidence scoring reuses the already-fetched homepage text.
+      const shouldScoreHalal = !finderQualified && isHalalFilterCategory(lead.category_name)
+      if (!isHalalFilterCategory(lead.category_name)) {
+        logger.info('researcher', `Skipping halal qualification for category: ${lead.category_name}`)
+      }
+      const halalConfidence = shouldScoreHalal ? scoreHalalQualification({
+        name: lead.business_name,
+        categories: [lead.category_name],
+        websiteText: websiteText || rawHtml,
+        websiteUrl: lead.website,
+        reviewTexts: [],
+        reviews: lead.google_reviews_count ?? 0,
+      }) : null
+
+      if (halalConfidence) {
+        const halalMeta = {
+          lead_id: lead.id,
+          business_name: lead.business_name,
+          category: lead.category_name,
+          halal_confidence_score: halalConfidence.confidence,
+          positive_keywords: halalConfidence.reasons,
+          negative_keywords: halalConfidence.negativeSignals,
+        }
+
+        if (halalConfidence.confidence >= 70) {
+          logger.info('researcher', 'HALAL_CONFIDENCE_HIGH', halalMeta)
+        }
+
+        logger.info('researcher', '[DEBUG_HALAL_CONFIDENCE] detected positive keywords', halalMeta)
+        logger.info('researcher', '[DEBUG_HALAL_CONFIDENCE] detected negative keywords', halalMeta)
+        logger.info('researcher', 'HALAL_CONFIDENCE_RECORDED', halalMeta)
+      }
+
       // Agentic email search — only if mailto didn't find anything and we have website text
       if (!foundEmail && lead.website && websiteText) {
         logger.info('researcher', `Starting agentic email search for "${lead.business_name}"`)
@@ -213,6 +266,7 @@ export async function runResearcherAgent(): Promise<number> {
         .from('leads')
         .update({
           ...(foundEmail && !lead.email ? { email: foundEmail } : {}),
+          ...(halalConfidence ? { halal_confidence_score: halalConfidence.confidence } : {}),
           description: enriched.description || null,
           services: enriched.services || null,
           instagram_handle: enriched.instagram_handle || null,
@@ -234,6 +288,9 @@ export async function runResearcherAgent(): Promise<number> {
           email_found: !!foundEmail,
           email_method: emailMethod,
           email_rounds: emailRounds,
+          halal_confidence_score: halalConfidence?.confidence ?? null,
+          halal_positive_keywords: halalConfidence?.reasons ?? [],
+          halal_negative_keywords: halalConfidence?.negativeSignals ?? [],
           has_instagram: !!enriched.instagram_handle,
           has_website: !!lead.website,
         },

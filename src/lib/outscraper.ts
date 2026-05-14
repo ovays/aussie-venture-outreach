@@ -14,6 +14,8 @@ export interface OutscraperResult {
   reviews: number
   latitude: number
   longitude: number
+  categories?: string[]
+  reviewTexts?: string[]
 }
 
 interface OutscraperJobResponse {

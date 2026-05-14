@@ -8,6 +8,7 @@ interface GooglePlace {
   websiteUri?: string
   rating?: number
   userRatingCount?: number
+  types?: string[]
 }
 
 interface GoogleSearchResponse {
@@ -31,6 +32,7 @@ function mapGooglePlace(place: GooglePlace): OutscraperResult {
     reviews: place.userRatingCount ?? 0,
     latitude: 0,
     longitude: 0,
+    categories: place.types ?? [],
   }
 }
 
@@ -55,7 +57,7 @@ export async function searchBusinessesGoogle(query: string, limit: number): Prom
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.id,nextPageToken',
+        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.types,places.id,nextPageToken',
       },
       body: JSON.stringify(body),
     })

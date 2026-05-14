@@ -67,5 +67,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  if (updates.status === 'closed_manual') {
+    await supabase.from('dm_queue').update({ status: 'skipped' }).eq('lead_id', id).eq('status', 'pending')
+    await supabase.from('follow_ups').update({ status: 'cancelled' }).eq('lead_id', id).eq('status', 'scheduled')
+  }
+
   return NextResponse.json({ data })
 }

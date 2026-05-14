@@ -25,6 +25,8 @@ interface Lead {
   halal: boolean
   description: string | null
   services: string | null
+  halal_confidence_score?: number | null
+  halal_reasons?: string[] | null
 }
 
 const COLUMNS = [

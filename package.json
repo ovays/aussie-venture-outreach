@@ -7,6 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test:halal": "tsx scripts/test-halal-confidence.ts",
     "deploy:trigger": "npx trigger.dev@4.4.4 deploy"
   },
   "dependencies": {
@@ -14,7 +15,7 @@
     "@hello-pangea/dnd": "^18.0.1",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.1",
-    "@trigger.dev/sdk": "4.4.5",
+    "@trigger.dev/sdk": "4.4.6",
     "lucide-react": "^1.14.0",
     "next": "16.2.4",
     "react": "19.2.4",

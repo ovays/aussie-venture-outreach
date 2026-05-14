@@ -18,6 +18,8 @@ interface Lead {
   website: string | null
   instagram_handle: string | null
   google_rating: number | null
+  halal_confidence_score?: number | null
+  halal_reasons?: string[] | null
   status: string
   deal_value: number | null
   deal_type: string | null
@@ -36,7 +38,40 @@ interface LeadDetailPanelProps {
   onUpdate: (id: string, updates: Partial<Lead>) => void
 }
 
-const STATUS_OPTIONS = ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'closed', 'dead']
+const STATUS_OPTIONS = ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'closed', 'closed_manual', 'dead']
+
+function HalalConfidenceBadge({ score }: { score: number | null }) {
+  if (score == null) return null
+  const label = `${score}%`
+  if (score >= 80) {
+    return (
+      <span
+        className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+        style={{ background: 'rgba(74,222,128,0.12)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' }}
+      >
+        {label}
+      </span>
+    )
+  }
+  if (score >= 40) {
+    return (
+      <span
+        className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+        style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.2)' }}
+      >
+        {label}
+      </span>
+    )
+  }
+  return (
+    <span
+      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+      style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)' }}
+    >
+      {label}
+    </span>
+  )
+}
 
 export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProps) {
   const [notes, setNotes] = useState(lead?.notes ?? '')
@@ -111,10 +146,11 @@ export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProp
 
   async function changeStatus(status: string) {
     if (!lead) return
-    await fetch('/api/leads', {
+    // Use the individual-lead route so closed_manual triggers DM queue + follow-up cancellation
+    await fetch(`/api/leads/${lead.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: lead.id, status }),
+      body: JSON.stringify({ status }),
     })
     onUpdate(lead.id, { status })
   }
@@ -151,7 +187,12 @@ export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProp
                 key={s}
                 onClick={() => changeStatus(s)}
                 className={`px-2.5 py-1 rounded-full text-xs font-medium transition-opacity ${lead.status === s ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}
-                style={{ background: lead.status === s ? '#0284c7' : '#2a2d3e', color: 'white' }}
+                style={{
+                  background: lead.status === s
+                    ? (s === 'closed_manual' ? '#c2410c' : '#0284c7')
+                    : '#2a2d3e',
+                  color: 'white',
+                }}
               >
                 {s}
               </button>
@@ -174,6 +215,19 @@ export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProp
                 <span className="text-right" style={{ color: '#e2e8f0' }}>{value}</span>
               </div>
             ) : null
+          )}
+
+          {/* Halal Confidence */}
+          {lead.halal_confidence_score != null && (
+            <div className="flex justify-between items-center text-sm">
+              <span style={{ color: '#64748b' }}>Halal Confidence</span>
+              <HalalConfidenceBadge score={lead.halal_confidence_score} />
+            </div>
+          )}
+          {lead.halal_confidence_score != null && lead.halal_reasons && lead.halal_reasons.length > 0 && (
+            <p className="text-xs leading-relaxed" style={{ color: '#475569' }}>
+              {lead.halal_reasons.slice(0, 3).join(' · ')}
+            </p>
           )}
 
           {/* Email — editable */}
@@ -278,7 +332,7 @@ export function LeadDetailPanel({ lead, onClose, onUpdate }: LeadDetailPanelProp
         )}
 
         {/* Deal info */}
-        {lead.status === 'closed' && (
+        {(lead.status === 'closed' || lead.status === 'closed_manual') && (
           <div className="rounded-lg p-4 space-y-3" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
             <p className="text-xs font-medium" style={{ color: '#64748b' }}>DEAL</p>
             <div className="flex justify-between text-sm">
