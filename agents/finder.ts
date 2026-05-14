@@ -1102,9 +1102,9 @@ export async function runFinderAgent(): Promise<number> {
   // PHASE 1 — EMAIL LEADS
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // Safety limits: prevent runaway searching when leads are scarce
-  const MAX_BUSINESSES_PROCESSED = 100
-  const MAX_QUERIES_EXECUTED     = 30
-  const MAX_RUNTIME_MS           = 15 * 60 * 1000
+  const MAX_BUSINESSES_PROCESSED = 1000
+  const MAX_QUERIES_EXECUTED     = 200
+  const MAX_RUNTIME_MS           = 90 * 60 * 1000
   const runStartTime             = Date.now()
   let businessesProcessed = 0
   let safetyLimitHit      = false
