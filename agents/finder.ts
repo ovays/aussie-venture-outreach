@@ -275,19 +275,11 @@ type LinkCandidate = {
 
 const CONTACT_LINK_KEYWORDS = [
   'contact',
-  'booking',
-  'reservation',
-  'function',
-  'catering',
   'enquiry',
   'inquiry',
-  'event',
   'about',
   'team',
-  'franchise',
-  'support',
   'location',
-  'venue',
 ]
 
 const STATIC_ASSET_EXTENSIONS = [
@@ -325,6 +317,10 @@ const SOCIAL_MEDIA_DOMAINS = new Set([
   'twitter.com',
   'youtube.com',
   'linkedin.com',
+  'order.store',
+  'uber.com',
+  'square.site',
+  'linktr.ee',
 ])
 
 function isSocialMediaUrl(url: string): boolean {
@@ -384,7 +380,7 @@ function scoreContactLink(url: string, text: string): number {
   CONTACT_LINK_KEYWORDS.forEach((keyword, index) => {
     if (haystack.includes(keyword)) score += 100 - index
   })
-  if (/mailto:|tel:|facebook\.com|instagram\.com|linktr\.ee|ubereats|doordash|menulog/i.test(url)) score -= 500
+  if (/mailto:|tel:|facebook\.com|instagram\.com|linktr\.ee|ubereats|doordash|menulog|order\.store|uber\.com|square\.site/i.test(url)) score -= 500
   if (!isCrawlableBusinessPageUrl(url)) score -= 500
   return score
 }
@@ -679,19 +675,10 @@ export async   function findEmailForBusiness(rawWebsite: string, businessName: s
     )
 
   const fixedPathPages = [
-    { path: '/contact', label: '/contact', score: 100 },
+    { path: '/contact',    label: '/contact',    score: 100 },
     { path: '/contact-us', label: '/contact-us', score: 99 },
-    { path: '/bookings', label: '/bookings', score: 98 },
-    { path: '/booking', label: '/booking', score: 97 },
-    { path: '/reservations', label: '/reservations', score: 96 },
-    { path: '/reservation', label: '/reservation', score: 95 },
-    { path: '/functions', label: '/functions', score: 94 },
-    { path: '/function', label: '/function', score: 93 },
-    { path: '/catering', label: '/catering', score: 92 },
-    { path: '/events', label: '/events', score: 91 },
-    { path: '/event', label: '/event', score: 90 },
-    { path: '/about', label: '/about', score: 80 },
-    { path: '/about-us', label: '/about-us', score: 79 },
+    { path: '/about',      label: '/about',      score: 50 },
+    { path: '/about-us',   label: '/about-us',   score: 49 },
   ]
 
   const fixedPages: CrawlPage[] = origin
@@ -742,7 +729,7 @@ export async   function findEmailForBusiness(rawWebsite: string, businessName: s
         b.score - a.score ||
         a.url.localeCompare(b.url)
     )
-    .slice(0, 10)
+    .slice(0, 4)
 
   console.log('Discovered internal links:')
 
@@ -1102,9 +1089,9 @@ export async function runFinderAgent(): Promise<number> {
   // PHASE 1 — EMAIL LEADS
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // Safety limits: prevent runaway searching when leads are scarce
-  const MAX_BUSINESSES_PROCESSED = 300
-  const MAX_QUERIES_EXECUTED = 80
-  const MAX_RUNTIME_MS = 45 * 60 * 1000
+const MAX_BUSINESSES_PROCESSED = 1200
+const MAX_QUERIES_EXECUTED = 300
+const MAX_RUNTIME_MS = 90 * 60 * 1000
   const runStartTime             = Date.now()
   let businessesProcessed = 0
   let safetyLimitHit      = false
