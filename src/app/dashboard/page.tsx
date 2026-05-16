@@ -71,9 +71,10 @@ export default async function DashboardPage() {
   return (
     <div>
       <TopBar title="Dashboard" />
-      <div className="p-3 md:p-6 space-y-4 md:space-y-6">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatsCard label="Total Leads Found" value={totalLeads ?? 0} sub="All time" />
+      <div className="p-3 md:p-5 space-y-4 md:space-y-5">
+        {/* Primary KPI row */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <StatsCard label="Total Leads Found" value={totalLeads ?? 0} sub="All time" accent="#e2e8f0" />
           <StatsCard
             label="Emails Sent This Week"
             value={analytics.emailsSentThisWeek}
@@ -83,7 +84,7 @@ export default async function DashboardPage() {
           <StatsCard
             label="Reply Rate"
             value={`${analytics.replyStats.replyRate}%`}
-            sub={`${analytics.replyStats.positiveResponseLeads} of ${analytics.replyStats.totalContactedLeads} contacted leads`}
+            sub={`${analytics.replyStats.positiveResponseLeads} of ${analytics.replyStats.totalContactedLeads} contacted`}
             accent="#4ade80"
           />
           <StatsCard
@@ -94,109 +95,68 @@ export default async function DashboardPage() {
           />
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <StatsCard
-            label="New Outreach Emails Sent Today"
-            value={analytics.todayEmailStats.initialSent}
-            sub="Initial pitches"
-            accent="#38bdf8"
-          />
-          <StatsCard
-            label="New DMs Sent Today"
-            value={analytics.todayDmStats.sentToday}
-            sub="Marked sent"
-            accent="#f472b6"
-          />
-          <StatsCard
-            label="Follow-up 1 Sent Today"
-            value={analytics.followupStats.followUp1SentToday}
-            sub="FU1"
-            accent="#a78bfa"
-          />
-          <StatsCard
-            label="Follow-up 2 Sent Today"
-            value={analytics.followupStats.followUp2SentToday}
-            sub="FU2"
-            accent="#c084fc"
-          />
-          <StatsCard
-            label="Follow-up 3 Sent Today"
-            value={analytics.followupStats.followUp3SentToday}
-            sub="FU3"
-            accent="#d8b4fe"
-          />
+        {/* Today's activity */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <StatsCard label="Emails Today" value={analytics.todayEmailStats.initialSent} sub="Initial pitches" accent="#38bdf8" />
+          <StatsCard label="DMs Today"    value={analytics.todayDmStats.sentToday}      sub="Marked sent"    accent="#f472b6" />
+          <StatsCard label="FU1 Today"    value={analytics.followupStats.followUp1SentToday} sub="Follow-up 1" accent="#a78bfa" />
+          <StatsCard label="FU2 Today"    value={analytics.followupStats.followUp2SentToday} sub="Follow-up 2" accent="#c084fc" />
+          <StatsCard label="FU3 Today"    value={analytics.followupStats.followUp3SentToday} sub="Follow-up 3" accent="#d8b4fe" />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <StatsCard
-            label="Pending Follow-up 1"
-            value={analytics.followupStats.pendingFollowUp1}
-            sub="Eligible contacted leads"
-            accent="#a78bfa"
-          />
-          <StatsCard
-            label="Pending Follow-up 2"
-            value={analytics.followupStats.pendingFollowUp2}
-            sub="Eligible contacted leads"
-            accent="#c084fc"
-          />
-          <StatsCard
-            label="Pending Follow-up 3"
-            value={analytics.followupStats.pendingFollowUp3}
-            sub="Eligible contacted leads"
-            accent="#d8b4fe"
-          />
+        {/* Pending follow-ups */}
+        <div className="grid grid-cols-3 gap-3">
+          <StatsCard label="Pending FU1" value={analytics.followupStats.pendingFollowUp1} sub="Awaiting follow-up 1" accent="#a78bfa" />
+          <StatsCard label="Pending FU2" value={analytics.followupStats.pendingFollowUp2} sub="Awaiting follow-up 2" accent="#c084fc" />
+          <StatsCard label="Pending FU3" value={analytics.followupStats.pendingFollowUp3} sub="Awaiting follow-up 3" accent="#d8b4fe" />
         </div>
 
-        <Card>
-          <h3 className="text-sm font-semibold mb-3 text-white">Pipeline</h3>
+        {/* Pipeline */}
+        <Card title="Pipeline">
           <PipelineSummary counts={pipelineCounts} />
         </Card>
 
-        <Card>
-          <h3 className="text-sm font-semibold mb-4 text-white">Weekly Revenue (Last 12 Weeks)</h3>
+        {/* Revenue chart */}
+        <Card title="Weekly Revenue — Last 12 Weeks">
           <ErrorBoundary label="RevenueChart">
             <RevenueChart data={weeklyRevenue} />
           </ErrorBoundary>
         </Card>
 
-        <Card>
-          <h3 className="text-sm font-semibold mb-3 text-white">Daily Activity (Last 7 Days)</h3>
+        {/* Daily activity */}
+        <Card title="Daily Activity — Last 7 Days">
           <DailyActivity rows={analytics.dailyRows} />
         </Card>
 
+        {/* Activity feed + quick stats */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
-            <Card>
-              <h3 className="text-sm font-semibold mb-1 text-white">Recent Activity</h3>
+            <Card title="Recent Activity">
               <ActivityFeed events={(recentActivity ?? []) as Parameters<typeof ActivityFeed>[0]['events']} />
             </Card>
           </div>
 
-          <div className="space-y-4">
-            <Card>
-              <h3 className="text-sm font-semibold mb-3 text-white">Quick Stats</h3>
-              <div className="space-y-3">
-                {[
-                  { label: 'New outreach emails today', value: analytics.todayEmailStats.initialSent },
-                  { label: 'New DMs sent today', value: analytics.todayDmStats.sentToday },
-                  { label: 'Follow-ups sent today', value: analytics.followupStats.sentToday },
-                  { label: 'FU1 / FU2 / FU3 today', value: `${analytics.followupStats.followUp1SentToday} / ${analytics.followupStats.followUp2SentToday} / ${analytics.followupStats.followUp3SentToday}` },
-                  { label: 'Total follow-ups sent', value: analytics.followupStats.totalSent },
-                  { label: 'Pending follow-ups', value: analytics.followupStats.pending },
-                  { label: 'Pending FU1 / FU2 / FU3', value: `${analytics.followupStats.pendingFollowUp1} / ${analytics.followupStats.pendingFollowUp2} / ${analytics.followupStats.pendingFollowUp3}` },
-                  { label: 'Replies Today', value: analytics.replyStats.repliesToday },
-                  { label: 'DMs in queue', value: pendingDMs?.length ?? 0 },
-                  { label: 'Deals this month', value: dealsThisMonth?.length ?? 0 },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex items-center justify-between">
-                    <span className="text-sm" style={{ color: '#94a3b8' }}>{label}</span>
-                    <span className="text-sm font-semibold text-white">{value}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          </div>
+          <Card title="Quick Stats">
+            <div className="space-y-3">
+              {[
+                { label: 'New outreach emails today',  value: analytics.todayEmailStats.initialSent },
+                { label: 'New DMs sent today',         value: analytics.todayDmStats.sentToday },
+                { label: 'Follow-ups sent today',      value: analytics.followupStats.sentToday },
+                { label: 'FU1 / FU2 / FU3 today',     value: `${analytics.followupStats.followUp1SentToday} / ${analytics.followupStats.followUp2SentToday} / ${analytics.followupStats.followUp3SentToday}` },
+                { label: 'Total follow-ups sent',      value: analytics.followupStats.totalSent },
+                { label: 'Pending follow-ups',         value: analytics.followupStats.pending },
+                { label: 'Pending FU1 / FU2 / FU3',   value: `${analytics.followupStats.pendingFollowUp1} / ${analytics.followupStats.pendingFollowUp2} / ${analytics.followupStats.pendingFollowUp3}` },
+                { label: 'Replies today',              value: analytics.replyStats.repliesToday },
+                { label: 'DMs in queue',               value: pendingDMs?.length ?? 0 },
+                { label: 'Deals this month',           value: dealsThisMonth?.length ?? 0 },
+              ].map(({ label, value }) => (
+                <div key={label} className="flex items-center justify-between gap-2">
+                  <span className="text-sm min-w-0 truncate" style={{ color: '#94a3b8' }}>{label}</span>
+                  <span className="text-sm font-semibold text-white shrink-0">{value}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
         </div>
       </div>
     </div>

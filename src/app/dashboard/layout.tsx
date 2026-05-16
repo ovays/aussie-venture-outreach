@@ -8,7 +8,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <SidebarProvider>
-      <div className="flex h-screen overflow-hidden" style={{ background: '#0f1117' }}>
+      <div className="flex h-screen overflow-hidden" style={{ background: '#0c0e16' }}>
         <Sidebar role={profile.role} />
         <main className="flex-1 overflow-y-auto min-w-0">
           <HealthBanner />

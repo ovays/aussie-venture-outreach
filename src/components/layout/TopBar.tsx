@@ -21,25 +21,24 @@ export default function TopBar({ title }: TopBarProps) {
 
   return (
     <header
-      className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b"
-      style={{ borderColor: '#2a2d3e', background: '#1a1d27' }}
+      className="sticky top-0 z-30 flex items-center justify-between px-4 md:px-6 py-3 md:py-3.5"
+      style={{ background: '#13151f', borderBottom: '1px solid #2a2d3e' }}
     >
-      <div className="flex items-center gap-2">
-        {/* Hamburger — mobile only */}
+      <div className="flex items-center gap-3 min-w-0">
         <button
           onClick={toggle}
-          className="md:hidden flex items-center justify-center w-10 h-10 rounded-lg transition-colors hover:bg-white/10 text-gray-400 hover:text-white shrink-0"
+          className="md:hidden flex items-center justify-center w-9 h-9 rounded-lg text-slate-400 hover:text-white hover:bg-white/8 shrink-0"
           aria-label="Open menu"
         >
-          <Menu size={20} />
+          <Menu size={18} />
         </button>
-        <h2 className="text-base md:text-lg font-semibold text-white">{title}</h2>
+        <h2 className="text-base font-semibold text-white truncate">{title}</h2>
       </div>
 
       <button
         onClick={handleSignOut}
-        className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg transition-colors hover:text-white min-h-[44px]"
-        style={{ color: '#94a3b8' }}
+        className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 shrink-0"
+        aria-label="Sign out"
       >
         <LogOut size={14} />
         <span className="hidden sm:inline">Sign out</span>
