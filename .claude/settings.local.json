@@ -39,7 +39,8 @@
       "Bash(Select-String -Path \"C:\\\\agents\\\\aussie-venture-outreach\\\\.env.local\" -Pattern \"GOOGLE_MAPS\")",
       "Bash(Select-Object -ExpandProperty Line)",
       "Bash(Get-ChildItem -Path \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\" -Recurse -Include \"*.tsx\", \"*.ts\")",
-      "Bash(Select-Object -ExpandProperty FullName)"
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Get-ChildItem -Path \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\" -Recurse -File)"
     ]
   }
 }
