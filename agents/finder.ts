@@ -541,7 +541,7 @@ async function fetchHtmlWithDiagnostics(url: string): Promise<WebsiteFetchResult
   }
 }
 
-export async   function findEmailForBusiness(rawWebsite: string, businessName: string): Promise<{
+export async function findEmailForBusiness(rawWebsite: string, businessName: string, deadline?: number): Promise<{
   email: string | null
   source: string
   websiteText: string
@@ -738,6 +738,11 @@ export async   function findEmailForBusiness(rawWebsite: string, businessName: s
   }
 
   for (const page of crawlPages) {
+    if (deadline != null && Date.now() >= deadline) {
+      logger.info('finder', `CRAWL_DEADLINE_REACHED = ${businessName} — skipping remaining pages`)
+      break
+    }
+
     console.log(`Scanning page: ${page.url}`)
 
     const selectedEmail = await scanPage(
@@ -1240,6 +1245,15 @@ const MAX_RUNTIME_MS = 50 * 60 * 1000
             if (emailCount >= EMAIL_TARGET) break
             if (emailCount + dmCount >= TOTAL_TARGET) break
             if (categoryEmailCount >= categoryLimit) break
+            if (Date.now() - runStartTime >= MAX_RUNTIME_MS) {
+              logger.warn('finder', 'Safety limit: max runtime reached mid-batch', {
+                limitMin:   MAX_RUNTIME_MS / 60000,
+                elapsedMin: ((Date.now() - runStartTime) / 60000).toFixed(1),
+              })
+              safetyLimitHit = true
+              safetyLimitReason = `max_runtime_exceeded (${MAX_RUNTIME_MS / 60000}min)`
+              break
+            }
 
             businessesProcessed++
 
@@ -1287,7 +1301,7 @@ const MAX_RUNTIME_MS = 50 * 60 * 1000
             }
 
             if (!foundEmail && rawWebsite) {
-              const found = await findEmailForBusiness(rawWebsite, name)
+              const found = await findEmailForBusiness(rawWebsite, name, runStartTime + MAX_RUNTIME_MS)
               websiteText = found.websiteText
               normalizedWebsite = found.normalizedWebsite ?? rawWebsite
               websiteFailureReason = found.failureReason
@@ -1460,6 +1474,8 @@ const MAX_RUNTIME_MS = 50 * 60 * 1000
               })
             }
           }
+
+          if (safetyLimitHit) break
 
           // Log progress after every batch regardless of yield
           logger.info('finder', 'DAILY_TARGET_PROGRESS', {
