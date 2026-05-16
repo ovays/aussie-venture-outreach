@@ -1096,7 +1096,7 @@ export async function runFinderAgent(): Promise<number> {
   // Safety limits: prevent runaway searching when leads are scarce
 const MAX_BUSINESSES_PROCESSED = 1200
 const MAX_QUERIES_EXECUTED = 300
-const MAX_RUNTIME_MS = 50 * 60 * 1000
+const MAX_RUNTIME_MS = 5 * 60 * 1000
   const runStartTime             = Date.now()
   let businessesProcessed = 0
   let safetyLimitHit      = false
