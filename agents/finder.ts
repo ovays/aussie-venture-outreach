@@ -1091,6 +1091,16 @@ export async function runFinderAgent(): Promise<number> {
   const seenQueries = new Set<string>()
   let costGuardHit = false
 
+  // Suburb round-robin rotation — flat list of all (suburb, city, state) combinations
+  const allLocations: Array<{ suburb: string; city: string; state: string }> =
+    Object.entries(cityAreas).flatMap(([city, suburbs]) =>
+      suburbs.map((suburb) => ({ suburb, city, state: CITY_STATE[city] ?? 'Unknown' }))
+    )
+  const suburbUsageCounts    = new Map<string, number>()
+  const SUBURB_COOLDOWN_SIZE = 15
+  const suburbCooldownQueue: string[] = []
+  const suburbCooldownSet    = new Set<string>()
+
   let emailCount               = 0
   let dmCount                  = 0
   let callCount                = 0
@@ -1146,21 +1156,25 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
       logger.info('finder', `Skipping halal qualification for category: ${category.name}`)
     }
 
-    citySuburbLoop:
-    for (const [city, suburbs] of Object.entries(cityAreas)) {
-      const state = CITY_STATE[city] ?? 'Unknown'
+    keywordSuburbLoop:
+    for (const keyword of category.queries) {
+      if (emailCount >= EMAIL_TARGET) break
+      if (emailCount + dmCount >= TOTAL_TARGET) break
+      if (categoryEmailCount >= categoryLimit) break
+      if (costGuardHit || safetyLimitHit) break
 
-      for (const suburb of suburbs) {
-        if (emailCount >= EMAIL_TARGET) break citySuburbLoop
-        if (emailCount + dmCount >= TOTAL_TARGET) break citySuburbLoop
-        if (categoryEmailCount >= categoryLimit) break citySuburbLoop
-        if (costGuardHit) break citySuburbLoop
+      // Round-robin: sort suburbs by usage count (least-used first).
+      // Exclude suburbs currently in the cooldown window; fall back to all if all are cooled.
+      const eligibleLocations = allLocations.filter((loc) => !suburbCooldownSet.has(loc.suburb))
+      const rotatedLocations  = (eligibleLocations.length > 0 ? eligibleLocations : allLocations)
+        .slice()
+        .sort((a, b) => (suburbUsageCounts.get(a.suburb) ?? 0) - (suburbUsageCounts.get(b.suburb) ?? 0))
 
-        for (const keyword of category.queries) {
-          if (emailCount >= EMAIL_TARGET) break citySuburbLoop
-          if (emailCount + dmCount >= TOTAL_TARGET) break citySuburbLoop
-          if (categoryEmailCount >= categoryLimit) break citySuburbLoop
-          if (costGuardHit) break citySuburbLoop
+      for (const { suburb, city, state } of rotatedLocations) {
+        if (emailCount >= EMAIL_TARGET) break keywordSuburbLoop
+        if (emailCount + dmCount >= TOTAL_TARGET) break keywordSuburbLoop
+        if (categoryEmailCount >= categoryLimit) break keywordSuburbLoop
+        if (costGuardHit || safetyLimitHit) break keywordSuburbLoop
 
         const query = buildNormalizedSearchQuery(keyword, suburb, city, state)
         logger.info('finder', '[SEARCH_QUERY_NORMALIZED]', { keyword, suburb, city, state, query })
@@ -1177,9 +1191,25 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           logger.warn('finder', 'Safety limit: max queries executed', { limit: MAX_QUERIES_EXECUTED, executed: seenQueries.size })
           safetyLimitHit = true
           safetyLimitReason = `max_queries_executed (${MAX_QUERIES_EXECUTED})`
-          break citySuburbLoop
+          break keywordSuburbLoop
         }
         seenQueries.add(query)
+
+        // Update suburb rotation tracking
+        const newSuburbCount = (suburbUsageCounts.get(suburb) ?? 0) + 1
+        suburbUsageCounts.set(suburb, newSuburbCount)
+        suburbCooldownSet.add(suburb)
+        suburbCooldownQueue.push(suburb)
+        if (suburbCooldownQueue.length > SUBURB_COOLDOWN_SIZE) {
+          const evicted = suburbCooldownQueue.shift()!
+          suburbCooldownSet.delete(evicted)
+        }
+        logger.info('finder', `SUBURB_USED = ${suburb} (count ${newSuburbCount})`, {
+          suburb,
+          city,
+          count:               newSuburbCount,
+          cooldown_queue_size: suburbCooldownQueue.length,
+        })
 
         let skip = 0
         let exhaustedThisQuery = false
@@ -1568,13 +1598,19 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           exhaustedSet.add(query)
         }
 
-        if (costGuardHit || safetyLimitHit) break citySuburbLoop
-        }
+        if (costGuardHit || safetyLimitHit) break keywordSuburbLoop
       }
-      if (costGuardHit || safetyLimitHit) break
     }
     if (costGuardHit || safetyLimitHit) break
   }
+
+  const suburbUsageEntries = [...suburbUsageCounts.entries()].sort((a, b) => b[1] - a[1])
+  logger.info('finder', 'SUBURB_USAGE_SUMMARY', {
+    total_suburbs_used: suburbUsageCounts.size,
+    total_searches:     [...suburbUsageCounts.values()].reduce((a, b) => a + b, 0),
+    most_used:          suburbUsageEntries.slice(0, 5).map(([suburb, count]) => ({ suburb, count })),
+    least_used:         suburbUsageEntries.slice(-5).map(([suburb, count]) => ({ suburb, count })),
+  })
 
   const finderStopReason =
     emailCount >= EMAIL_TARGET ? 'DAILY_TARGET_REACHED'
