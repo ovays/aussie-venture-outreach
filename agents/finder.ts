@@ -1076,6 +1076,18 @@ export async function runFinderAgent(): Promise<number> {
     root_domains: dedupeIndex.byRootDomain.size,
   })
 
+  const { data: existingWebsiteRows } = await supabase
+    .from('leads')
+    .select('website')
+    .not('website', 'is', null)
+  const knownDomains = new Set<string>(
+    (existingWebsiteRows ?? [])
+      .map((r) => rootHost(r.website ?? ''))
+      .filter((d): d is string => Boolean(d))
+  )
+  logger.info('finder', `Known website domains pre-loaded = ${knownDomains.size}`)
+
+  const seenDomains = new Set<string>()
   const seenQueries = new Set<string>()
   let costGuardHit = false
 
@@ -1279,6 +1291,21 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               logger.info('finder', `Skip Instagram website: ${name}`)
               noOutreachMethodsRemoved++
               continue
+            }
+
+            // Domain dedup: skip entire business if we've already crawled this domain
+            // (either in DB from previous runs, or seen earlier in this run)
+            if (rawWebsite) {
+              const domain = rootHost(rawWebsite)
+              if (domain) {
+                if (knownDomains.has(domain) || seenDomains.has(domain)) {
+                  const reason = knownDomains.has(domain) ? 'known_in_db' : 'seen_this_run'
+                  logger.info('finder', `DOMAIN_SKIP = ${domain}`, { business_name: name, domain, reason })
+                  duplicatesRemoved++
+                  continue
+                }
+                seenDomains.add(domain)
+              }
             }
 
             let foundEmail: string | null = null
