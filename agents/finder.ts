@@ -309,6 +309,16 @@ function rootHost(url: string): string | null {
   }
 }
 
+function normalizeDomain(url: string): string | null {
+  try {
+    const withProtocol = /^https?:\/\//i.test(url) ? url : `https://${url}`
+    const parsed = new URL(withProtocol)
+    return parsed.hostname.toLowerCase().replace(/^www\./, '')
+  } catch {
+    return null
+  }
+}
+
 const SOCIAL_MEDIA_DOMAINS = new Set([
   'facebook.com',
   'instagram.com',
@@ -1031,6 +1041,27 @@ export async function runFinderAgent(): Promise<number> {
 
   logger.info('finder', 'Active cities', { cities: activeCities })
 
+  // Load global lead filtering settings once at pipeline start
+  const [filterEnabledRow, blockedKeywordsRow, blockedCategoriesRow] = await Promise.all([
+    supabase.from('settings').select('value').eq('key', 'enable_lead_filtering').single(),
+    supabase.from('settings').select('value').eq('key', 'blocked_business_keywords').single(),
+    supabase.from('settings').select('value').eq('key', 'blocked_google_categories').single(),
+  ])
+
+  const leadFilterEnabled = filterEnabledRow.data?.value === 'true'
+  const blockedKeywords: string[] = (() => {
+    try { return JSON.parse(blockedKeywordsRow.data?.value ?? '[]') as string[] } catch { return [] }
+  })()
+  const blockedCategories: string[] = (() => {
+    try { return JSON.parse(blockedCategoriesRow.data?.value ?? '[]') as string[] } catch { return [] }
+  })()
+
+  logger.info('finder', 'GLOBAL_FILTER_SETTINGS', {
+    enabled: leadFilterEnabled,
+    blocked_keywords: blockedKeywords,
+    blocked_categories: blockedCategories,
+  })
+
   // Load active suburbs for active cities only — both filters must be satisfied
   const { data: suburbData } = await supabase
     .from('city_suburbs')
@@ -1082,7 +1113,7 @@ export async function runFinderAgent(): Promise<number> {
     .not('website', 'is', null)
   const knownDomains = new Set<string>(
     (existingWebsiteRows ?? [])
-      .map((r) => rootHost(r.website ?? ''))
+      .map((r) => normalizeDomain(r.website ?? ''))
       .filter((d): d is string => Boolean(d))
   )
   logger.info('finder', `Known website domains pre-loaded = ${knownDomains.size}`)
@@ -1309,6 +1340,37 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               continue
             }
 
+            // Global lead filter — skip before any website scraping
+            if (leadFilterEnabled) {
+              const lowerName = name.toLowerCase()
+              const matchedKeyword = blockedKeywords.find((kw) => lowerName.includes(kw))
+              if (matchedKeyword) {
+                logger.info('finder', 'GLOBAL_FILTER_KEYWORD_MATCH', {
+                  event: 'FILTERED_BEFORE_SCRAPING',
+                  business_name: name,
+                  matched_keyword: matchedKeyword,
+                })
+                continue
+              }
+
+              const businessCategories = result.categories ?? []
+              const lowerBusinessCategories = businessCategories.map((c) => c.toLowerCase())
+              const lowerBlockedCategories = blockedCategories.map((c) => c.toLowerCase())
+              const matchedCategory = lowerBlockedCategories.find((blocked) =>
+                lowerBusinessCategories.some((cat) => cat === blocked || cat.includes(blocked))
+              )
+              if (matchedCategory) {
+                const originalMatched = blockedCategories[lowerBlockedCategories.indexOf(matchedCategory)]
+                logger.info('finder', 'GLOBAL_FILTER_CATEGORY_MATCH', {
+                  event: 'FILTERED_BEFORE_SCRAPING',
+                  business_name: name,
+                  matched_category: originalMatched,
+                  business_categories: businessCategories,
+                })
+                continue
+              }
+            }
+
             if (rawWebsite) {
               logger.info('finder', 'Website extracted', {
                 business_name: name,
@@ -1323,14 +1385,19 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               continue
             }
 
-            // Domain dedup: skip entire business if we've already crawled this domain
-            // (either in DB from previous runs, or seen earlier in this run)
+            // Early domain dedup: skip entire business before any scraping if domain already known.
+            // Covers: existing leads (all statuses), current pipeline session.
             if (rawWebsite) {
-              const domain = rootHost(rawWebsite)
+              const domain = normalizeDomain(rawWebsite)
               if (domain) {
                 if (knownDomains.has(domain) || seenDomains.has(domain)) {
-                  const reason = knownDomains.has(domain) ? 'known_in_db' : 'seen_this_run'
-                  logger.info('finder', `DOMAIN_SKIP = ${domain}`, { business_name: name, domain, reason })
+                  const source = knownDomains.has(domain) ? 'known_in_db' : 'seen_this_run'
+                  logger.info('finder', 'EARLY_DUPLICATE_DETECTED', {
+                    event: 'EARLY_DOMAIN_SKIP',
+                    business_name: name,
+                    domain,
+                    source,
+                  })
                   duplicatesRemoved++
                   continue
                 }

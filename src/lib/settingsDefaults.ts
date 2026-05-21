@@ -3,6 +3,18 @@ export const SETTINGS_DEFAULTS = {
     value: 'Sydney',
     description: 'Comma separated list of active cities',
   },
+  blocked_business_keywords: {
+    value: '[]',
+    description: 'JSON array of blocked business name keywords (lowercase, matched by inclusion)',
+  },
+  blocked_google_categories: {
+    value: '[]',
+    description: 'JSON array of blocked Google Maps categories (matched exact or by lowercase inclusion)',
+  },
+  enable_lead_filtering: {
+    value: 'false',
+    description: 'Enable global lead filtering — skip businesses matching blocked keywords or Google Maps categories before scraping',
+  },
   daily_dm_limit: {
     value: '10',
     description: 'Maximum DMs to queue per day (Instagram + Facebook)',

@@ -3,6 +3,7 @@ import TopBar from '@/components/layout/TopBar'
 import { SystemSettings } from '@/components/settings/SystemSettings'
 import { CategoriesTable } from '@/components/settings/CategoriesTable'
 import { CitySuburbs } from '@/components/settings/CitySuburbs'
+import { LeadFiltering } from '@/components/settings/LeadFiltering'
 import { Card } from '@/components/ui/Card'
 import { withDefaultSettings } from '@/lib/settingsDefaults'
 
@@ -120,6 +121,16 @@ export default async function SettingsPage() {
   const hasGoogleMapsKey = !!process.env.GOOGLE_MAPS_API_KEY
   const settingsWithDefaults = withDefaultSettings(settings ?? [])
 
+  const settingsByKey = Object.fromEntries(settingsWithDefaults.map((s) => [s.key, s.value]))
+
+  function parseJsonArray(raw: string): string[] {
+    try { return JSON.parse(raw) as string[] } catch { return [] }
+  }
+
+  const filterEnabled = settingsByKey['enable_lead_filtering'] === 'true'
+  const filterKeywords = parseJsonArray(settingsByKey['blocked_business_keywords'] ?? '[]')
+  const filterCategories = parseJsonArray(settingsByKey['blocked_google_categories'] ?? '[]')
+
   console.log('[SETTINGS_FETCH]', {
     keys: settingsWithDefaults.map((setting) => setting.key),
     values: Object.fromEntries(settingsWithDefaults.map((setting) => [setting.key, setting.value])),
@@ -142,6 +153,14 @@ export default async function SettingsPage() {
 
         <Card>
           <CitySuburbs initialData={suburbsByCity} />
+        </Card>
+
+        <Card>
+          <LeadFiltering
+            initialEnabled={filterEnabled}
+            initialKeywords={filterKeywords}
+            initialCategories={filterCategories}
+          />
         </Card>
 
         <Card>
