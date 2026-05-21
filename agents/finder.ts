@@ -1125,6 +1125,10 @@ export async function runFinderAgent(): Promise<number> {
     Object.entries(cityAreaMaps).flatMap(([city, suburbMap]) =>
       [...suburbMap.entries()].map(([suburb, priority]) => ({ suburb, city, state: CITY_STATE[city] ?? 'Unknown', priority }))
     )
+  const totalCombinations = finderCategories.reduce(
+    (sum, cat) => sum + cat.queries.length * allLocations.length, 0
+  )
+  logger.info('finder', `Total keyword/suburb combinations: ${totalCombinations}`)
   const suburbUsageCounts    = new Map<string, number>()
   const SUBURB_COOLDOWN_SIZE = 15
   const suburbCooldownQueue: string[] = []
@@ -1140,6 +1144,16 @@ export async function runFinderAgent(): Promise<number> {
   let invalidEmailsRemoved     = 0
   let noOutreachMethodsRemoved = 0
   let qualifiedCandidates      = 0
+
+  // Granular skip counters — used only for pipeline observability summary
+  let irrelevantSkips      = 0
+  let keywordFilteredSkips = 0
+  let earlyDuplicateSkips  = 0
+  let dbDuplicateSkips     = 0
+  let dedupeIndexSkips     = 0
+  let noWebsiteSkips       = 0
+  let socialOnlySkips      = 0
+  let websiteNoEmailSkips  = 0
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // PHASE 1 — EMAIL LEADS
@@ -1262,6 +1276,14 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           cooldown_queue_size: suburbCooldownQueue.length,
         })
 
+        // Per-combination counters for EMPTY_GOOGLE_RESULTS / SUBURB_EXHAUSTED logging
+        let comboGoogleResults    = 0
+        let comboNewLeads         = 0
+        let comboDuplicates       = 0
+        let comboNoWebsite        = 0
+        let comboValidationFailed = 0
+        let comboBlockedKeyword   = 0
+
         let skip = 0
         let exhaustedThisQuery = false
         while (true) {
@@ -1331,6 +1353,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           if (apiUsed === 'outscraper' || apiUsed === 'outscraper_fallback') {
             outscraperResultsFetched += results.length
           }
+          comboGoogleResults += results.length
 
           let newLeadsThisBatch = 0
 
@@ -1356,6 +1379,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
             let websiteFailureReason: string | null = null
 
             if (isIrrelevant(name)) {
+              irrelevantSkips++
               logger.info('finder', `Skip irrelevant: ${name}`)
               continue
             }
@@ -1365,6 +1389,8 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               const nameWords = name.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean)
               const matchedKeyword = blockedKeywords.find((kw) => nameWords.includes(kw.toLowerCase()))
               if (matchedKeyword) {
+                keywordFilteredSkips++
+                comboBlockedKeyword++
                 logger.info('finder', 'GLOBAL_FILTER_KEYWORD_MATCH', {
                   event: 'FILTERED_BEFORE_SCRAPING',
                   business_name: name,
@@ -1383,6 +1409,8 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
 
             // Business whose website IS an Instagram page has no real web presence for email
             if (rawWebsite && INSTAGRAM_REGEX.test(rawWebsite)) {
+              socialOnlySkips++
+              comboValidationFailed++
               logger.info('finder', `Skip Instagram website: ${name}`)
               noOutreachMethodsRemoved++
               continue
@@ -1401,6 +1429,8 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                     domain,
                     source,
                   })
+                  earlyDuplicateSkips++
+                  comboDuplicates++
                   duplicatesRemoved++
                   continue
                 }
@@ -1419,6 +1449,8 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
             }
 
             if (!foundEmail && !rawWebsite) {
+              noWebsiteSkips++
+              comboNoWebsite++
               logger.info('finder', 'No website available for email extraction', {
                 business_name: name,
                 extracted_website: rawWebsite,
@@ -1493,6 +1525,8 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
             }
 
             if (await isAlreadyInDB(supabase, name, city, result.phone)) {
+              dbDuplicateSkips++
+              comboDuplicates++
               duplicatesRemoved++
               logger.info('finder', `Skip duplicate: ${name}`)
               continue
@@ -1529,6 +1563,8 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                   logger.info('finder', '[DEBUG_DEDUPLICATION] duplicate domain detected', duplicateMeta)
                 }
                 logger.info('finder', '[DEBUG_DEDUPLICATION] lead skipped reason', duplicateMeta)
+                dedupeIndexSkips++
+                comboDuplicates++
                 duplicatesRemoved++
                 continue
               }
@@ -1563,6 +1599,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               emailCount++
               categoryEmailCount++
               newLeadsThisBatch++
+              comboNewLeads++
               logger.info('finder', `Email lead: ${name}`, { email: foundEmail, source: emailSource })
 
               logger.info('finder', `SUCCESSFUL_LEAD_PROGRESS = ${emailCount}/${EMAIL_TARGET} (category ${categoryEmailCount}/${categoryLimit})`, {
@@ -1592,6 +1629,8 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                 metadata:    { category: category.name, city, email: foundEmail, source: emailSource, type: 'email' },
               })
             } else {
+              websiteNoEmailSkips++
+              comboValidationFailed++
               noOutreachMethodsRemoved++
               logger.info('finder', 'No email found after website validation', {
                 business_name: name,
@@ -1666,6 +1705,25 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
             expires_at:   new Date(Date.now() + 3 * 86_400_000).toISOString(),
           })
           exhaustedSet.add(query)
+        }
+
+        if (comboGoogleResults === 0) {
+          console.log(`[EMPTY_GOOGLE_RESULTS] keyword="${keyword}" suburb="${suburb}"`)
+          logger.info('finder', '[EMPTY_GOOGLE_RESULTS]', { keyword, suburb, query })
+        } else if (comboNewLeads === 0) {
+          const reasonBreakdown = {
+            duplicates:       comboDuplicates,
+            noWebsite:        comboNoWebsite,
+            validationFailed: comboValidationFailed,
+            blockedKeyword:   comboBlockedKeyword,
+          }
+          console.log(`[SUBURB_EXHAUSTED] keyword="${keyword}" suburb="${suburb}" results=${comboGoogleResults} reasons=${JSON.stringify(reasonBreakdown)}`)
+          logger.info('finder', '[SUBURB_EXHAUSTED]', {
+            keyword,
+            suburb,
+            google_results:   comboGoogleResults,
+            reason_breakdown: reasonBreakdown,
+          })
         }
 
         if (costGuardHit || safetyLimitHit) break keywordSuburbLoop
@@ -1856,6 +1914,88 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
       safety_limit_hit:   safetyLimitHit,
       safety_limit_reason: safetyLimitReason || null,
     },
+  })
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // PIPELINE FINAL SUMMARY
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  const summaryElapsedMs  = Date.now() - runStartTime
+  const summaryElapsedMin = Math.floor(summaryElapsedMs / 60000)
+  const summaryElapsedSec = Math.floor((summaryElapsedMs % 60000) / 1000)
+  const suburbsProcessed  = suburbUsageCounts.size
+  const combinationsProcessed = seenQueries.size
+
+  const pipelineExitReason =
+    emailCount >= EMAIL_TARGET                                          ? 'EMAIL_TARGET_REACHED'
+    : costGuardHit                                                      ? 'COST_GUARD_HIT'
+    : safetyLimitHit && safetyLimitReason.includes('max_runtime')      ? 'MAX_RUNTIME_REACHED'
+    : safetyLimitHit && safetyLimitReason.includes('max_queries')      ? 'MAX_QUERIES_REACHED'
+    : safetyLimitHit && safetyLimitReason.includes('max_businesses')   ? 'MAX_BUSINESSES_REACHED'
+    :                                                                     'ALL_COMBINATIONS_EXHAUSTED'
+
+  const summaryLines = [
+    '',
+    '==================================================',
+    'PIPELINE FINAL SUMMARY',
+    '======================',
+    '',
+    `Total suburbs configured       : ${totalSuburbs}`,
+    `Suburbs processed              : ${suburbsProcessed}`,
+    '',
+    `Total keyword/suburb combos    : ${totalCombinations}`,
+    `Combinations processed         : ${combinationsProcessed}`,
+    '',
+    `Total Google businesses        : ${totalResultsFetched}`,
+    '',
+    `Irrelevant name skips          : ${irrelevantSkips}`,
+    `Blocked by keyword filter      : ${keywordFilteredSkips}`,
+    `Skipped as early duplicates    : ${earlyDuplicateSkips}`,
+    `DB duplicate skips             : ${dbDuplicateSkips}`,
+    `Dedupe index skips             : ${dedupeIndexSkips}`,
+    `No website available           : ${noWebsiteSkips}`,
+    `Social-only websites skipped   : ${socialOnlySkips}`,
+    `No email after scraping        : ${websiteNoEmailSkips}`,
+    `Invalid emails removed         : ${invalidEmailsRemoved}`,
+    `Emails successfully extracted  : ${emailCount}`,
+    `Final unique email-ready leads : ${emailCount}`,
+    '',
+    `Queries executed               : ${seenQueries.size} / ${MAX_QUERIES_EXECUTED}`,
+    `Businesses processed           : ${businessesProcessed} / ${MAX_BUSINESSES_PROCESSED}`,
+    `Runtime used                   : ${summaryElapsedMin}m ${summaryElapsedSec}s / ${MAX_RUNTIME_MS / 60000}m`,
+    '',
+    `PIPELINE EXIT REASON: ${pipelineExitReason}`,
+    '',
+    '==================================================',
+    '',
+  ]
+
+  for (const line of summaryLines) {
+    console.log(line)
+  }
+
+  logger.info('finder', 'PIPELINE_FINAL_SUMMARY', {
+    total_suburbs_configured:   totalSuburbs,
+    suburbs_processed:          suburbsProcessed,
+    total_combinations:         totalCombinations,
+    combinations_processed:     combinationsProcessed,
+    total_google_businesses:    totalResultsFetched,
+    irrelevant_skips:           irrelevantSkips,
+    keyword_filtered_skips:     keywordFilteredSkips,
+    early_duplicate_skips:      earlyDuplicateSkips,
+    db_duplicate_skips:         dbDuplicateSkips,
+    dedupe_index_skips:         dedupeIndexSkips,
+    no_website_skips:           noWebsiteSkips,
+    social_only_skips:          socialOnlySkips,
+    website_no_email_skips:     websiteNoEmailSkips,
+    invalid_emails_removed:     invalidEmailsRemoved,
+    email_leads:                emailCount,
+    queries_executed:           seenQueries.size,
+    queries_limit:              MAX_QUERIES_EXECUTED,
+    businesses_processed:       businessesProcessed,
+    businesses_limit:           MAX_BUSINESSES_PROCESSED,
+    runtime_ms:                 summaryElapsedMs,
+    runtime_limit_ms:           MAX_RUNTIME_MS,
+    pipeline_exit_reason:       pipelineExitReason,
   })
 
   return leadsKept
