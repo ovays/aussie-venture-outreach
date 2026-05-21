@@ -1042,24 +1042,19 @@ export async function runFinderAgent(): Promise<number> {
   logger.info('finder', 'Active cities', { cities: activeCities })
 
   // Load global lead filtering settings once at pipeline start
-  const [filterEnabledRow, blockedKeywordsRow, blockedCategoriesRow] = await Promise.all([
+  const [filterEnabledRow, blockedKeywordsRow] = await Promise.all([
     supabase.from('settings').select('value').eq('key', 'enable_lead_filtering').single(),
     supabase.from('settings').select('value').eq('key', 'blocked_business_keywords').single(),
-    supabase.from('settings').select('value').eq('key', 'blocked_google_categories').single(),
   ])
 
   const leadFilterEnabled = filterEnabledRow.data?.value === 'true'
   const blockedKeywords: string[] = (() => {
     try { return JSON.parse(blockedKeywordsRow.data?.value ?? '[]') as string[] } catch { return [] }
   })()
-  const blockedCategories: string[] = (() => {
-    try { return JSON.parse(blockedCategoriesRow.data?.value ?? '[]') as string[] } catch { return [] }
-  })()
 
   logger.info('finder', 'GLOBAL_FILTER_SETTINGS', {
     enabled: leadFilterEnabled,
     blocked_keywords: blockedKeywords,
-    blocked_categories: blockedCategories,
   })
 
   // Load active suburbs for active cities only — both filters must be satisfied
@@ -1340,32 +1335,15 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               continue
             }
 
-            // Global lead filter — skip before any website scraping
-            if (leadFilterEnabled) {
-              const lowerName = name.toLowerCase()
-              const matchedKeyword = blockedKeywords.find((kw) => lowerName.includes(kw))
+            // Global lead filter — skip before any website scraping (whole-word match only)
+            if (leadFilterEnabled && blockedKeywords.length > 0) {
+              const nameWords = name.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean)
+              const matchedKeyword = blockedKeywords.find((kw) => nameWords.includes(kw.toLowerCase()))
               if (matchedKeyword) {
                 logger.info('finder', 'GLOBAL_FILTER_KEYWORD_MATCH', {
                   event: 'FILTERED_BEFORE_SCRAPING',
                   business_name: name,
                   matched_keyword: matchedKeyword,
-                })
-                continue
-              }
-
-              const businessCategories = result.categories ?? []
-              const lowerBusinessCategories = businessCategories.map((c) => c.toLowerCase())
-              const lowerBlockedCategories = blockedCategories.map((c) => c.toLowerCase())
-              const matchedCategory = lowerBlockedCategories.find((blocked) =>
-                lowerBusinessCategories.some((cat) => cat === blocked || cat.includes(blocked))
-              )
-              if (matchedCategory) {
-                const originalMatched = blockedCategories[lowerBlockedCategories.indexOf(matchedCategory)]
-                logger.info('finder', 'GLOBAL_FILTER_CATEGORY_MATCH', {
-                  event: 'FILTERED_BEFORE_SCRAPING',
-                  business_name: name,
-                  matched_category: originalMatched,
-                  business_categories: businessCategories,
                 })
                 continue
               }

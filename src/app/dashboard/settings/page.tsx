@@ -129,7 +129,6 @@ export default async function SettingsPage() {
 
   const filterEnabled = settingsByKey['enable_lead_filtering'] === 'true'
   const filterKeywords = parseJsonArray(settingsByKey['blocked_business_keywords'] ?? '[]')
-  const filterCategories = parseJsonArray(settingsByKey['blocked_google_categories'] ?? '[]')
 
   console.log('[SETTINGS_FETCH]', {
     keys: settingsWithDefaults.map((setting) => setting.key),
@@ -159,7 +158,6 @@ export default async function SettingsPage() {
           <LeadFiltering
             initialEnabled={filterEnabled}
             initialKeywords={filterKeywords}
-            initialCategories={filterCategories}
           />
         </Card>
 

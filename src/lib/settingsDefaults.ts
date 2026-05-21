@@ -7,13 +7,9 @@ export const SETTINGS_DEFAULTS = {
     value: '[]',
     description: 'JSON array of blocked business name keywords (lowercase, matched by inclusion)',
   },
-  blocked_google_categories: {
-    value: '[]',
-    description: 'JSON array of blocked Google Maps categories (matched exact or by lowercase inclusion)',
-  },
   enable_lead_filtering: {
     value: 'false',
-    description: 'Enable global lead filtering — skip businesses matching blocked keywords or Google Maps categories before scraping',
+    description: 'Enable global lead filtering — skip businesses whose name contains a blocked keyword',
   },
   daily_dm_limit: {
     value: '10',

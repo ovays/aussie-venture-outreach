@@ -6,15 +6,12 @@ import { X } from 'lucide-react'
 interface LeadFilteringProps {
   initialEnabled: boolean
   initialKeywords: string[]
-  initialCategories: string[]
 }
 
-export function LeadFiltering({ initialEnabled, initialKeywords, initialCategories }: LeadFilteringProps) {
+export function LeadFiltering({ initialEnabled, initialKeywords }: LeadFilteringProps) {
   const [enabled, setEnabled] = useState(initialEnabled)
   const [keywords, setKeywords] = useState<string[]>(initialKeywords)
-  const [categories, setCategories] = useState<string[]>(initialCategories)
   const [keywordInput, setKeywordInput] = useState('')
-  const [categoryInput, setCategoryInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -26,16 +23,6 @@ export function LeadFiltering({ initialEnabled, initialKeywords, initialCategori
     }
     setKeywords((prev) => [...prev, val])
     setKeywordInput('')
-  }
-
-  function addCategory() {
-    const val = categoryInput.trim()
-    if (!val || categories.includes(val)) {
-      setCategoryInput('')
-      return
-    }
-    setCategories((prev) => [...prev, val])
-    setCategoryInput('')
   }
 
   async function save() {
@@ -52,11 +39,6 @@ export function LeadFiltering({ initialEnabled, initialKeywords, initialCategori
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'blocked_business_keywords', value: JSON.stringify(keywords) }),
       }),
-      fetch('/api/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'blocked_google_categories', value: JSON.stringify(categories) }),
-      }),
     ])
     setSaving(false)
     setSaved(true)
@@ -67,7 +49,7 @@ export function LeadFiltering({ initialEnabled, initialKeywords, initialCategori
     <section>
       <h3 className="text-base font-semibold text-white mb-1">Lead Filtering</h3>
       <p className="text-xs mb-4" style={{ color: '#64748b' }}>
-        Skip businesses before any website scraping if they match blocked name keywords or Google Maps categories.
+        Skip businesses before any website scraping if their name contains a blocked keyword.
         Applies globally to all categories.
       </p>
 
@@ -96,7 +78,7 @@ export function LeadFiltering({ initialEnabled, initialKeywords, initialCategori
       </div>
 
       {/* Blocked Business Name Keywords */}
-      <div className="mb-4">
+      <div className="mb-5">
         <p className="text-xs font-medium mb-2" style={{ color: '#94a3b8' }}>Blocked Business Name Keywords</p>
         <div
           className="rounded-lg p-3 mb-2"
@@ -142,56 +124,6 @@ export function LeadFiltering({ initialEnabled, initialKeywords, initialCategori
         />
         <p className="text-xs mt-1.5" style={{ color: '#374151' }}>
           e.g. bar, wine, pub, brewery — stored lowercase, matched by inclusion in business name
-        </p>
-      </div>
-
-      {/* Blocked Google Maps Categories */}
-      <div className="mb-5">
-        <p className="text-xs font-medium mb-2" style={{ color: '#94a3b8' }}>Blocked Google Maps Categories</p>
-        <div
-          className="rounded-lg p-3 mb-2"
-          style={{ background: '#0f1117', border: '1px solid #2a2d3e', minHeight: 48 }}
-        >
-          <div className="flex flex-wrap gap-1.5">
-            {categories.length === 0 ? (
-              <span className="text-xs" style={{ color: '#374151' }}>No categories added yet</span>
-            ) : (
-              categories.map((cat) => (
-                <span
-                  key={cat}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
-                  style={{ background: '#1e2130', color: '#94a3b8', border: '1px solid #2a2d3e' }}
-                >
-                  {cat}
-                  <button
-                    type="button"
-                    onClick={() => setCategories((prev) => prev.filter((c) => c !== cat))}
-                    className="hover:text-red-400 transition-colors"
-                    aria-label={`Remove ${cat}`}
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
-              ))
-            )}
-          </div>
-        </div>
-        <input
-          type="text"
-          value={categoryInput}
-          onChange={(e) => setCategoryInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              addCategory()
-            }
-          }}
-          placeholder="Type category and press Enter…"
-          className="w-full px-3 py-2 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-sky-500"
-          style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
-        />
-        <p className="text-xs mt-1.5" style={{ color: '#374151' }}>
-          e.g. Bar, Pub, Wine Bar, Liquor Store — matched by lowercase inclusion in Google Maps category
         </p>
       </div>
 
