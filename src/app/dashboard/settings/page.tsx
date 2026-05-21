@@ -48,7 +48,7 @@ export default async function SettingsPage() {
       .order('created_at', { ascending: false }),
     supabase
       .from('city_suburbs')
-      .select('id, city, suburb, active')
+      .select('id, city, suburb, active, priority')
       .order('city')
       .order('suburb'),
     supabase
@@ -63,10 +63,11 @@ export default async function SettingsPage() {
   ])
 
   // Group suburbs by city
-  const suburbsByCity: Record<string, { id: string; suburb: string; active: boolean }[]> = {}
+  const suburbsByCity: Record<string, { id: string; suburb: string; active: boolean; priority: number }[]> = {}
   for (const row of suburbRows ?? []) {
     if (!suburbsByCity[row.city]) suburbsByCity[row.city] = []
-    suburbsByCity[row.city].push({ id: row.id, suburb: row.suburb, active: row.active })
+    const r = row as typeof row & { priority?: number | null }
+    suburbsByCity[row.city].push({ id: row.id, suburb: row.suburb, active: row.active, priority: r.priority ?? 1 })
   }
 
   // Compute usage stats from raw events

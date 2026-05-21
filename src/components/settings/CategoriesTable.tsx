@@ -16,6 +16,7 @@ interface Category {
   pitch_template: string | null
   dm_template: string | null
   search_keywords: string[] | null
+  use_priority_suburbs: boolean
   status: 'active' | 'paused'
 }
 
@@ -93,6 +94,9 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
                     {cat.halal_filter && (
                       <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#16a34a20', color: '#4ade80' }}>Halal</span>
                     )}
+                    {cat.use_priority_suburbs && (
+                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#0284c720', color: '#38bdf8' }}>Priority</span>
+                    )}
                   </div>
                 </td>
                 <td className="px-4 py-3 text-xs" style={{ color: '#94a3b8' }}>{CITIES_LABEL[cat.cities]}</td>
@@ -119,6 +123,7 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
       </div>
 
       <CategoryModal
+        key={editingCategory?.id ?? 'new'}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         category={editingCategory}

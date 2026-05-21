@@ -5,16 +5,17 @@ export async function GET() {
   const supabase = createServiceClient()
   const { data, error } = await supabase
     .from('city_suburbs')
-    .select('id, city, suburb, active')
+    .select('id, city, suburb, active, priority')
     .order('city')
     .order('suburb')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const grouped: Record<string, { id: string; suburb: string; active: boolean }[]> = {}
+  const grouped: Record<string, { id: string; suburb: string; active: boolean; priority: number }[]> = {}
   for (const row of data ?? []) {
     if (!grouped[row.city]) grouped[row.city] = []
-    grouped[row.city].push({ id: row.id, suburb: row.suburb, active: row.active })
+    const r = row as typeof row & { priority?: number | null }
+    grouped[row.city].push({ id: row.id, suburb: row.suburb, active: row.active, priority: r.priority ?? 1 })
   }
 
   return NextResponse.json({ data: grouped })
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase
     .from('city_suburbs')
     .insert({ city, suburb, active: true })
-    .select('id, city, suburb, active')
+    .select('id, city, suburb, active, priority')
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -36,12 +37,16 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   const supabase = createServiceClient()
-  const { id, active } = await req.json() as { id: string; active: boolean }
+  const body = await req.json() as { id: string; active?: boolean; priority?: number }
+
+  const updates: Record<string, unknown> = {}
+  if (body.active !== undefined) updates.active = body.active
+  if (body.priority !== undefined) updates.priority = body.priority
 
   const { error } = await supabase
     .from('city_suburbs')
-    .update({ active })
-    .eq('id', id)
+    .update(updates)
+    .eq('id', body.id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })

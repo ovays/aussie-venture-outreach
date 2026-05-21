@@ -25,12 +25,14 @@ export type FinderEmailCategory = {
   queries: string[]
   capped: boolean
   batchSize: number
+  usePrioritySuburbs: boolean
 }
 
 type FinderCategoryRow = {
   id: string
   name: string
   search_keywords: string[] | null
+  use_priority_suburbs: boolean | null
   status: string | null
 }
 
@@ -48,7 +50,7 @@ export async function loadFinderCategories(
 ): Promise<FinderEmailCategory[]> {
   const { data, error } = await supabase
     .from('categories')
-    .select('id, name, search_keywords, status')
+    .select('id, name, search_keywords, use_priority_suburbs, status')
     .eq('status', 'active')
     .order('created_at', { ascending: true })
     .order('name')
@@ -62,6 +64,7 @@ export async function loadFinderCategories(
       queries: category.search_keywords?.filter(Boolean) ?? [],
       capped: index < 4,
       batchSize: index < 2 ? 5 : 3,
+      usePrioritySuburbs: category.use_priority_suburbs ?? false,
     }))
     .filter((category) => category.queries.length > 0)
 }
@@ -1060,28 +1063,28 @@ export async function runFinderAgent(): Promise<number> {
   // Load active suburbs for active cities only — both filters must be satisfied
   const { data: suburbData } = await supabase
     .from('city_suburbs')
-    .select('city, suburb')
+    .select('city, suburb, priority')
     .eq('active', true)
     .in('city', activeCities)
     .order('last_used_at', { ascending: true, nullsFirst: true })
     .order('city')
     .order('suburb')
 
-  // Use a Set per city so duplicate DB rows never produce duplicate suburbs
-  const cityAreaSets: Record<string, Set<string>> = {}
+  // Map<suburb, priority> per city — deduplicates while preserving individual suburb priority
+  const cityAreaMaps: Record<string, Map<string, number>> = {}
   for (const row of suburbData ?? []) {
-    if (!cityAreaSets[row.city]) cityAreaSets[row.city] = new Set()
-    cityAreaSets[row.city].add(row.suburb)
+    if (!cityAreaMaps[row.city]) cityAreaMaps[row.city] = new Map()
+    if (!cityAreaMaps[row.city].has(row.suburb)) {
+      cityAreaMaps[row.city].set(row.suburb, (row as typeof row & { priority?: number | null }).priority ?? 1)
+    }
   }
-  const cityAreas: Record<string, string[]> = Object.fromEntries(
-    Object.entries(cityAreaSets).map(([city, set]) => [city, [...set]])
-  )
-  // If a city is active but has no configured suburbs, search the city name itself
+  // If a city is active but has no configured suburbs, search the city name itself (priority 1)
   for (const city of activeCities) {
-    if (!cityAreas[city]?.length) cityAreas[city] = [city]
+    if (!cityAreaMaps[city]?.size) cityAreaMaps[city] = new Map([[city, 1]])
   }
 
-  logger.info('finder', `Suburbs loaded: ${Object.values(cityAreas).flat().length} active suburbs`)
+  const totalSuburbs = Object.values(cityAreaMaps).reduce((n, m) => n + m.size, 0)
+  logger.info('finder', `Suburbs loaded: ${totalSuburbs} active suburbs`)
 
   // Load exhausted queries (cleanup expired first)
   await supabase.from('exhausted_queries').delete().lt('expires_at', new Date().toISOString())
@@ -1117,10 +1120,10 @@ export async function runFinderAgent(): Promise<number> {
   const seenQueries = new Set<string>()
   let costGuardHit = false
 
-  // Suburb round-robin rotation — flat list of all (suburb, city, state) combinations
-  const allLocations: Array<{ suburb: string; city: string; state: string }> =
-    Object.entries(cityAreas).flatMap(([city, suburbs]) =>
-      suburbs.map((suburb) => ({ suburb, city, state: CITY_STATE[city] ?? 'Unknown' }))
+  // Suburb weighted rotation — flat list with priority for weighted score sorting
+  const allLocations: Array<{ suburb: string; city: string; state: string; priority: number }> =
+    Object.entries(cityAreaMaps).flatMap(([city, suburbMap]) =>
+      [...suburbMap.entries()].map(([suburb, priority]) => ({ suburb, city, state: CITY_STATE[city] ?? 'Unknown', priority }))
     )
   const suburbUsageCounts    = new Map<string, number>()
   const SUBURB_COOLDOWN_SIZE = 15
@@ -1189,14 +1192,29 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
       if (categoryEmailCount >= categoryLimit) break
       if (costGuardHit || safetyLimitHit) break
 
-      // Round-robin: sort suburbs by usage count (least-used first).
-      // Exclude suburbs currently in the cooldown window; fall back to all if all are cooled.
+      // Suburb ordering — exclude cooldown window, fall back to all if all cooled.
       const eligibleLocations = allLocations.filter((loc) => !suburbCooldownSet.has(loc.suburb))
-      const rotatedLocations  = (eligibleLocations.length > 0 ? eligibleLocations : allLocations)
-        .slice()
-        .sort((a, b) => (suburbUsageCounts.get(a.suburb) ?? 0) - (suburbUsageCounts.get(b.suburb) ?? 0))
+      const baseLocations = (eligibleLocations.length > 0 ? eligibleLocations : allLocations).slice()
 
-      for (const { suburb, city, state } of rotatedLocations) {
+      let rotatedLocations: typeof baseLocations
+      if (category.usePrioritySuburbs) {
+        // Priority-suburb mode: sort by priority DESC so highest-priority suburbs come first.
+        // Every suburb is still searched exactly once per keyword cycle.
+        rotatedLocations = baseLocations.sort((a, b) => b.priority - a.priority)
+        logger.info('finder', 'PRIORITY_SUBURB_ORDER_ENABLED', {
+          category: category.name,
+          suburb_order: rotatedLocations.map((loc) => ({ suburb: loc.suburb, priority: loc.priority })),
+        })
+      } else {
+        // Default weighted rotation: sort by usageCount/priority (least-used relative to priority first).
+        rotatedLocations = baseLocations.sort((a, b) => {
+          const scoreA = (suburbUsageCounts.get(a.suburb) ?? 0) / a.priority
+          const scoreB = (suburbUsageCounts.get(b.suburb) ?? 0) / b.priority
+          return scoreA - scoreB
+        })
+      }
+
+      for (const { suburb, city, state, priority } of rotatedLocations) {
         if (emailCount >= EMAIL_TARGET) break keywordSuburbLoop
         if (emailCount + dmCount >= TOTAL_TARGET) break keywordSuburbLoop
         if (categoryEmailCount >= categoryLimit) break keywordSuburbLoop
@@ -1230,6 +1248,13 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           const evicted = suburbCooldownQueue.shift()!
           suburbCooldownSet.delete(evicted)
         }
+        logger.info('finder', 'SUBURB_PRIORITY_USED', {
+          suburb,
+          city,
+          priority,
+          usage_count:    newSuburbCount,
+          weighted_score: newSuburbCount / priority,
+        })
         logger.info('finder', `SUBURB_USED = ${suburb} (count ${newSuburbCount})`, {
           suburb,
           city,

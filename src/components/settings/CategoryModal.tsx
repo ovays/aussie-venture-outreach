@@ -16,6 +16,7 @@ interface Category {
   pitch_template: string | null
   dm_template: string | null
   search_keywords: string[] | null
+  use_priority_suburbs: boolean
   status: 'active' | 'paused'
 }
 
@@ -42,6 +43,7 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
     pitch_template: category?.pitch_template ?? '',
     dm_template: category?.dm_template ?? '',
     search_keywords: category?.search_keywords ?? [],
+    use_priority_suburbs: category?.use_priority_suburbs ?? false,
   })
   const [keywordInput, setKeywordInput] = useState('')
   const [saving, setSaving] = useState(false)
@@ -112,6 +114,12 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
           checked={form.halal_filter}
           onChange={(v) => set('halal_filter', v)}
           label="Halal filter (only show halal businesses)"
+        />
+
+        <Toggle
+          checked={form.use_priority_suburbs}
+          onChange={(v) => set('use_priority_suburbs', v)}
+          label="Use Priority Suburbs (search high-priority suburbs first)"
         />
 
         <div>

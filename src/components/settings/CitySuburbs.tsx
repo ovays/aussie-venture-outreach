@@ -7,6 +7,7 @@ interface SuburbRow {
   id: string
   suburb: string
   active: boolean
+  priority: number
 }
 
 interface CitySuburbsProps {
@@ -33,6 +34,19 @@ export function CitySuburbs({ initialData }: CitySuburbsProps) {
     }))
   }
 
+  async function updatePriority(id: string, priority: number) {
+    const clamped = Math.min(10, Math.max(1, Math.round(priority)))
+    setData((prev) => ({
+      ...prev,
+      [activeCity]: (prev[activeCity] ?? []).map((s) => s.id === id ? { ...s, priority: clamped } : s),
+    }))
+    await fetch('/api/city-suburbs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, priority: clamped }),
+    })
+  }
+
   async function removeSuburb(id: string) {
     await fetch('/api/city-suburbs', {
       method: 'DELETE',
@@ -54,11 +68,11 @@ export function CitySuburbs({ initialData }: CitySuburbsProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ city: activeCity, suburb: trimmed }),
     })
-    const json = await res.json() as { data?: { id: string; suburb: string; active: boolean } }
+    const json = await res.json() as { data?: { id: string; suburb: string; active: boolean; priority?: number | null } }
     if (json.data) {
       setData((prev) => ({
         ...prev,
-        [activeCity]: [...(prev[activeCity] ?? []), { id: json.data!.id, suburb: json.data!.suburb, active: true }],
+        [activeCity]: [...(prev[activeCity] ?? []), { id: json.data!.id, suburb: json.data!.suburb, active: true, priority: json.data!.priority ?? 1 }],
       }))
       setNewSuburb('')
     }
@@ -131,6 +145,34 @@ export function CitySuburbs({ initialData }: CitySuburbsProps) {
                 >
                   {s.suburb}
                 </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={s.priority}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10)
+                    if (!isNaN(val)) {
+                      setData((prev) => ({
+                        ...prev,
+                        [activeCity]: (prev[activeCity] ?? []).map((r) => r.id === s.id ? { ...r, priority: val } : r),
+                      }))
+                    }
+                  }}
+                  onBlur={(e) => {
+                    const val = parseInt(e.target.value, 10)
+                    if (!isNaN(val)) updatePriority(s.id, val)
+                  }}
+                  className="shrink-0 text-center text-xs rounded outline-none focus:ring-1 focus:ring-sky-500"
+                  style={{
+                    width: 36,
+                    background: '#0f1117',
+                    border: '1px solid #2a2d3e',
+                    color: '#94a3b8',
+                    padding: '2px 4px',
+                  }}
+                  title="Priority (1–10)"
+                />
                 <button
                   onClick={() => removeSuburb(s.id)}
                   className="shrink-0 transition-colors hover:text-red-400"
