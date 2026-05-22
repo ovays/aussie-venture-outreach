@@ -404,17 +404,25 @@ function normalizeCrawlUrl(url: string): string {
 }
 
 // Canonical key for per-business scanned-page dedup.
-// Normalises scheme (http→https) and strips www so that
-// http://site.com/contact and https://www.site.com/contact map to the same key.
+// Strips scheme, www prefix, hash, and trailing slash so that all variants
+// of the same logical page map to an identical key: domain.com/path
+//
+// Examples:
+//   https://burgerpoint.com.au/contact-us   → burgerpoint.com.au/contact-us
+//   http://www.burgerpoint.com.au/contact-us → burgerpoint.com.au/contact-us
+//   https://site.com/about/                  → site.com/about
 function canonicalPageKey(url: string): string {
   try {
     const parsed = new URL(url)
-    parsed.hash = ''
-    parsed.protocol = 'https:'
-    parsed.hostname = parsed.hostname.toLowerCase().replace(/^www\./, '')
-    return parsed.toString().replace(/\/$/, '')
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '')
+    const path = `${parsed.pathname}${parsed.search}`.replace(/\/+$/, '')
+    return `${hostname}${path}`
   } catch {
-    return url.toLowerCase().replace(/[#?].*$/, '').replace(/\/+$/, '')
+    return url.toLowerCase()
+      .replace(/^https?:\/\//i, '')
+      .replace(/^www\./i, '')
+      .replace(/[#].*$/, '')
+      .replace(/\/+$/, '')
   }
 }
 
@@ -641,6 +649,8 @@ export async function findEmailForBusiness(rawWebsite: string, businessName: str
     logName: 'Homepage scanned' | 'Contact page scanned'
   ): Promise<string | null> => {
     const pageKey = canonicalPageKey(page.url)
+    console.log(`[CANONICAL_URL] original=${page.url} canonical=${pageKey}`)
+    logger.info('finder', '[CANONICAL_URL]', { original: page.url, canonical: pageKey, business_name: businessName })
 
     if (scannedPages.has(pageKey)) {
       console.log(`[DUPLICATE_PAGE_SCAN_SKIPPED] url=${page.url}`)
