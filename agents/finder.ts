@@ -403,6 +403,21 @@ function normalizeCrawlUrl(url: string): string {
   }
 }
 
+// Canonical key for per-business scanned-page dedup.
+// Normalises scheme (http→https) and strips www so that
+// http://site.com/contact and https://www.site.com/contact map to the same key.
+function canonicalPageKey(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.hash = ''
+    parsed.protocol = 'https:'
+    parsed.hostname = parsed.hostname.toLowerCase().replace(/^www\./, '')
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return url.toLowerCase().replace(/[#?].*$/, '').replace(/\/+$/, '')
+  }
+}
+
 function crawlOrigin(url: string): string | null {
   try {
     const parsed = new URL(url)
@@ -566,6 +581,7 @@ async function fetchHtmlWithDiagnostics(url: string): Promise<WebsiteFetchResult
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 7000)
     try {
+      console.log(`[HTTP_FETCH] url=${candidate}`)
       const res = await fetch(candidate, {
         method: 'GET',
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)' },
@@ -618,11 +634,32 @@ export async function findEmailForBusiness(rawWebsite: string, businessName: str
 
   const emailsFound = new Set<string>()
   const sourceByEmail = new Map<string, string>()
+  const scannedPages = new Set<string>()
 
   const scanPage = async (
     page: CrawlPage,
     logName: 'Homepage scanned' | 'Contact page scanned'
   ): Promise<string | null> => {
+    const pageKey = canonicalPageKey(page.url)
+
+    if (scannedPages.has(pageKey)) {
+      console.log(`[DUPLICATE_PAGE_SCAN_SKIPPED] url=${page.url}`)
+      logger.info('finder', '[DUPLICATE_PAGE_SCAN_SKIPPED]', {
+        url:           page.url,
+        canonical_key: pageKey,
+        business_name: businessName,
+      })
+      return null
+    }
+
+    scannedPages.add(pageKey)
+    console.log(`[PAGE_SCAN_REGISTERED] url=${page.url}`)
+    logger.info('finder', '[PAGE_SCAN_REGISTERED]', {
+      url:           page.url,
+      canonical_key: pageKey,
+      business_name: businessName,
+    })
+
     const scanMessage =
       logName === 'Homepage scanned'
         ? `Scanning homepage: ${page.url}`
@@ -802,8 +839,6 @@ export async function findEmailForBusiness(rawWebsite: string, businessName: str
       logger.info('finder', `CRAWL_DEADLINE_REACHED = ${businessName} — skipping remaining pages`)
       break
     }
-
-    console.log(`Scanning page: ${page.url}`)
 
     const selectedEmail = await scanPage(
       page,
