@@ -930,15 +930,21 @@ async function isAlreadyInDB(
   name: string,
   city: string,
   phone?: string
-): Promise<boolean> {
+): Promise<{ isDuplicate: boolean; matchedId?: string; matchedName?: string; matchedEmail?: string }> {
   const conditions: string[] = [`and(business_name.eq.${name},city.eq.${city})`]
   if (phone) conditions.push(`phone.eq.${phone}`)
   const { data } = await supabase
     .from('leads')
-    .select('id')
+    .select('id, business_name, email')
     .or(conditions.join(','))
     .limit(1)
-  return !!data?.length
+  const match = data?.[0] as { id: string; business_name: string; email: string | null } | undefined
+  return {
+    isDuplicate:  !!data?.length,
+    matchedId:    match?.id,
+    matchedName:  match?.business_name,
+    matchedEmail: match?.email ?? undefined,
+  }
 }
 
 // ── Daily spend helper ───────────────────────────────────────────────────────
@@ -1491,18 +1497,31 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               const domain = normalizeDomain(rawWebsite)
               if (domain) {
                 if (knownDomains.has(domain) || seenDomains.has(domain)) {
-                  const source = knownDomains.has(domain) ? 'known_in_db' : 'seen_this_run'
+                  const matchedSource = knownDomains.has(domain) ? 'knownWebsiteDomains' : 'currentPipelineRun'
+                  logger.info('finder', '[DUPLICATE_MATCH_FOUND]', {
+                    incomingBusiness:         name,
+                    incomingWebsite:          rawWebsite,
+                    incomingNormalizedDomain: domain,
+                    matchedDomain:            domain,
+                    matchedSource,
+                    matchType:                'normalizedWebsiteDomain',
+                  })
                   logger.info('finder', 'EARLY_DUPLICATE_DETECTED', {
                     event: 'EARLY_DOMAIN_SKIP',
                     business_name: name,
                     domain,
-                    source,
+                    source: matchedSource,
                   })
                   earlyDuplicateSkips++
                   comboDuplicates++
                   duplicatesRemoved++
                   continue
                 }
+                logger.info('finder', '[DEDUPE_DOMAIN_REGISTERED]', {
+                  business: name,
+                  domain,
+                  source: 'currentPipelineRun',
+                })
                 seenDomains.add(domain)
               }
             }
@@ -1593,7 +1612,19 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               })
             }
 
-            if (await isAlreadyInDB(supabase, name, city, result.phone)) {
+            const dbDupeCheck = await isAlreadyInDB(supabase, name, city, result.phone)
+            if (dbDupeCheck.isDuplicate) {
+              logger.info('finder', '[DUPLICATE_MATCH_FOUND]', {
+                incomingBusiness:         name,
+                incomingWebsite:          rawWebsite ?? null,
+                incomingNormalizedDomain: rawWebsite ? normalizeDomain(rawWebsite) : null,
+                incomingEmail:            foundEmail ?? null,
+                matchedLeadId:            dbDupeCheck.matchedId ?? null,
+                matchedBusiness:          dbDupeCheck.matchedName ?? null,
+                matchedEmail:             dbDupeCheck.matchedEmail ?? null,
+                matchedSource:            'database',
+                matchType:                'name_city_or_phone',
+              })
               dbDuplicateSkips++
               comboDuplicates++
               duplicatesRemoved++
@@ -1615,6 +1646,21 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
 
               const dedupeDecision = checkLeadDedupe(foundEmail, dedupeIndex)
               if (dedupeDecision.duplicate) {
+                const matchType = dedupeDecision.reason === 'DUPLICATE_EMAIL_SKIPPED'
+                  ? 'emailExactMatch'
+                  : 'normalizedEmailDomain'
+                logger.info('finder', '[DUPLICATE_MATCH_FOUND]', {
+                  incomingBusiness:         name,
+                  incomingWebsite:          rawWebsite ?? null,
+                  incomingNormalizedDomain: rawWebsite ? normalizeDomain(rawWebsite) : null,
+                  incomingEmail:            dedupeDecision.email,
+                  matchedDomain:            dedupeDecision.rootDomain ?? null,
+                  matchedLeadId:            dedupeDecision.match.id,
+                  matchedBusiness:          dedupeDecision.match.businessName ?? null,
+                  matchedEmail:             dedupeDecision.match.email,
+                  matchedSource:            'inMemoryCache',
+                  matchType,
+                })
                 const duplicateMeta = {
                   candidate_business_name: name,
                   candidate_email: dedupeDecision.email,
@@ -1663,6 +1709,11 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
 
               if (insertedLead) {
                 addLeadToDedupeIndex(dedupeIndex, insertedLead)
+                logger.info('finder', '[DEDUPE_DOMAIN_REGISTERED]', {
+                  business: insertedLead.business_name,
+                  email:    insertedLead.email,
+                  source:   'inMemoryCache',
+                })
               }
 
               emailCount++
