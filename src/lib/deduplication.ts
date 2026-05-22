@@ -42,6 +42,31 @@ export type LeadDedupeIndex = {
   byRootDomain: Map<string, DedupeMatch[]>
 }
 
+// Personal/shared email providers must never be used for domain-based dedup.
+// e.g. info@gmail.com and contact@gmail.com are unrelated businesses.
+const PERSONAL_EMAIL_PROVIDER_DOMAINS = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'hotmail.com',
+  'hotmail.com.au',
+  'outlook.com',
+  'live.com',
+  'live.com.au',
+  'yahoo.com',
+  'yahoo.com.au',
+  'icloud.com',
+  'me.com',
+  'mac.com',
+  'aol.com',
+  'protonmail.com',
+  'proton.me',
+  'bigpond.com',
+  'bigpond.net.au',
+  'optusnet.com.au',
+  'tpg.com.au',
+  'internode.on.net',
+])
+
 const MULTI_PART_PUBLIC_SUFFIXES = new Set([
   'com.au',
   'net.au',
@@ -101,7 +126,7 @@ export function createLeadDedupeIndex(leads: DedupeLead[]): LeadDedupeIndex {
     byEmail.set(email, emailMatches)
 
     const rootDomain = extractRootDomainFromEmail(email)
-    if (!rootDomain) continue
+    if (!rootDomain || PERSONAL_EMAIL_PROVIDER_DOMAINS.has(rootDomain)) continue
 
     const domainMatches = byRootDomain.get(rootDomain) ?? []
     domainMatches.push(match)
@@ -142,7 +167,7 @@ export function checkLeadDedupe(
     }
   }
 
-  if (rootDomain) {
+  if (rootDomain && !PERSONAL_EMAIL_PROVIDER_DOMAINS.has(rootDomain)) {
     const domainMatch = getCanonicalDuplicate(index.byRootDomain.get(rootDomain) ?? [], currentLeadId)
     if (domainMatch) {
       return {

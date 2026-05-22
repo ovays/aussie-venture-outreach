@@ -341,6 +341,53 @@ function isSocialMediaUrl(url: string): boolean {
   return host != null && SOCIAL_MEDIA_DOMAINS.has(host)
 }
 
+// Pre-scrape blocklist — websites that will never yield a business email.
+// Checked before any HTTP request is made.
+const BLOCKED_SOCIAL_DOMAINS = new Set([
+  'facebook.com',
+  'instagram.com',
+  'tiktok.com',
+  'x.com',
+  'twitter.com',
+  'youtube.com',
+  'linkedin.com',
+  'linktr.ee',
+  'beacons.ai',
+  'linkin.bio',
+  'taplink.cc',
+])
+
+const BLOCKED_MARKETPLACE_DOMAINS = new Set([
+  'ubereats.com',
+  'menulog.com.au',
+  'doordash.com',
+  'eatclub.com.au',
+  'ozfoodhunter.com.au',
+  'order.online',
+  'order.store',
+  'revu.website',
+  'square.site',
+  'uber.com',
+  'zomato.com',
+  'tripadvisor.com',
+  'tripadvisor.com.au',
+  'yelp.com',
+  'truelocal.com.au',
+  'yellowpages.com.au',
+  'dineout.com.au',
+  'thefork.com.au',
+  'dimmi.com.au',
+  'opentable.com',
+])
+
+function isBlockedWebsiteDomain(url: string): 'social' | 'marketplace' | false {
+  const host = rootHost(url)
+  if (!host) return false
+  if (BLOCKED_SOCIAL_DOMAINS.has(host)) return 'social'
+  if (BLOCKED_MARKETPLACE_DOMAINS.has(host)) return 'marketplace'
+  return false
+}
+
 function stripHtml(value: string): string {
   return value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
@@ -1405,6 +1452,28 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                 business_name: name,
                 extracted_website: rawWebsite,
               })
+            }
+
+            // Block social and marketplace websites before any HTTP request is made.
+            if (rawWebsite) {
+              const blockType = isBlockedWebsiteDomain(rawWebsite)
+              if (blockType === 'social') {
+                const blockedDomain = rootHost(rawWebsite) ?? rawWebsite
+                socialOnlySkips++
+                comboValidationFailed++
+                console.log(`[SOCIAL_DOMAIN_SKIP] domain=${blockedDomain} business=${name}`)
+                logger.info('finder', '[SOCIAL_DOMAIN_SKIP]', { domain: blockedDomain, business_name: name, url: rawWebsite })
+                noOutreachMethodsRemoved++
+                continue
+              }
+              if (blockType === 'marketplace') {
+                const blockedDomain = rootHost(rawWebsite) ?? rawWebsite
+                comboValidationFailed++
+                console.log(`[MARKETPLACE_DOMAIN_SKIP] domain=${blockedDomain} business=${name}`)
+                logger.info('finder', '[MARKETPLACE_DOMAIN_SKIP]', { domain: blockedDomain, business_name: name, url: rawWebsite })
+                noOutreachMethodsRemoved++
+                continue
+              }
             }
 
             // Business whose website IS an Instagram page has no real web presence for email
