@@ -584,8 +584,15 @@ function normalizeResolvedWebsite(url: string): string {
 async function fetchHtmlWithDiagnostics(url: string): Promise<WebsiteFetchResult> {
   const candidates = buildWebsiteUrlCandidates(url)
   let lastReason = 'no URL candidates'
+  let successResult: WebsiteFetchResult | null = null
 
   for (const candidate of candidates) {
+    // Short-circuit: skip remaining variants once a successful fetch is in hand.
+    if (successResult !== null) {
+      console.log(`[FALLBACK_FETCH_SKIPPED] canonical=${canonicalPageKey(url)} skippedUrl=${candidate} reason=already_have_successful_fetch`)
+      continue
+    }
+
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 7000)
     try {
@@ -605,7 +612,8 @@ async function fetchHtmlWithDiagnostics(url: string): Promise<WebsiteFetchResult
 
       const html = await res.text()
       clearTimeout(timeoutId)
-      return {
+      console.log(`[FETCH_SUCCESS] url=${candidate} status=${res.status}`)
+      successResult = {
         html,
         requestedUrl: normalizeResolvedWebsite(candidate),
         finalUrl: normalizeResolvedWebsite(res.url || candidate),
@@ -614,6 +622,10 @@ async function fetchHtmlWithDiagnostics(url: string): Promise<WebsiteFetchResult
       clearTimeout(timeoutId)
       lastReason = `${candidate} failed: ${error instanceof Error ? error.name || error.message : String(error)}`
     }
+  }
+
+  if (successResult !== null) {
+    return successResult
   }
 
   const fallbackUrl = candidates[0] ?? url
