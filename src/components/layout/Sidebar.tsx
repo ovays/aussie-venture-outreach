@@ -12,6 +12,7 @@ import {
   DollarSign,
   Settings,
   Shield,
+  Activity,
   X,
 } from 'lucide-react'
 import { useSidebar } from './SidebarContext'
@@ -23,6 +24,7 @@ const navItems = [
   { href: '/dashboard/dm-queue',  label: 'DM Queue',  icon: MessageSquare,   adminOnly: false },
   { href: '/dashboard/pipeline',  label: 'Pipeline',  icon: GitBranch,       adminOnly: false },
   { href: '/dashboard/email-log', label: 'Email Log', icon: Mail,            adminOnly: false },
+  { href: '/dashboard/lifecycle', label: 'Lifecycle', icon: Activity,        adminOnly: false },
   { href: '/dashboard/deals',     label: 'Deals',     icon: DollarSign,      adminOnly: false },
   { href: '/dashboard/settings',  label: 'Settings',  icon: Settings,        adminOnly: false },
   { href: '/dashboard/admin',     label: 'Admin',     icon: Shield,          adminOnly: true  },

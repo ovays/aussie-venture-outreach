@@ -9,6 +9,8 @@
     "start": "next start",
     "test:finder": "tsx scripts/test-finder.ts",
     "test:halal": "tsx scripts/test-halal-confidence.ts",
+    "test:reactivation": "tsx scripts/test-reactivation.ts",
+    "test:reactivation-email": "tsx scripts/test-reactivation-email.ts",
     "deploy:trigger": "npx trigger.dev@4.4.4 deploy"
   },
   "dependencies": {

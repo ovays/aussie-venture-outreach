@@ -39,9 +39,21 @@ export const SETTINGS_DEFAULTS = {
     value: '2.00',
     description: 'Maximum Outscraper spend per day in USD. Pipeline stops when reached. Normal daily cost is ~$0.50. Set to $2.00 for safety margin.',
   },
+  dead_after_reactivation_days: {
+    value: '14',
+    description: 'Days of no reply after reactivation before marking lead as dead again',
+  },
   dead_lead_days: {
     value: '21',
     description: 'Days before marking lead as dead',
+  },
+  reactivation_delay_days: {
+    value: '60',
+    description: 'Days after a lead is marked dead before sending a reactivation email',
+  },
+  reactivation_enabled: {
+    value: 'true',
+    description: 'Enable reactivation emails — send a follow-up to dead leads after a delay',
   },
   digest_email: {
     value: 'hello@aussieventure.com',

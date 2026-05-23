@@ -458,6 +458,57 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
         </div>
       </section>
 
+      {/* Reactivation Settings */}
+      <section>
+        <h3 className="text-base font-semibold text-white mb-4">Reactivation Settings</h3>
+        <div className="space-y-4">
+          {/* Enable toggle */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
+            <div>
+              <p className="text-sm text-white">Enable reactivation</p>
+              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Send a follow-up to dead leads after a delay</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => updateSetting('reactivation_enabled', settings['reactivation_enabled'] === 'true' ? 'false' : 'true')}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500 ${settings['reactivation_enabled'] === 'true' ? 'bg-sky-500' : 'bg-gray-600'}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings['reactivation_enabled'] === 'true' ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+              <SaveIndicator k="reactivation_enabled" />
+            </div>
+          </div>
+          {/* Days inputs */}
+          {[
+            { key: 'reactivation_delay_days', label: 'Reactivation delay', description: 'Days after dead before sending reactivation email' },
+            { key: 'dead_after_reactivation_days', label: 'Dead after reactivation', description: 'Days of no reply after reactivation before marking dead again' },
+          ].map(({ key, label, description }) => (
+            <div key={key} className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
+              <div>
+                <p className="text-sm text-white">{label}</p>
+                <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>{description}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={getNum(key)}
+                    onChange={(e) => setSettings((p) => ({ ...p, [key]: e.target.value }))}
+                    onBlur={(e) => updateSetting(key, e.target.value)}
+                    min={1}
+                    max={365}
+                    className="w-full sm:w-20 px-3 py-2 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
+                    style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+                  />
+                  <span className="text-sm" style={{ color: '#64748b' }}>days</span>
+                </div>
+                <SaveIndicator k={key} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* Search API */}
       <section>
         <h3 className="text-base font-semibold text-white mb-4">Search API</h3>

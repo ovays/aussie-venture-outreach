@@ -356,6 +356,105 @@ Now decide. JSON only: {"action":"found","email":"..."} or {"action":"fetch_url"
   return { email: null, method: 'not_found', rounds: MAX_ROUNDS }
 }
 
+// ─── Reactivation email writer ───────────────────────────────────────────────
+
+function getReactivationContentContext(category: string): string {
+  const halalFood = ['Halal Restaurants', 'Halal Cafes']
+  const desserts = ['Halal Bakeries / Dessert Shops']
+  const beauty = ['Nail Salons', 'Hair Salons', 'Beauty / Lash Studios']
+  const wellness = ['Spas / Massage Studios']
+  const accommodation = ['Hotels / Resorts']
+  const travelOps = ['Travel Agents', 'Tour Operators']
+
+  if (halalFood.includes(category)) return 'Sydney halal dining spots'
+  if (desserts.includes(category)) return 'Sydney dessert and cafe spots'
+  if (beauty.includes(category)) return 'Sydney beauty and lifestyle venues'
+  if (wellness.includes(category)) return 'Sydney wellness and spa spots'
+  if (accommodation.includes(category)) return 'Sydney accommodation and stays'
+  if (travelOps.includes(category)) return 'Australian travel experiences'
+  return 'Sydney venues and businesses'
+}
+
+export async function writeReactivationEmail(params: {
+  business_name: string
+  category: string
+  suburb: string
+  city: string
+}): Promise<{ subject: string; body: string }> {
+  const brandDesc = getBrandDescription(params.category)
+  const contentContext = getReactivationContentContext(params.category)
+
+  const response = await rateLimitedCall(() =>
+    anthropic.messages.create({
+      model: SONNET_MODEL,
+      max_tokens: 400,
+      messages: [
+        {
+          role: 'user',
+          content: `You are Owais. You run Aussie Venture, an Australian ${brandDesc} with 650K+ followers across Facebook, Instagram and TikTok. Write a short fresh collaboration email to a local business.
+
+This is a new campaign email — do NOT reference any previous emails or contact history.
+
+Business: ${params.business_name}, ${params.suburb} ${params.city}
+Category: ${params.category}
+
+WHAT THE EMAIL MUST DO:
+1. Open with "Hey ${params.business_name},"
+2. Mention you are planning a new content round or feature push for ${contentContext}
+3. Reference Aussie Venture's 650K+ followers once
+4. Express interest in a collab or feature
+5. End with a soft CTA like "Would you be keen to collab?" or similar
+
+HARD RULES — break any of these and the email is wrong:
+- Under 80 words (not counting sign-off)
+- Feel like a fresh new campaign — NOT a follow-up or check-in
+- Friendly, casual, human, conversational
+- No em dashes (no — character)
+- No bullet points
+- No corporate language: no "leverage", "synergy", "reach out", "I wanted to", "I hope this finds you well"
+- NEVER include: "following up", "checking in again", "previous email", "earlier outreach", "last time", "again"
+- No guilt wording, no pressure, no urgency
+- Sound like a real 25-year-old Australian
+- 2 short paragraphs max
+
+Subject line: fresh and specific, not "Re:" anything. Options:
+- "Another collab opportunity with Aussie Venture"
+- "Featuring more ${contentContext} this month"
+- "Quick collab idea for ${params.business_name}"
+- "Content collab opportunity"
+
+Sign off (use exactly this, every line, nothing more and nothing less):
+Cheers,
+Owais
+Aussie Venture
+hello@aussieventure.com
+aussieventure.com
+instagram.com/aussie.venture
+tiktok.com/@aussie.venture
+facebook.com/AussieVenture
+facebook.com/Sydneyventure
+
+Respond in JSON: { "subject": "...", "body": "..." }`,
+        },
+      ],
+    })
+  )
+
+  const text = response.content[0].type === 'text' ? response.content[0].text : ''
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0])
+    }
+  } catch {
+    // fallback
+  }
+  return {
+    subject: 'Another collab opportunity with Aussie Venture',
+    body: `Hey ${params.business_name},\n\nWe're planning a new round of ${contentContext} features this month and thought you'd be a great fit. Aussie Venture has 650K+ followers across Facebook, Instagram and TikTok.\n\nWould you be keen to collab?\n\nCheers,\nOwais\nAussie Venture\nhello@aussieventure.com\naussieventure.com\ninstagram.com/aussie.venture\ntiktok.com/@aussie.venture\nfacebook.com/AussieVenture\nfacebook.com/Sydneyventure`,
+  }
+}
+
 // ─── DM writer ───────────────────────────────────────────────────────────────
 
 export async function writeOutreachDM(params: {

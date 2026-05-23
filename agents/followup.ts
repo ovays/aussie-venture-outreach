@@ -180,10 +180,15 @@ export async function runFollowUpAgent(): Promise<void> {
         'daily_followup1_limit',
         'daily_followup2_limit',
         'daily_followup3_limit',
+        'reactivation_enabled',
       ])
+
+    // reactivation_enabled is a boolean string, handled separately before numeric parse
+    const reactivationEnabled = (settingsRows ?? []).find((r) => r.key === 'reactivation_enabled')?.value === 'true'
 
     const settings: Record<string, number> = {}
     for (const row of settingsRows ?? []) {
+      if (row.key === 'reactivation_enabled') continue
       settings[row.key] = parseInt(row.value, 10)
     }
 
@@ -250,7 +255,9 @@ export async function runFollowUpAgent(): Promise<void> {
       const followUp3Email = emailsList.find((email) => email.type === 'follow_up_3' && email.sent_at)
       const hasFollowUp3 = !!followUp3Email
 
-      if (followUp3Email?.sent_at && followUp3Email.sent_at < today.start && daysSince >= followUp3Days) {
+      // When reactivation is enabled, do not mark dead here — the reactivation agent handles
+      // dead-marking after reactivation_delay_days + dead_after_reactivation_days elapse.
+      if (!reactivationEnabled && followUp3Email?.sent_at && followUp3Email.sent_at < today.start && daysSince >= followUp3Days) {
         await supabase.from('leads').update({ status: 'dead' }).eq('id', lead.id)
         await supabase.from('activity_log').insert({
           event_type: 'lead_marked_dead',

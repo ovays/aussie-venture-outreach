@@ -4,6 +4,7 @@ import { runResearcherAgent } from "../agents/researcher"
 import { runWriterAgent } from "../agents/writer"
 import { runSenderAgent } from "../agents/sender"
 import { runFollowUpAgent } from "../agents/followup"
+import { runReactivationAgent } from "../agents/reactivation"
 
 export const dailyPipelineJob = schedules.task({
   id: "daily-pipeline",
@@ -58,12 +59,23 @@ export const dailyPipelineJob = schedules.task({
     }
 
     try {
-      console.log("Step 5: Follow-up agent")
+      console.log("[PIPELINE_STAGE] Follow-up starting")
       await runFollowUpAgent()
+      console.log("[PIPELINE_STAGE] Follow-up complete")
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error("PIPELINE FAILED at Step 5 (Follow-up):", error)
       throw new Error(`Pipeline failed at Follow-up: ${message}`)
+    }
+
+    try {
+      console.log("[PIPELINE_STAGE] Reactivation starting")
+      await runReactivationAgent()
+      console.log("[PIPELINE_STAGE] Reactivation complete")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error("PIPELINE FAILED at Step 6 (Reactivation):", error)
+      throw new Error(`Pipeline failed at Reactivation: ${message}`)
     }
 
     console.log("[PIPELINE_STAGE] Pipeline complete", { reason: "all_stages_finished", leadsFound })
