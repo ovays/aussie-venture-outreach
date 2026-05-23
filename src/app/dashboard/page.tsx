@@ -1,6 +1,10 @@
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import TopBar from '@/components/layout/TopBar'
-import { StatsCard } from '@/components/dashboard/StatsCard'
+import { ActionQueueCard } from '@/components/dashboard/ActionQueueCard'
+import { WorkflowQueue } from '@/components/dashboard/WorkflowQueue'
+import { HotLeadsPanel } from '@/components/dashboard/HotLeadsPanel'
+import { LiveActivityFeed } from '@/components/dashboard/LiveActivityFeed'
 import { PipelineSummary } from '@/components/dashboard/PipelineSummary'
 import { RevenueChart } from '@/components/dashboard/RevenueChart'
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed'
@@ -8,7 +12,8 @@ import { DailyActivity } from '@/components/dashboard/DailyActivity'
 import { Card } from '@/components/ui/Card'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { getDashboardMetrics, logAnalyticsMetrics } from '@/lib/analytics'
-import { formatCurrency } from '@/lib/utils'
+import type { HotLead } from '@/components/dashboard/HotLeadsPanel'
+import { Send, MessageSquare, TrendingUp, RotateCcw, AlertTriangle, Flame, Zap } from 'lucide-react'
 
 export const revalidate = 60
 
@@ -18,23 +23,28 @@ export default async function DashboardPage() {
 
   const [
     analytics,
-    { count: totalLeads },
-    { data: allDeals },
     { data: statusCounts },
     { data: recentActivity },
     { data: pendingDMs },
     { data: dealsThisMonth },
     { data: weeklyDeals },
+    { data: hotLeadsRaw },
   ] = await Promise.all([
     getDashboardMetrics(supabase),
-    supabase.from('leads').select('*', { count: 'exact', head: true }),
-    supabase.from('deals').select('deal_value'),
     supabase.from('leads').select('status'),
     supabase.from('activity_log').select('*').order('created_at', { ascending: false }).limit(20),
     supabase.from('dm_queue').select('id').eq('status', 'pending'),
     supabase.from('deals').select('deal_value').gte('closed_at', new Date(Date.now() - 30 * 86_400_000).toISOString()),
     supabase.from('deals').select('deal_value, closed_at').gte('closed_at', twelveWeeksAgo).order('closed_at'),
+    supabase
+      .from('leads')
+      .select('id, business_name, city, status, notes, created_at, emails(id, type, sent_at, replied_at, subject)')
+      .in('status', ['replied', 'negotiating', 'interested'])
+      .order('created_at', { ascending: false })
+      .limit(10),
   ])
+
+  const hotLeads = (hotLeadsRaw ?? []) as HotLead[]
 
   logAnalyticsMetrics('[DASHBOARD_METRICS]', {
     range: analytics.todayEmailStats.range,
@@ -43,13 +53,13 @@ export default async function DashboardPage() {
     replies: analytics.replyStats.repliesToday,
   })
 
-  const totalRevenue = (allDeals ?? []).reduce((sum, deal) => sum + (deal.deal_value ?? 0), 0)
-
   const statusMap: Record<string, number> = {}
   for (const { status } of statusCounts ?? []) {
     statusMap[status] = (statusMap[status] ?? 0) + 1
   }
   const pipelineCounts = Object.entries(statusMap).map(([status, count]) => ({ status, count }))
+
+  const negotiationsActive = (statusMap['negotiating'] ?? 0) + (statusMap['interested'] ?? 0)
 
   const weeklyRevenue: Array<{ week: string; revenue: number }> = []
   for (let i = 11; i >= 0; i--) {
@@ -72,49 +82,192 @@ export default async function DashboardPage() {
     <div>
       <TopBar title="Dashboard" />
       <div className="p-3 md:p-5 space-y-4 md:space-y-5">
-        {/* Primary KPI row */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <StatsCard label="Total Leads Found" value={totalLeads ?? 0} sub="All time" accent="#e2e8f0" />
-          <StatsCard
-            label="Emails Sent This Week"
-            value={analytics.emailsSentThisWeek}
-            sub="Sydney calendar days"
-            accent="#38bdf8"
-          />
-          <StatsCard
-            label="Reply Rate"
-            value={`${analytics.replyStats.replyRate}%`}
-            sub={`${analytics.replyStats.positiveResponseLeads} of ${analytics.replyStats.totalContactedLeads} contacted`}
-            accent="#4ade80"
-          />
-          <StatsCard
-            label="Total Revenue"
-            value={formatCurrency(totalRevenue)}
-            sub="All time closed deals"
-            accent="#fbbf24"
-          />
+        {/* ── Today's Action Queue ── */}
+        <div>
+          <div className="flex items-end justify-between mb-5">
+            <div>
+              <h2
+                className="text-xl font-bold tracking-tight leading-none"
+                style={{ color: '#f1f5f9' }}
+              >
+                Today&apos;s Action Queue
+              </h2>
+              <p className="text-sm mt-1.5" style={{ color: '#475569' }}>
+                What needs your attention right now
+              </p>
+            </div>
+            <div className="hidden sm:flex items-center gap-2 pb-0.5">
+              <span
+                className="w-1.5 h-1.5 rounded-full animate-pulse"
+                style={{ background: '#34d399' }}
+              />
+              <span className="text-xs font-mono" style={{ color: '#334155' }}>
+                Live · Sydney
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-3.5">
+            <ActionQueueCard
+              icon={<Send size={18} strokeWidth={1.8} />}
+              count={analytics.followupStats.pending}
+              title="Follow-ups Due"
+              subtitle="Queued for sending"
+              detail={`FU1 ${analytics.followupStats.pendingFollowUp1} · FU2 ${analytics.followupStats.pendingFollowUp2} · FU3 ${analytics.followupStats.pendingFollowUp3}`}
+              ctaLabel="Send Follow-ups"
+              ctaHref="/dashboard/leads"
+              accent="#8b5cf6"
+              urgency="medium"
+            />
+            <ActionQueueCard
+              icon={<MessageSquare size={18} strokeWidth={1.8} />}
+              count={statusMap['replied'] ?? 0}
+              title="Replies To Review"
+              subtitle="Awaiting your response"
+              detail={`Today: ${analytics.replyStats.repliesToday} · Rate: ${analytics.replyStats.replyRate}%`}
+              ctaLabel="Review Replies"
+              ctaHref="/dashboard/leads"
+              accent="#38bdf8"
+              urgency="high"
+            />
+            <ActionQueueCard
+              icon={<TrendingUp size={18} strokeWidth={1.8} />}
+              count={negotiationsActive}
+              title="Negotiations Active"
+              subtitle="In active discussion"
+              detail={`Negotiating: ${statusMap['negotiating'] ?? 0} · Interested: ${statusMap['interested'] ?? 0}`}
+              ctaLabel="View Deals"
+              ctaHref="/dashboard/deals"
+              accent="#34d399"
+              urgency="normal"
+            />
+            <ActionQueueCard
+              icon={<RotateCcw size={18} strokeWidth={1.8} />}
+              count={statusMap['dead'] ?? 0}
+              title="Reactivation Queue"
+              subtitle="Cold leads to re-engage"
+              detail="DM outreach recommended"
+              ctaLabel="Open DM Queue"
+              ctaHref="/dashboard/dm-queue"
+              accent="#fb923c"
+              urgency="medium"
+            />
+            <ActionQueueCard
+              icon={<AlertTriangle size={18} strokeWidth={1.8} />}
+              count={analytics.followupStats.pendingFollowUp3}
+              title="Overdue Leads"
+              subtitle="Past final follow-up window"
+              detail="Needs immediate action"
+              ctaLabel="Review Overdue"
+              ctaHref="/dashboard/leads"
+              accent="#f87171"
+              urgency="critical"
+            />
+          </div>
         </div>
 
-        {/* Today's activity */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          <StatsCard label="Emails Today" value={analytics.todayEmailStats.initialSent} sub="Initial pitches" accent="#38bdf8" />
-          <StatsCard label="DMs Today"    value={analytics.todayDmStats.sentToday}      sub="Marked sent"    accent="#f472b6" />
-          <StatsCard label="FU1 Today"    value={analytics.followupStats.followUp1SentToday} sub="Follow-up 1" accent="#a78bfa" />
-          <StatsCard label="FU2 Today"    value={analytics.followupStats.followUp2SentToday} sub="Follow-up 2" accent="#c084fc" />
-          <StatsCard label="FU3 Today"    value={analytics.followupStats.followUp3SentToday} sub="Follow-up 3" accent="#d8b4fe" />
-        </div>
+        {/* ── Today's Tasks / Workflow Queue ── */}
+        <WorkflowQueue
+          fu1Due={analytics.followupStats.pendingFollowUp1}
+          fu2Due={analytics.followupStats.pendingFollowUp2}
+          fu3Overdue={analytics.followupStats.pendingFollowUp3}
+          repliesToReview={statusMap['replied'] ?? 0}
+          negotiationsActive={negotiationsActive}
+          reactivationQueue={pendingDMs?.length ?? 0}
+          initialSentToday={analytics.todayEmailStats.initialSent}
+          fu1SentToday={analytics.followupStats.followUp1SentToday}
+          fu2SentToday={analytics.followupStats.followUp2SentToday}
+          fu3SentToday={analytics.followupStats.followUp3SentToday}
+          dmsToday={analytics.todayDmStats.sentToday}
+          repliesToday={analytics.replyStats.repliesToday}
+        />
 
-        {/* Pending follow-ups */}
-        <div className="grid grid-cols-3 gap-3">
-          <StatsCard label="Pending FU1" value={analytics.followupStats.pendingFollowUp1} sub="Awaiting follow-up 1" accent="#a78bfa" />
-          <StatsCard label="Pending FU2" value={analytics.followupStats.pendingFollowUp2} sub="Awaiting follow-up 2" accent="#c084fc" />
-          <StatsCard label="Pending FU3" value={analytics.followupStats.pendingFollowUp3} sub="Awaiting follow-up 3" accent="#d8b4fe" />
+        {/* ── Hot Leads & Recent Replies ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4">
+          {/* Hot Leads — 2 cols */}
+          <div className="lg:col-span-2 flex flex-col">
+            <div
+              className="flex-1 rounded-2xl overflow-hidden flex flex-col"
+              style={{ background: '#161927', border: '1px solid rgba(255,255,255,0.055)' }}
+            >
+              {/* Header */}
+              <div
+                className="flex items-center justify-between px-5 py-4 flex-shrink-0"
+                style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="p-1.5 rounded-lg"
+                    style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}
+                  >
+                    <Flame size={14} strokeWidth={2} />
+                  </div>
+                  <span className="text-sm font-semibold" style={{ color: '#f1f5f9' }}>
+                    Hot Leads
+                  </span>
+                  {hotLeads.length > 0 && (
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-bold"
+                      style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}
+                    >
+                      {hotLeads.length}
+                    </span>
+                  )}
+                </div>
+                <Link
+                  href="/dashboard/leads"
+                  className="text-xs font-medium transition-colors duration-150 hover:opacity-80"
+                  style={{ color: '#475569' }}
+                >
+                  View all →
+                </Link>
+              </div>
+
+              {/* Rows */}
+              <div className="px-4 py-2 flex-1">
+                <HotLeadsPanel leads={hotLeads} />
+              </div>
+            </div>
+          </div>
+
+          {/* Live Activity — 1 col */}
+          <div className="flex flex-col">
+            <div
+              className="flex-1 rounded-2xl overflow-hidden flex flex-col"
+              style={{ background: '#161927', border: '1px solid rgba(255,255,255,0.055)' }}
+            >
+              {/* Header */}
+              <div
+                className="flex items-center gap-2.5 px-5 py-4 flex-shrink-0"
+                style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+              >
+                <div
+                  className="p-1.5 rounded-lg"
+                  style={{ background: 'rgba(52,211,153,0.1)', color: '#34d399' }}
+                >
+                  <Zap size={14} strokeWidth={2} />
+                </div>
+                <span className="text-sm font-semibold" style={{ color: '#f1f5f9' }}>
+                  Live Activity
+                </span>
+                <span
+                  className="w-1.5 h-1.5 rounded-full ml-auto animate-pulse"
+                  style={{ background: '#34d399' }}
+                />
+              </div>
+
+              {/* Feed */}
+              <div className="px-5 py-4 overflow-y-auto flex-1">
+                <LiveActivityFeed
+                  events={(recentActivity ?? []) as Parameters<typeof LiveActivityFeed>[0]['events']}
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Pipeline */}
-        <Card title="Pipeline">
-          <PipelineSummary counts={pipelineCounts} />
-        </Card>
+        <PipelineSummary counts={pipelineCounts} />
 
         {/* Revenue chart */}
         <Card title="Weekly Revenue — Last 12 Weeks">

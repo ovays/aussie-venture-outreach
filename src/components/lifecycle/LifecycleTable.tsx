@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef } from 'react'
-import type { LifecycleLead } from '@/app/api/lifecycle/route'
+import type { LifecycleLead } from '@/types/lifecycle'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 

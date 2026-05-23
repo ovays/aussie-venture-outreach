@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import type { LifecycleLead } from '@/types/lifecycle'
 
 interface EmailRow {
   type: string
@@ -24,17 +25,7 @@ interface Settings {
   reactivationEnabled: boolean
 }
 
-export interface LifecycleLead {
-  id: string
-  business_name: string
-  email: string
-  stage: string
-  days_since_initial: number | null
-  next_action: string
-  next_action_date: string | null
-  filter_key: 'fu1' | 'fu2' | 'reactivation' | 'dead' | 'none'
-  is_overdue: boolean
-}
+export type { LifecycleLead }
 
 function addDays(isoDate: string, days: number): string {
   return new Date(new Date(isoDate).getTime() + days * 86_400_000).toISOString()
