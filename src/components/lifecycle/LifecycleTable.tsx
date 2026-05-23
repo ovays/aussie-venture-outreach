@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import type { LifecycleLead } from '@/app/api/lifecycle/route'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -87,13 +87,18 @@ function resolveDate(isoDate: string | null, isOverdue: boolean): {
 
 // ── Summary cards ──────────────────────────────────────────────────────────────
 
-const CARDS = [
-  { key: 'fu1_due',          label: 'FU1 Due',         accent: '#38bdf8' },
-  { key: 'fu2_due',          label: 'FU2 Due',          accent: '#a78bfa' },
-  { key: 'reactivation_due', label: 'Reactivation Due', accent: '#fb923c' },
-  { key: 'awaiting_dead',    label: 'Awaiting Dead',    accent: '#f59e0b' },
-  { key: 'dead_today',       label: 'Dead Today',       accent: '#f87171' },
-] as const
+const CARDS: {
+  key: string
+  label: string
+  accent: string
+  filterKey: FilterKey
+}[] = [
+  { key: 'fu1_due',          label: 'FU1 Due',         accent: '#38bdf8', filterKey: 'fu1'          },
+  { key: 'fu2_due',          label: 'FU2 Due',          accent: '#a78bfa', filterKey: 'fu2'          },
+  { key: 'reactivation_due', label: 'Reactivation Due', accent: '#fb923c', filterKey: 'reactivation' },
+  { key: 'awaiting_dead',    label: 'Awaiting Dead',    accent: '#f59e0b', filterKey: 'awaiting_dead' },
+  { key: 'dead_today',       label: 'Dead Today',       accent: '#f87171', filterKey: 'dead'         },
+]
 
 // ── Filter pill definitions ────────────────────────────────────────────────────
 
@@ -152,6 +157,7 @@ function SortTh({
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function LifecycleTable() {
+  const tableRef = useRef<HTMLDivElement>(null)
   const [leads, setLeads] = useState<LifecycleLead[]>([])
   const [summary, setSummary] = useState<Summary | null>(null)
   const [filter, setFilter] = useState<FilterKey>('all')
@@ -169,6 +175,11 @@ export function LifecycleTable() {
         setLoading(false)
       })
   }, [])
+
+  function selectFilter(key: FilterKey) {
+    setFilter(key)
+    tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   function onSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -199,24 +210,40 @@ export function LifecycleTable() {
         className="grid grid-cols-2 md:grid-cols-5 gap-3 p-4 md:p-5 border-b"
         style={{ borderColor: '#2a2d3e' }}
       >
-        {CARDS.map(({ key, label, accent }) => (
-          <div
-            key={key}
-            className="rounded-lg p-3 md:p-4"
-            style={{ background: '#13151f', border: '1px solid #2a2d3e', borderTop: `2px solid ${accent}` }}
-          >
-            <p className="text-xs uppercase tracking-wide font-medium mb-2" style={{ color: '#475569' }}>
-              {label}
-            </p>
-            <p className="text-2xl md:text-3xl font-bold leading-none" style={{ color: accent }}>
-              {loading ? '—' : ((summary as unknown as Record<string, number>)?.[key] ?? 0)}
-            </p>
-          </div>
-        ))}
+        {CARDS.map(({ key, label, accent, filterKey: cardFilterKey }) => {
+          const isActive = filter === cardFilterKey
+          return (
+            <button
+              key={key}
+              onClick={() => selectFilter(isActive ? 'all' : cardFilterKey)}
+              className="rounded-lg p-3 md:p-4 text-left transition-all duration-150"
+              style={{
+                background: isActive ? `${accent}12` : '#13151f',
+                border: `1px solid ${isActive ? `${accent}50` : '#2a2d3e'}`,
+                borderTop: `2px solid ${accent}`,
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                if (!isActive) e.currentTarget.style.background = `${accent}0a`
+              }}
+              onMouseLeave={(e) => {
+                if (!isActive) e.currentTarget.style.background = '#13151f'
+              }}
+              title={`Filter by ${label}`}
+            >
+              <p className="text-xs uppercase tracking-wide font-medium mb-2" style={{ color: isActive ? accent : '#475569' }}>
+                {label}
+              </p>
+              <p className="text-2xl md:text-3xl font-bold leading-none" style={{ color: accent }}>
+                {loading ? '—' : ((summary as unknown as Record<string, number>)?.[key] ?? 0)}
+              </p>
+            </button>
+          )
+        })}
       </div>
 
       {/* ── Toolbar: search + filter pills ── */}
-      <div className="px-4 py-3 border-b space-y-2.5" style={{ borderColor: '#2a2d3e' }}>
+      <div ref={tableRef} className="px-4 py-3 border-b space-y-2.5" style={{ borderColor: '#2a2d3e' }}>
         {/* Search */}
         <div className="relative w-full max-w-xs">
           <svg
@@ -246,7 +273,7 @@ export function LifecycleTable() {
             return (
               <button
                 key={key}
-                onClick={() => setFilter(key)}
+                onClick={() => selectFilter(key)}
                 className="px-2.5 py-1 rounded-full text-xs font-medium transition-colors"
                 style={
                   active
