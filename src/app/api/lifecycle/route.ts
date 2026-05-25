@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import type { LifecycleLead } from '@/types/lifecycle'
+import { computeFollowUpEligibility, isFuEmailSent } from '@/lib/followup-eligibility'
 
 interface EmailRow {
   type: string
@@ -31,7 +32,7 @@ function addDays(isoDate: string, days: number): string {
   return new Date(new Date(isoDate).getTime() + days * 86_400_000).toISOString()
 }
 
-function computeLifecycle(lead: LeadRow, s: Settings): LifecycleLead {
+function computeLifecycle(lead: LeadRow, s: Settings, now = new Date()): LifecycleLead {
   const base = {
     id: lead.id,
     business_name: lead.business_name,
@@ -40,12 +41,14 @@ function computeLifecycle(lead: LeadRow, s: Settings): LifecycleLead {
 
   const emails = lead.emails ?? []
   const initialEmail = emails.find((e) => e.type === 'initial_pitch' && e.sent_at)
-  const fu1Email = emails.find((e) => e.type === 'follow_up_1' && e.sent_at)
-  const fu2Email = emails.find((e) => e.type === 'follow_up_2' && e.sent_at)
-  const fu3Email = emails.find((e) => e.type === 'follow_up_3' && e.sent_at)
+  const fu1Email = emails.find((e) => e.type === 'follow_up_1' && isFuEmailSent(e))
+  const fu2Email = emails.find((e) => e.type === 'follow_up_2' && isFuEmailSent(e))
+  const fu3Email = emails.find((e) => e.type === 'follow_up_3' && isFuEmailSent(e))
 
+  // daysSinceInitial used only for early returns (dead / reactivation / unknown)
+  // where computeFollowUpEligibility is not called.
   const daysSinceInitial = initialEmail?.sent_at
-    ? Math.floor((Date.now() - new Date(initialEmail.sent_at).getTime()) / 86_400_000)
+    ? Math.floor((now.getTime() - new Date(initialEmail.sent_at).getTime()) / 86_400_000)
     : null
 
   if (lead.status === 'dead') {
@@ -53,7 +56,7 @@ function computeLifecycle(lead: LeadRow, s: Settings): LifecycleLead {
   }
 
   if (lead.reactivation_sent_at) {
-    const daysSinceReact = Math.floor((Date.now() - new Date(lead.reactivation_sent_at).getTime()) / 86_400_000)
+    const daysSinceReact = Math.floor((now.getTime() - new Date(lead.reactivation_sent_at).getTime()) / 86_400_000)
     const deadDate = addDays(lead.reactivation_sent_at, s.deadAfterReactivationDays)
     const isOverdue = daysSinceReact >= s.deadAfterReactivationDays
     return {
@@ -67,64 +70,84 @@ function computeLifecycle(lead: LeadRow, s: Settings): LifecycleLead {
     }
   }
 
-  if (!initialEmail?.sent_at || daysSinceInitial === null) {
+  if (!initialEmail?.sent_at) {
     return { ...base, stage: 'Unknown', next_action: 'None', next_action_date: null, days_since_initial: null, filter_key: 'none', is_overdue: false }
   }
 
-  if (fu2Email?.sent_at) {
+  // Shared eligibility engine — same logic used by the follow-up sender agent.
+  const eligibility = computeFollowUpEligibility(
+    initialEmail.sent_at,
+    !!fu1Email,
+    !!fu2Email,
+    !!fu3Email,
+    { fu1Days: s.fu1Days, fu2Days: s.fu2Days, fu3Days: s.deadLeadDays },
+    now
+  )
+
+  console.log('[LIFECYCLE_DEBUG]', {
+    leadId:       lead.id,
+    nextFuType:   eligibility.nextFuType,
+    isDue:        eligibility.isDue,
+    daysSince:    eligibility.daysSince,
+    dueAtDays:    eligibility.dueAtDays,
+    daysUntilDue: eligibility.daysUntilDue,
+  })
+
+  // FU2 already sent (nextFuType is 'follow_up_3' or null) → reactivation or dead path
+  if (eligibility.nextFuType === null || eligibility.nextFuType === 'follow_up_3') {
     if (s.reactivationEnabled) {
       const reactDate = addDays(initialEmail.sent_at, s.reactivationDelayDays)
-      const isOverdue = daysSinceInitial >= s.reactivationDelayDays
+      const isOverdue = eligibility.daysSince >= s.reactivationDelayDays
       const baseStage = fu3Email ? 'Follow-up 3 Sent' : 'Follow-up 2 Sent'
       return {
         ...base,
         stage: isOverdue ? 'Reactivation Due' : baseStage,
         next_action: 'Send Reactivation',
         next_action_date: reactDate,
-        days_since_initial: daysSinceInitial,
+        days_since_initial: eligibility.daysSince,
         filter_key: 'reactivation',
         is_overdue: isOverdue,
       }
     } else {
       const deadDate = addDays(initialEmail.sent_at, s.deadLeadDays)
-      const isOverdue = daysSinceInitial >= s.deadLeadDays
+      const isOverdue = eligibility.daysSince >= s.deadLeadDays
       const baseStage = fu3Email ? 'Follow-up 3 Sent' : 'Follow-up 2 Sent'
       return {
         ...base,
         stage: baseStage,
         next_action: 'Mark Dead',
         next_action_date: deadDate,
-        days_since_initial: daysSinceInitial,
+        days_since_initial: eligibility.daysSince,
         filter_key: 'none',
         is_overdue: isOverdue,
       }
     }
   }
 
-  if (fu1Email?.sent_at) {
+  // FU1 sent, FU2 pending
+  if (eligibility.nextFuType === 'follow_up_2') {
     const fu2Date = addDays(initialEmail.sent_at, s.fu2Days)
-    const isOverdue = daysSinceInitial >= s.fu2Days
     return {
       ...base,
       stage: 'Follow-up 1 Sent',
       next_action: 'Send Follow-up 2',
       next_action_date: fu2Date,
-      days_since_initial: daysSinceInitial,
+      days_since_initial: eligibility.daysSince,
       filter_key: 'fu2',
-      is_overdue: isOverdue,
+      is_overdue: eligibility.isDue,
     }
   }
 
+  // No FUs sent, FU1 pending (nextFuType === 'follow_up_1')
   const fu1Date = addDays(initialEmail.sent_at, s.fu1Days)
-  const isOverdue = daysSinceInitial >= s.fu1Days
   return {
     ...base,
     stage: 'Initial Sent',
     next_action: 'Send Follow-up 1',
     next_action_date: fu1Date,
-    days_since_initial: daysSinceInitial,
+    days_since_initial: eligibility.daysSince,
     filter_key: 'fu1',
-    is_overdue: isOverdue,
+    is_overdue: eligibility.isDue,
   }
 }
 
@@ -174,10 +197,11 @@ export async function GET(): Promise<NextResponse> {
     reactivationEnabled: sm['reactivation_enabled'] === 'true',
   }
 
+  const now = new Date()
   const allLeads = [...(contactedLeads ?? []), ...(deadLeads ?? [])] as LeadRow[]
   const leads = allLeads
     .filter((l) => l.email)
-    .map((l) => computeLifecycle(l, settings))
+    .map((l) => computeLifecycle(l, settings, now))
 
   const summary = {
     fu1_due: leads.filter((l) => l.filter_key === 'fu1' && l.is_overdue).length,

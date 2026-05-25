@@ -94,7 +94,7 @@ import {
   POSITIVE_RESPONSE_STATUSES as POSITIVE_RESPONSE_STATUSES_CANONICAL,
   PITCHED_STATUSES,
 } from './lead-status'
-import { isFuEmailSent } from './followup-eligibility'
+import { computeFollowUpEligibility, isFuEmailSent } from './followup-eligibility'
 
 const FOLLOW_UP_TYPES: EmailType[] = ['follow_up_1', 'follow_up_2', 'follow_up_3']
 const POSITIVE_RESPONSE_STATUSES: string[] = [...POSITIVE_RESPONSE_STATUSES_CANONICAL]
@@ -326,17 +326,23 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
     const initialEmail = emailsList.find((email) => email.type === 'initial_pitch' && email.sent_at)
     if (!initialEmail?.sent_at) continue
 
-    const daysSince = Math.floor((date.getTime() - new Date(initialEmail.sent_at).getTime()) / DAY_MS)
     const hasFollowUp1 = emailsList.some((email) => email.type === 'follow_up_1' && isFuEmailSent(email))
     const hasFollowUp2 = emailsList.some((email) => email.type === 'follow_up_2' && isFuEmailSent(email))
     const hasFollowUp3 = emailsList.some((email) => email.type === 'follow_up_3' && isFuEmailSent(email))
 
-    if (daysSince >= followUp3Days && hasFollowUp1 && hasFollowUp2 && !hasFollowUp3) {
-      pendingFollowUp3++
-    } else if (daysSince >= followUp2Days && hasFollowUp1 && !hasFollowUp2) {
-      pendingFollowUp2++
-    } else if (daysSince >= followUp1Days && !hasFollowUp1) {
-      pendingFollowUp1++
+    const eligibility = computeFollowUpEligibility(
+      initialEmail.sent_at,
+      hasFollowUp1,
+      hasFollowUp2,
+      hasFollowUp3,
+      { fu1Days: followUp1Days, fu2Days: followUp2Days, fu3Days: followUp3Days },
+      date
+    )
+
+    if (eligibility.isDue) {
+      if (eligibility.nextFuType === 'follow_up_3') pendingFollowUp3++
+      else if (eligibility.nextFuType === 'follow_up_2') pendingFollowUp2++
+      else if (eligibility.nextFuType === 'follow_up_1') pendingFollowUp1++
     }
   }
 
@@ -352,9 +358,18 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
     const initialEmail = emailsList.find((e) => e.type === 'initial_pitch' && e.sent_at)
     if (!initialEmail?.sent_at) continue
 
-    const daysSince = Math.floor((date.getTime() - new Date(initialEmail.sent_at).getTime()) / DAY_MS)
-    const fu1Sent = emailsList.some((e) => e.type === 'follow_up_1' && e.sent_at)
-    const fu2Sent = emailsList.some((e) => e.type === 'follow_up_2' && e.sent_at)
+    const fu1Sent = emailsList.some((e) => e.type === 'follow_up_1' && isFuEmailSent(e))
+    const fu2Sent = emailsList.some((e) => e.type === 'follow_up_2' && isFuEmailSent(e))
+    const fu3Sent = emailsList.some((e) => e.type === 'follow_up_3' && isFuEmailSent(e))
+
+    const eligibility = computeFollowUpEligibility(
+      initialEmail.sent_at,
+      fu1Sent,
+      fu2Sent,
+      fu3Sent,
+      { fu1Days: followUp1Days, fu2Days: followUp2Days, fu3Days: followUp3Days },
+      date
+    )
 
     if (lead.reactivation_sent_at) {
       const daysSinceReact = Math.floor((date.getTime() - new Date(lead.reactivation_sent_at).getTime()) / DAY_MS)
@@ -367,25 +382,24 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
       continue
     }
 
-    if (fu2Sent) {
+    // FU2 sent (nextFuType is 'follow_up_3' or null) → reactivation or dead path
+    if (eligibility.nextFuType === null || eligibility.nextFuType === 'follow_up_3') {
       if (reactivationEnabled) {
         reactivationNotAwaitingDead++
-        if (daysSince >= reactivationDelayDays) overdueTotal++
-      } else if (daysSince >= followUp3Days) {
+        if (eligibility.daysSince >= reactivationDelayDays) overdueTotal++
+      } else if (eligibility.daysSince >= followUp3Days) {
         overdueTotal++
       }
       continue
     }
 
-    if (fu1Sent) {
-      if (daysSince >= followUp2Days) {
-        fu2Due++
-        overdueTotal++
-      }
+    if (eligibility.nextFuType === 'follow_up_2' && eligibility.isDue) {
+      fu2Due++
+      overdueTotal++
       continue
     }
 
-    if (daysSince >= followUp1Days) {
+    if (eligibility.nextFuType === 'follow_up_1' && eligibility.isDue) {
       fu1Due++
       overdueTotal++
     }
