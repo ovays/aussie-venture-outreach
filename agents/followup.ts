@@ -433,6 +433,18 @@ export async function runFollowUpAgent(): Promise<void> {
       finalTotal,
     })
 
+    logger.info('followup', '[FOLLOWUP_SUMMARY]', {
+      configuredGlobalLimit,
+      alreadySentToday:  alreadySentToday ?? 0,
+      remainingGlobalToday,
+      allocation,
+      finalAllocation,
+      totalAllocated:    finalTotal,
+      skippedNotDue:     skipNotYetDue,
+      skippedMissingEmail: skipNoEmail + skipNoInitialEmail,
+      skippedAlreadySent:  skipAllSent,
+    })
+
     const sent = {
       follow_up_1: 0,
       follow_up_2: 0,
@@ -473,6 +485,13 @@ export async function runFollowUpAgent(): Promise<void> {
       sent_follow_up_1: sent.follow_up_1,
       sent_follow_up_2: sent.follow_up_2,
       sent_follow_up_3: sent.follow_up_3,
+    })
+
+    logger.info('followup', '[FOLLOWUP_SEND_COMPLETE]', {
+      sentFU1:   sent.follow_up_1,
+      sentFU2:   sent.follow_up_2,
+      sentFU3:   sent.follow_up_3,
+      totalSent: sent.follow_up_1 + sent.follow_up_2 + sent.follow_up_3,
     })
 
     await supabase.from('activity_log').insert({
