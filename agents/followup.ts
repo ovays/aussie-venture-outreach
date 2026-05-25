@@ -197,12 +197,12 @@ export async function runFollowUpAgent(): Promise<void> {
     const followUp2Days = settings['follow_up_2_days'] ?? 14
     const followUp3Days = settings['dead_lead_days'] ?? 21
 
-    const globalDailyLimit = settings['daily_lead_limit'] ?? 100
+    const configuredGlobalLimit = settings['daily_lead_limit'] ?? 100
 
     const today = getAnalyticsDayRange()
 
     // Global cap: total outbound emails sent today across all types.
-    const { count: totalSentToday } = await supabase
+    const { count: alreadySentToday } = await supabase
       .from('emails')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'sent')
@@ -210,7 +210,7 @@ export async function runFollowUpAgent(): Promise<void> {
       .gte('sent_at', today.start)
       .lt('sent_at', today.end)
 
-    const globalRemaining = Math.max(0, globalDailyLimit - (totalSentToday ?? 0))
+    const remainingGlobalToday = Math.max(0, configuredGlobalLimit - (alreadySentToday ?? 0))
 
     const limits = {
       follow_up_1: settings[FOLLOW_UP_LIMIT_KEYS.follow_up_1] ?? FOLLOW_UP_DEFAULT_LIMITS.follow_up_1,
@@ -224,30 +224,40 @@ export async function runFollowUpAgent(): Promise<void> {
       follow_up_3: await sentTodayCount(supabase, 'follow_up_3', today),
     } satisfies Record<FollowUpType, number>
 
+    const fu1SentToday = sentBeforeRun.follow_up_1
+    const fu2SentToday = sentBeforeRun.follow_up_2
+    const fu3SentToday = sentBeforeRun.follow_up_3
+
     const remaining = {
-      follow_up_1: Math.max(0, limits.follow_up_1 - sentBeforeRun.follow_up_1),
-      follow_up_2: Math.max(0, limits.follow_up_2 - sentBeforeRun.follow_up_2),
-      follow_up_3: Math.max(0, limits.follow_up_3 - sentBeforeRun.follow_up_3),
+      follow_up_1: Math.max(0, limits.follow_up_1 - fu1SentToday),
+      follow_up_2: Math.max(0, limits.follow_up_2 - fu2SentToday),
+      follow_up_3: Math.max(0, limits.follow_up_3 - fu3SentToday),
     } satisfies Record<FollowUpType, number>
 
-    logger.info('followup', `GLOBAL_DAILY_SEND_LIMIT = ${globalDailyLimit}`)
-    logger.info('followup', `TOTAL_SENT_TODAY = ${totalSentToday ?? 0} / ${globalDailyLimit}`, {
-      total_sent_today:        totalSentToday ?? 0,
-      global_daily_send_limit: globalDailyLimit,
-      global_remaining:        globalRemaining,
+    logger.info('followup', '[FU_QUOTA_DEBUG]', {
+      fu1_limit:              limits.follow_up_1,
+      fu1_sent_today:         fu1SentToday,
+      fu1_remaining:          remaining.follow_up_1,
+      fu2_limit:              limits.follow_up_2,
+      fu2_sent_today:         fu2SentToday,
+      fu2_remaining:          remaining.follow_up_2,
+      fu3_limit:              limits.follow_up_3,
+      fu3_sent_today:         fu3SentToday,
+      fu3_remaining:          remaining.follow_up_3,
+      configured_global_limit: configuredGlobalLimit,
+      already_sent_today:     alreadySentToday ?? 0,
+      remaining_global_today: remainingGlobalToday,
+    })
+
+    logger.info('followup', `CONFIGURED_GLOBAL_LIMIT = ${configuredGlobalLimit}`)
+    logger.info('followup', `ALREADY_SENT_TODAY = ${alreadySentToday ?? 0} / ${configuredGlobalLimit}`, {
+      already_sent_today:      alreadySentToday ?? 0,
+      configured_global_limit: configuredGlobalLimit,
+      remaining_global_today:  remainingGlobalToday,
     })
     logger.info('followup', `FU1_LIMIT = ${limits.follow_up_1}`)
     logger.info('followup', `FU2_LIMIT = ${limits.follow_up_2}`)
     logger.info('followup', `FU3_LIMIT = ${limits.follow_up_3}`)
-    logger.info('followup', '[FOLLOWUP_ALLOCATION]', {
-      global_daily_send_limit: globalDailyLimit,
-      global_remaining:        globalRemaining,
-      fu1_allocation:          Math.min(remaining.follow_up_1, globalRemaining),
-      fu2_allocation:          Math.min(remaining.follow_up_2, globalRemaining),
-      fu3_allocation:          Math.min(remaining.follow_up_3, globalRemaining),
-      limits,
-      sent_before_run:         sentBeforeRun,
-    })
 
     logger.info('followup', '[FU_ELIGIBILITY] querying contacted leads')
     const { data: contactedLeads, error: contactedLeadsErr } = await supabase
@@ -289,7 +299,15 @@ export async function runFollowUpAgent(): Promise<void> {
       }
 
       const emailsList = lead.emails ?? []
-      const initialEmail = emailsList.find((email) => email.type === 'initial_pitch' && email.sent_at)
+      const initialPitchRows = emailsList.filter((email) => email.type === 'initial_pitch')
+      const initialEmail = initialPitchRows.find((email) => isFuEmailSent(email))
+
+      logger.info('followup', '[FU_INITIAL_DEBUG]', {
+        lead_id:           lead.id,
+        initial_pitch_rows: initialPitchRows.map((e) => ({ id: e.id, status: e.status, sent_at: e.sent_at ?? null })),
+        chosen_sent_at:    initialEmail?.sent_at ?? null,
+      })
+
       if (!initialEmail?.sent_at) {
         skipNoInitialEmail++
         logger.info('followup', '[FU_SKIP] no sent initial_pitch email', {
@@ -383,33 +401,60 @@ export async function runFollowUpAgent(): Promise<void> {
       today_range: today,
     })
 
+    // Phase B: Independent allocation — each queue gets min(eligible, queueLimit)
+    // without competing for a shared pool. A single global cap is applied afterwards.
+    const allocation = {
+      follow_up_1: Math.min(queues.follow_up_1.length, remaining.follow_up_1),
+      follow_up_2: Math.min(queues.follow_up_2.length, remaining.follow_up_2),
+      follow_up_3: Math.min(queues.follow_up_3.length, remaining.follow_up_3),
+    } satisfies Record<FollowUpType, number>
+
+    const totalRequested = allocation.follow_up_1 + allocation.follow_up_2 + allocation.follow_up_3
+    const finalAllocation = { ...allocation } as Record<FollowUpType, number>
+
+    if (totalRequested > remainingGlobalToday) {
+      let budget = remainingGlobalToday
+      for (const type of ['follow_up_1', 'follow_up_2', 'follow_up_3'] as FollowUpType[]) {
+        const take = Math.min(finalAllocation[type], budget)
+        finalAllocation[type] = take
+        budget -= take
+      }
+    }
+
+    const finalTotal = finalAllocation.follow_up_1 + finalAllocation.follow_up_2 + finalAllocation.follow_up_3
+
+    logger.info('followup', '[OUTBOUND_ALLOCATION]', {
+      configuredGlobalLimit,
+      alreadySentToday:      alreadySentToday ?? 0,
+      remainingGlobalToday,
+      allocation,
+      totalRequested,
+      finalAllocation,
+      finalTotal,
+    })
+
     const sent = {
       follow_up_1: 0,
       follow_up_2: 0,
       follow_up_3: 0,
     } satisfies Record<FollowUpType, number>
 
-    // globalSentThisRun tracks sends made during this agent run so the global cap
-    // is shared correctly across FU1 → FU2 → FU3 in sequence.
     let globalSentThisRun = 0
 
     for (const type of ['follow_up_1', 'follow_up_2', 'follow_up_3'] as FollowUpType[]) {
       const fuLabel = type === 'follow_up_1' ? 'FU1' : type === 'follow_up_2' ? 'FU2' : 'FU3'
-      const typeRemaining = Math.min(remaining[type], globalRemaining - globalSentThisRun)
-      const queue = queues[type].slice(0, typeRemaining)
+      const toSend  = queues[type].slice(0, finalAllocation[type])
 
       logger.info('followup', `[PIPELINE_STAGE] ${fuLabel} starting`)
-      logger.info('followup', `[${fuLabel}_DEBUG] fetching eligible ${fuLabel} leads`)
       logger.info('followup', `[${fuLabel}_DEBUG]`, {
-        totalEligible:   queues[type].length,
-        limit:           limits[type],
-        typeRemaining,
-        remainingGlobal: globalRemaining - globalSentThisRun,
-        totalSentToday:  sentBeforeRun[type],
+        eligible:       queues[type].length,
+        limit:          limits[type],
+        sentToday:      sentBeforeRun[type],
+        allocated:      allocation[type],
+        finalAllocated: finalAllocation[type],
       })
 
-      for (const candidate of queue) {
-        if (globalSentThisRun >= globalRemaining) break
+      for (const candidate of toSend) {
         const wasSent = await sendFollowUp(supabase, candidate, type)
         if (wasSent) {
           sent[type]++
@@ -420,7 +465,6 @@ export async function runFollowUpAgent(): Promise<void> {
       logger.info('followup', `[${fuLabel}_DEBUG] ${fuLabel} done`, {
         sent:               sent[type],
         global_sent_so_far: globalSentThisRun,
-        global_remaining:   globalRemaining - globalSentThisRun,
       })
       logger.info('followup', `[PIPELINE_STAGE] ${fuLabel} complete`, { sent: sent[type] })
     }

@@ -12,6 +12,7 @@
     "test:reactivation": "tsx scripts/test-reactivation.ts",
     "test:reactivation-email": "tsx scripts/test-reactivation-email.ts",
     "test:followup-quotas": "tsx scripts/test-followup-quotas.ts",
+    "test:followups": "tsx scripts/test-followups.ts",
     "deploy:trigger": "npx trigger.dev@4.4.4 deploy"
   },
   "dependencies": {
