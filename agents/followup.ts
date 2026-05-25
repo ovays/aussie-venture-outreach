@@ -327,8 +327,17 @@ export async function runFollowUpAgent(): Promise<void> {
     let globalSentThisRun = 0
 
     for (const type of ['follow_up_1', 'follow_up_2', 'follow_up_3'] as FollowUpType[]) {
+      const fuLabel = type === 'follow_up_1' ? 'FU1' : type === 'follow_up_2' ? 'FU2' : 'FU3'
       const typeRemaining = Math.min(remaining[type], globalRemaining - globalSentThisRun)
       const queue = queues[type].slice(0, typeRemaining)
+
+      logger.info('followup', `[PIPELINE_STAGE] ${fuLabel} starting`, {
+        queue_size:       queues[type].length,
+        type_limit:       limits[type],
+        type_remaining:   typeRemaining,
+        global_remaining: globalRemaining - globalSentThisRun,
+      })
+
       for (const candidate of queue) {
         if (globalSentThisRun >= globalRemaining) break
         const wasSent = await sendFollowUp(supabase, candidate, type)
@@ -337,6 +346,12 @@ export async function runFollowUpAgent(): Promise<void> {
           globalSentThisRun++
         }
       }
+
+      logger.info('followup', `[PIPELINE_STAGE] ${fuLabel} complete`, {
+        sent:               sent[type],
+        global_sent_so_far: globalSentThisRun,
+        global_remaining:   globalRemaining - globalSentThisRun,
+      })
     }
 
     logger.info('followup', '[FOLLOWUP_SENT]', {
