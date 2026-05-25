@@ -380,11 +380,37 @@ const BLOCKED_MARKETPLACE_DOMAINS = new Set([
   'opentable.com',
 ])
 
-function isBlockedWebsiteDomain(url: string): 'social' | 'marketplace' | false {
+// Hosted QR ordering systems, menu platforms, and takeaway wrappers.
+// These domains host restaurant ordering/menu pages on their own infrastructure —
+// the business has no email exposure here. Subdomain patterns are also matched
+// (e.g. restaurant.qonus.com.au blocks on the qonus.com.au entry).
+// Checked before any HTTP request is made.
+const PLATFORM_DOMAIN_BLOCKLIST = new Set([
+  'qonus.com.au',
+  'yumbojumbo.com.au',
+  'flipdish.com',
+  'bopple.com',
+  'bopple.com.au',
+  'ordermentum.com',
+  'orderahead.com.au',
+  'popmenu.com',
+  'mobi2go.com',
+  'hungry.com.au',
+  'eatnow.com.au',
+  'menumaster.com.au',
+  'orderup.com.au',
+  'me.orderup.com.au',
+  'me.orderahead.com.au',
+])
+
+function isBlockedWebsiteDomain(url: string): 'social' | 'marketplace' | 'platform' | false {
   const host = rootHost(url)
   if (!host) return false
   if (BLOCKED_SOCIAL_DOMAINS.has(host)) return 'social'
   if (BLOCKED_MARKETPLACE_DOMAINS.has(host)) return 'marketplace'
+  for (const platform of PLATFORM_DOMAIN_BLOCKLIST) {
+    if (host === platform || host.endsWith(`.${platform}`)) return 'platform'
+  }
   return false
 }
 
@@ -1540,6 +1566,14 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                 comboValidationFailed++
                 console.log(`[MARKETPLACE_DOMAIN_SKIP] domain=${blockedDomain} business=${name}`)
                 logger.info('finder', '[MARKETPLACE_DOMAIN_SKIP]', { domain: blockedDomain, business_name: name, url: rawWebsite })
+                noOutreachMethodsRemoved++
+                continue
+              }
+              if (blockType === 'platform') {
+                const blockedDomain = rootHost(rawWebsite) ?? rawWebsite
+                comboValidationFailed++
+                console.log(`[PLATFORM_DOMAIN_BLOCKED]\n${JSON.stringify({ domain: blockedDomain, business: name, reason: 'hosted_ordering_platform' }, null, 2)}`)
+                logger.info('finder', '[PLATFORM_DOMAIN_BLOCKED]', { domain: blockedDomain, business_name: name, reason: 'hosted_ordering_platform', url: rawWebsite })
                 noOutreachMethodsRemoved++
                 continue
               }
