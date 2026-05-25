@@ -68,7 +68,19 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     capped_to:                    remainingToday,
   })
 
-
+  // Early exit — must be here, before any diagnostic DB queries, so the pipeline
+  // immediately proceeds to the follow-up stage when initial outreach is at capacity.
+  if (remainingToday === 0) {
+    const exitReason = globalRemaining === 0 ? 'global_daily_send_limit_reached' : 'daily_initial_outreach_limit_reached'
+    logger.info('sender', '[PIPELINE_STAGE] Sender exiting', {
+      reason:                       exitReason,
+      global_daily_send_limit:      globalDailyLimit,
+      total_sent_today:             totalSentToday ?? 0,
+      daily_initial_outreach_limit: dailyLimit,
+      initial_sent_today:           sentToday ?? 0,
+    })
+    return { sent: 0, failed: 0 }
+  }
 
   const emailStatusesQueried = ['pending_send']
   const emailTypesQueried = ['initial_pitch']
@@ -149,18 +161,6 @@ console.log("FILTERED PENDING", pendingEmails)
       eligible_pending_send_emails: eligiblePendingCount ?? 0,
       email_ready_leads: emailReadyCount ?? 0,
       email_ready_with_email: emailReadyWithEmail ?? 0,
-    })
-    return { sent: 0, failed: 0 }
-  }
-
-  if (remainingToday === 0) {
-    const exitReason = globalRemaining === 0 ? 'global_daily_send_limit_reached' : 'daily_initial_outreach_limit_reached'
-    logger.info('sender', '[PIPELINE_STAGE] Sender exiting', {
-      reason:                      exitReason,
-      global_daily_send_limit:     globalDailyLimit,
-      total_sent_today:            totalSentToday ?? 0,
-      daily_initial_outreach_limit: dailyLimit,
-      initial_sent_today:          sentToday ?? 0,
     })
     return { sent: 0, failed: 0 }
   }
