@@ -20,15 +20,26 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     return { sent: 0, failed: 0 }
   }
 
-  const { data: limitSetting } = await supabase
-    .from('settings')
-    .select('value')
-    .eq('key', 'daily_initial_outreach_limit')
-    .single()
+  const [globalLimitRow, limitRow] = await Promise.all([
+    supabase.from('settings').select('value').eq('key', 'daily_lead_limit').single(),
+    supabase.from('settings').select('value').eq('key', 'daily_initial_outreach_limit').single(),
+  ])
 
-  const dailyLimit = parseInt(limitSetting?.value ?? '50', 10)
+  const globalDailyLimit = parseInt(globalLimitRow.data?.value ?? '100', 10)
+  const dailyLimit       = parseInt(limitRow.data?.value ?? '50', 10)
 
   const today = getAnalyticsDayRange()
+
+  // Global cap: count all outbound email types sent today.
+  const { count: totalSentToday } = await supabase
+    .from('emails')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'sent')
+    .in('type', ['initial_pitch', 'follow_up_1', 'follow_up_2', 'follow_up_3'])
+    .gte('sent_at', today.start)
+    .lt('sent_at', today.end)
+
+  // Sub-limit: count only initial pitches sent today.
   const { count: sentToday } = await supabase
     .from('emails')
     .select('*', { count: 'exact', head: true })
@@ -37,12 +48,24 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .gte('sent_at', today.start)
     .lt('sent_at', today.end)
 
-  const remainingToday = Math.max(0, dailyLimit - (sentToday ?? 0))
+  const globalRemaining  = Math.max(0, globalDailyLimit - (totalSentToday ?? 0))
+  const initialRemaining = Math.max(0, dailyLimit - (sentToday ?? 0))
+  const remainingToday   = Math.min(globalRemaining, initialRemaining)
+
+  logger.info('sender', `GLOBAL_DAILY_SEND_LIMIT = ${globalDailyLimit}`)
+  logger.info('sender', `INITIAL_OUTREACH_LIMIT = ${dailyLimit}`)
+  logger.info('sender', `TOTAL_SENT_TODAY = ${totalSentToday ?? 0} / ${globalDailyLimit}`, {
+    total_sent_today:        totalSentToday ?? 0,
+    global_daily_send_limit: globalDailyLimit,
+    global_remaining:        globalRemaining,
+    today_range:             today,
+  })
   logger.info('sender', `INITIAL_OUTREACH_TARGET = ${remainingToday}`, {
     daily_initial_outreach_limit: dailyLimit,
-    sent_today:                   sentToday ?? 0,
-    remaining:                    remainingToday,
-    today_range:                  today,
+    initial_sent_today:           sentToday ?? 0,
+    initial_remaining:            initialRemaining,
+    global_remaining:             globalRemaining,
+    capped_to:                    remainingToday,
   })
 
 
@@ -131,10 +154,13 @@ console.log("FILTERED PENDING", pendingEmails)
   }
 
   if (remainingToday === 0) {
+    const exitReason = globalRemaining === 0 ? 'global_daily_send_limit_reached' : 'daily_initial_outreach_limit_reached'
     logger.info('sender', '[PIPELINE_STAGE] Sender exiting', {
-      reason: 'daily_initial_outreach_limit_reached',
+      reason:                      exitReason,
+      global_daily_send_limit:     globalDailyLimit,
+      total_sent_today:            totalSentToday ?? 0,
       daily_initial_outreach_limit: dailyLimit,
-      sent_today: sentToday ?? 0,
+      initial_sent_today:          sentToday ?? 0,
     })
     return { sent: 0, failed: 0 }
   }
@@ -248,7 +274,7 @@ const result = await sendEmail({
   await supabase.from('activity_log').insert({
     event_type: 'sender_complete',
     description: `Sender agent completed - ${sent} sent, ${failed} failed`,
-    metadata: { sent, failed, daily_initial_outreach_limit: dailyLimit, initial_pitch_sent_before_run: sentToday ?? 0 },
+    metadata: { sent, failed, global_daily_send_limit: globalDailyLimit, daily_initial_outreach_limit: dailyLimit, initial_pitch_sent_before_run: sentToday ?? 0 },
   })
 
   // Haiku writing (~$0.001/email) + Resend API (free tier / ~$0.0001/email)

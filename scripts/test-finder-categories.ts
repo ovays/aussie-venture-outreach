@@ -63,22 +63,21 @@ async function run(): Promise<void> {
     console.log('(none)')
   }
 
+  const dailyInitialOutreachLimit = parseInt(await readSetting(supabase, 'daily_initial_outreach_limit', '30'), 10)
   const totalTarget = parseInt(await readSetting(supabase, 'daily_lead_limit', '40'), 10)
-  const dmLimit = parseInt(await readSetting(supabase, 'daily_dm_limit', '10'), 10)
-  const dmTarget = Math.min(dmLimit, totalTarget)
-  const leadDiscoveryTarget = totalTarget - dmTarget
-  const cappedLimit = leadDiscoveryTarget > 0 ? Math.max(1, Math.ceil(leadDiscoveryTarget / 4)) : 0
+  const emailTarget = Math.min(dailyInitialOutreachLimit, totalTarget)
+  const cappedLimit = emailTarget > 0 ? Math.max(1, Math.ceil(emailTarget / 4)) : 0
 
   console.log('\nFINDER CATEGORY SELECTION SIMULATION')
-  console.log(`LEAD_DISCOVERY_TARGET=${totalTarget}`)
-  console.log(`EMAIL_QUEUE_TARGET=${leadDiscoveryTarget}`)
+  console.log(`GLOBAL_DAILY_SEND_LIMIT=${totalTarget}`)
+  console.log(`INITIAL_OUTREACH_LIMIT=${emailTarget}`)
   console.log(`cappedLimit=${cappedLimit}`)
 
   let simulatedEmailCount = 0
   for (const category of categoryDebug.finderCategories) {
-    if (simulatedEmailCount >= leadDiscoveryTarget) break
+    if (simulatedEmailCount >= emailTarget) break
 
-    const categoryLimit = category.capped ? cappedLimit : leadDiscoveryTarget - simulatedEmailCount
+    const categoryLimit = category.capped ? cappedLimit : emailTarget - simulatedEmailCount
 
     console.log(`- ${category.name}`)
     console.log(`  queries: ${category.queries.join(' | ')}`)

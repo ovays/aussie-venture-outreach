@@ -177,6 +177,7 @@ export async function runFollowUpAgent(): Promise<void> {
         'follow_up_1_days',
         'follow_up_2_days',
         'dead_lead_days',
+        'daily_lead_limit',
         'daily_followup1_limit',
         'daily_followup2_limit',
         'daily_followup3_limit',
@@ -196,7 +197,21 @@ export async function runFollowUpAgent(): Promise<void> {
     const followUp2Days = settings['follow_up_2_days'] ?? 14
     const followUp3Days = settings['dead_lead_days'] ?? 21
 
+    const globalDailyLimit = settings['daily_lead_limit'] ?? 100
+
     const today = getAnalyticsDayRange()
+
+    // Global cap: total outbound emails sent today across all types.
+    const { count: totalSentToday } = await supabase
+      .from('emails')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'sent')
+      .in('type', ['initial_pitch', 'follow_up_1', 'follow_up_2', 'follow_up_3'])
+      .gte('sent_at', today.start)
+      .lt('sent_at', today.end)
+
+    const globalRemaining = Math.max(0, globalDailyLimit - (totalSentToday ?? 0))
+
     const limits = {
       follow_up_1: settings[FOLLOW_UP_LIMIT_KEYS.follow_up_1] ?? FOLLOW_UP_DEFAULT_LIMITS.follow_up_1,
       follow_up_2: settings[FOLLOW_UP_LIMIT_KEYS.follow_up_2] ?? FOLLOW_UP_DEFAULT_LIMITS.follow_up_2,
@@ -215,15 +230,23 @@ export async function runFollowUpAgent(): Promise<void> {
       follow_up_3: Math.max(0, limits.follow_up_3 - sentBeforeRun.follow_up_3),
     } satisfies Record<FollowUpType, number>
 
-    logger.info('followup', `FU1_TARGET = ${remaining.follow_up_1}`)
-    logger.info('followup', `FU2_TARGET = ${remaining.follow_up_2}`)
-    logger.info('followup', `FU3_TARGET = ${remaining.follow_up_3}`)
+    logger.info('followup', `GLOBAL_DAILY_SEND_LIMIT = ${globalDailyLimit}`)
+    logger.info('followup', `TOTAL_SENT_TODAY = ${totalSentToday ?? 0} / ${globalDailyLimit}`, {
+      total_sent_today:        totalSentToday ?? 0,
+      global_daily_send_limit: globalDailyLimit,
+      global_remaining:        globalRemaining,
+    })
+    logger.info('followup', `FU1_LIMIT = ${limits.follow_up_1}`)
+    logger.info('followup', `FU2_LIMIT = ${limits.follow_up_2}`)
+    logger.info('followup', `FU3_LIMIT = ${limits.follow_up_3}`)
     logger.info('followup', '[FOLLOWUP_ALLOCATION]', {
-      fu1_allocation: remaining.follow_up_1,
-      fu2_allocation: remaining.follow_up_2,
-      fu3_allocation: remaining.follow_up_3,
+      global_daily_send_limit: globalDailyLimit,
+      global_remaining:        globalRemaining,
+      fu1_allocation:          Math.min(remaining.follow_up_1, globalRemaining),
+      fu2_allocation:          Math.min(remaining.follow_up_2, globalRemaining),
+      fu3_allocation:          Math.min(remaining.follow_up_3, globalRemaining),
       limits,
-      sent_before_run: sentBeforeRun,
+      sent_before_run:         sentBeforeRun,
     })
 
     const { data: contactedLeads } = await supabase
@@ -299,11 +322,20 @@ export async function runFollowUpAgent(): Promise<void> {
       follow_up_3: 0,
     } satisfies Record<FollowUpType, number>
 
+    // globalSentThisRun tracks sends made during this agent run so the global cap
+    // is shared correctly across FU1 → FU2 → FU3 in sequence.
+    let globalSentThisRun = 0
+
     for (const type of ['follow_up_1', 'follow_up_2', 'follow_up_3'] as FollowUpType[]) {
-      const queue = queues[type].slice(0, remaining[type])
+      const typeRemaining = Math.min(remaining[type], globalRemaining - globalSentThisRun)
+      const queue = queues[type].slice(0, typeRemaining)
       for (const candidate of queue) {
+        if (globalSentThisRun >= globalRemaining) break
         const wasSent = await sendFollowUp(supabase, candidate, type)
-        if (wasSent) sent[type]++
+        if (wasSent) {
+          sent[type]++
+          globalSentThisRun++
+        }
       }
     }
 
