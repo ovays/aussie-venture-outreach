@@ -94,6 +94,7 @@ import {
   POSITIVE_RESPONSE_STATUSES as POSITIVE_RESPONSE_STATUSES_CANONICAL,
   PITCHED_STATUSES,
 } from './lead-status'
+import { isFuEmailSent } from './followup-eligibility'
 
 const FOLLOW_UP_TYPES: EmailType[] = ['follow_up_1', 'follow_up_2', 'follow_up_3']
 const POSITIVE_RESPONSE_STATUSES: string[] = [...POSITIVE_RESPONSE_STATUSES_CANONICAL]
@@ -326,9 +327,9 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
     if (!initialEmail?.sent_at) continue
 
     const daysSince = Math.floor((date.getTime() - new Date(initialEmail.sent_at).getTime()) / DAY_MS)
-    const hasFollowUp1 = emailsList.some((email) => email.type === 'follow_up_1')
-    const hasFollowUp2 = emailsList.some((email) => email.type === 'follow_up_2')
-    const hasFollowUp3 = emailsList.some((email) => email.type === 'follow_up_3')
+    const hasFollowUp1 = emailsList.some((email) => email.type === 'follow_up_1' && isFuEmailSent(email))
+    const hasFollowUp2 = emailsList.some((email) => email.type === 'follow_up_2' && isFuEmailSent(email))
+    const hasFollowUp3 = emailsList.some((email) => email.type === 'follow_up_3' && isFuEmailSent(email))
 
     if (daysSince >= followUp3Days && hasFollowUp1 && hasFollowUp2 && !hasFollowUp3) {
       pendingFollowUp3++
