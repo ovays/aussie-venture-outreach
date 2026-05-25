@@ -663,6 +663,46 @@ async function fetchHtmlWithDiagnostics(url: string): Promise<WebsiteFetchResult
   }
 }
 
+// Single-attempt fetch with no protocol/www variant retries.
+// Used for internal pages once the homepage base URL is already known.
+async function fetchHtmlDirect(url: string): Promise<WebsiteFetchResult> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 7000)
+  try {
+    console.log(`[HTTP_FETCH] url=${url}`)
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)' },
+      redirect: 'follow',
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+    if (!res.ok) {
+      return {
+        html: '',
+        requestedUrl: normalizeResolvedWebsite(url),
+        finalUrl: normalizeResolvedWebsite(url),
+        reason: `${url} returned HTTP ${res.status}`,
+      }
+    }
+    const html = await res.text()
+    console.log(`[FETCH_SUCCESS] url=${url} status=${res.status}`)
+    return {
+      html,
+      requestedUrl: normalizeResolvedWebsite(url),
+      finalUrl: normalizeResolvedWebsite(res.url || url),
+    }
+  } catch (error) {
+    clearTimeout(timeoutId)
+    return {
+      html: '',
+      requestedUrl: normalizeResolvedWebsite(url),
+      finalUrl: normalizeResolvedWebsite(url),
+      reason: `${url} failed: ${error instanceof Error ? error.name || error.message : String(error)}`,
+    }
+  }
+}
+
 export async function findEmailForBusiness(rawWebsite: string, businessName: string, deadline?: number): Promise<{
   email: string | null
   source: string
@@ -684,7 +724,8 @@ export async function findEmailForBusiness(rawWebsite: string, businessName: str
 
   const scanPage = async (
     page: CrawlPage,
-    logName: 'Homepage scanned' | 'Contact page scanned'
+    logName: 'Homepage scanned' | 'Contact page scanned',
+    direct = false
   ): Promise<string | null> => {
     const pageKey = canonicalPageKey(page.url)
     console.log(`[CANONICAL_URL] original=${page.url} canonical=${pageKey}`)
@@ -721,7 +762,9 @@ export async function findEmailForBusiness(rawWebsite: string, businessName: str
       url: page.url,
     })
 
-    const fetchResult = await fetchHtmlWithDiagnostics(page.url)
+    const fetchResult = direct
+      ? await fetchHtmlDirect(page.url)
+      : await fetchHtmlWithDiagnostics(page.url)
 
     if (fetchResult.finalUrl) {
       normalizedWebsite = fetchResult.finalUrl
@@ -783,6 +826,10 @@ export async function findEmailForBusiness(rawWebsite: string, businessName: str
       failureReason: null,
     }
   }
+
+  // True when the homepage HTTP request succeeded and returned HTML.
+  // Internal pages can inherit the resolved base URL and skip variant retries.
+  const homepageSucceeded = homepageHtml !== ''
 
   if (isSocialMediaUrl(decoded)) {
     const socialDomain = rootHost(decoded) ?? decoded
@@ -888,9 +935,16 @@ export async function findEmailForBusiness(rawWebsite: string, businessName: str
       break
     }
 
+    if (homepageSucceeded && origin) {
+      const internalPath = crawlPath(page.url)
+      console.log(`[INHERITED_BASE_URL]\n${JSON.stringify({ homepage_base: origin, internal_page: internalPath }, null, 2)}`)
+      logger.info('finder', '[INHERITED_BASE_URL]', { homepage_base: origin, internal_page: internalPath, business_name: businessName })
+    }
+
     const selectedEmail = await scanPage(
       page,
-      'Contact page scanned'
+      'Contact page scanned',
+      homepageSucceeded
     )
 
     if (selectedEmail) {
