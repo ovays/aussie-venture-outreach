@@ -13,7 +13,7 @@
     "test:reactivation-email": "tsx scripts/test-reactivation-email.ts",
     "test:followup-quotas": "tsx scripts/test-followup-quotas.ts",
     "test:followups": "tsx scripts/test-followups.ts",
-    "deploy:trigger": "npx trigger.dev@4.4.4 deploy"
+    "deploy:trigger": "npx trigger.dev@4.4.6 deploy"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

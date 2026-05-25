@@ -404,9 +404,9 @@ export async function runFollowUpAgent(): Promise<void> {
     // Phase B: Independent allocation — each queue gets min(eligible, queueLimit)
     // without competing for a shared pool. A single global cap is applied afterwards.
     const allocation = {
-      follow_up_1: Math.min(queues.follow_up_1.length, remaining.follow_up_1),
-      follow_up_2: Math.min(queues.follow_up_2.length, remaining.follow_up_2),
-      follow_up_3: Math.min(queues.follow_up_3.length, remaining.follow_up_3),
+      follow_up_1: Math.min(queues.follow_up_1.length, limits.follow_up_1),
+      follow_up_2: Math.min(queues.follow_up_2.length, limits.follow_up_2),
+      follow_up_3: Math.min(queues.follow_up_3.length, limits.follow_up_3),
     } satisfies Record<FollowUpType, number>
 
     const totalRequested = allocation.follow_up_1 + allocation.follow_up_2 + allocation.follow_up_3

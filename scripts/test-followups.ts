@@ -311,9 +311,9 @@ async function main() {
   // Each queue gets min(eligible, queueLimit) independently — no competition.
   // One final global cap applied afterwards via budget trimming (fu1 → fu2 → fu3).
   const allocation: Record<FollowUpType, number> = {
-    follow_up_1: Math.min(queues.follow_up_1.length, remaining.follow_up_1),
-    follow_up_2: Math.min(queues.follow_up_2.length, remaining.follow_up_2),
-    follow_up_3: Math.min(queues.follow_up_3.length, remaining.follow_up_3),
+    follow_up_1: Math.min(queues.follow_up_1.length, limits.follow_up_1),
+    follow_up_2: Math.min(queues.follow_up_2.length, limits.follow_up_2),
+    follow_up_3: Math.min(queues.follow_up_3.length, limits.follow_up_3),
   }
 
   const totalRequested = allocation.follow_up_1 + allocation.follow_up_2 + allocation.follow_up_3
