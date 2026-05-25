@@ -11,6 +11,7 @@ interface LeadEmail {
   type: string
   subject: string
   sent_at: string | null
+  status: string
 }
 
 interface ContactedLead {
@@ -249,10 +250,18 @@ export async function runFollowUpAgent(): Promise<void> {
       sent_before_run:         sentBeforeRun,
     })
 
-    const { data: contactedLeads } = await supabase
+    logger.info('followup', '[FU_ELIGIBILITY] querying contacted leads')
+    const { data: contactedLeads, error: contactedLeadsErr } = await supabase
       .from('leads')
-      .select('*, emails(id, type, subject, sent_at)')
+      .select('*, emails(id, type, subject, sent_at, status)')
       .eq('status', 'contacted')
+
+    if (contactedLeadsErr) {
+      logger.error('followup', '[FU_ELIGIBILITY] contacted leads query failed', { error: contactedLeadsErr.message })
+      throw contactedLeadsErr
+    }
+
+    logger.info('followup', `[FU_ELIGIBILITY] contacted leads fetched: ${contactedLeads?.length ?? 0}`)
 
     if (!contactedLeads?.length) {
       logger.info('followup', 'No contacted leads to follow up')
@@ -267,18 +276,36 @@ export async function runFollowUpAgent(): Promise<void> {
     }
 
     let markedDead = 0
+    let skipNoEmail         = 0
+    let skipNoInitialEmail  = 0
+    let skipNotYetDue       = 0
+    let skipAllSent         = 0
 
     for (const lead of contactedLeads as ContactedLead[]) {
-      if (!lead.email) continue
+      if (!lead.email) {
+        skipNoEmail++
+        continue
+      }
 
       const emailsList = lead.emails ?? []
-      const initialEmail = emailsList.find((email) => email.type === 'initial_pitch' && email.sent_at)
-      if (!initialEmail?.sent_at) continue
+      const initialEmail = emailsList.find((email) => email.type === 'initial_pitch' && email.status === 'sent' && email.sent_at)
+      if (!initialEmail?.sent_at) {
+        skipNoInitialEmail++
+        logger.info('followup', '[FU_SKIP] no sent initial_pitch email', {
+          lead_id:   lead.id,
+          lead_name: lead.business_name,
+          emails:    emailsList.map((e) => ({ type: e.type, status: e.status, sent_at: e.sent_at ?? null })),
+        })
+        continue
+      }
 
       const daysSince = Math.floor((Date.now() - new Date(initialEmail.sent_at).getTime()) / 86_400_000)
-      const hasFollowUp1 = emailsList.some((email) => email.type === 'follow_up_1')
-      const hasFollowUp2 = emailsList.some((email) => email.type === 'follow_up_2')
-      const followUp3Email = emailsList.find((email) => email.type === 'follow_up_3' && email.sent_at)
+
+      // FU sent = email row with status='sent' AND sent_at set.
+      // A failed/cancelled row (status='failed', sent_at=null) must NOT count as sent.
+      const hasFollowUp1 = emailsList.some((email) => email.type === 'follow_up_1' && email.status === 'sent' && email.sent_at)
+      const hasFollowUp2 = emailsList.some((email) => email.type === 'follow_up_2' && email.status === 'sent' && email.sent_at)
+      const followUp3Email = emailsList.find((email) => email.type === 'follow_up_3' && email.status === 'sent' && email.sent_at)
       const hasFollowUp3 = !!followUp3Email
 
       // When reactivation is enabled, do not mark dead here — the reactivation agent handles
@@ -303,8 +330,38 @@ export async function runFollowUpAgent(): Promise<void> {
         queues.follow_up_2.push(candidate)
       } else if (daysSince >= followUp1Days && !hasFollowUp1) {
         queues.follow_up_1.push(candidate)
+      } else {
+        // Lead is not yet due for its next follow-up, or all FUs already sent.
+        if (hasFollowUp3 || (hasFollowUp2 && daysSince < followUp3Days)) {
+          skipAllSent++
+        } else {
+          skipNotYetDue++
+          logger.info('followup', '[FU_SKIP] not yet due', {
+            lead_id:      lead.id,
+            lead_name:    lead.business_name,
+            days_since:   daysSince,
+            fu1_days:     followUp1Days,
+            fu2_days:     followUp2Days,
+            fu3_days:     followUp3Days,
+            has_fu1:      hasFollowUp1,
+            has_fu2:      hasFollowUp2,
+            has_fu3:      hasFollowUp3,
+          })
+        }
       }
     }
+
+    logger.info('followup', '[FU_ELIGIBILITY] queue build complete', {
+      contacted_leads_total: contactedLeads.length,
+      fu1_eligible:   queues.follow_up_1.length,
+      fu2_eligible:   queues.follow_up_2.length,
+      fu3_eligible:   queues.follow_up_3.length,
+      marked_dead:    markedDead,
+      skip_no_email:        skipNoEmail,
+      skip_no_initial:      skipNoInitialEmail,
+      skip_not_yet_due:     skipNotYetDue,
+      skip_all_sent:        skipAllSent,
+    })
 
     logger.info('followup', '[FOLLOWUP_QUEUE]', {
       pending_follow_up_1: queues.follow_up_1.length,
@@ -331,11 +388,14 @@ export async function runFollowUpAgent(): Promise<void> {
       const typeRemaining = Math.min(remaining[type], globalRemaining - globalSentThisRun)
       const queue = queues[type].slice(0, typeRemaining)
 
-      logger.info('followup', `[PIPELINE_STAGE] ${fuLabel} starting`, {
-        queue_size:       queues[type].length,
-        type_limit:       limits[type],
-        type_remaining:   typeRemaining,
-        global_remaining: globalRemaining - globalSentThisRun,
+      logger.info('followup', `[PIPELINE_STAGE] ${fuLabel} starting`)
+      logger.info('followup', `[${fuLabel}_DEBUG] fetching eligible ${fuLabel} leads`)
+      logger.info('followup', `[${fuLabel}_DEBUG]`, {
+        totalEligible:   queues[type].length,
+        limit:           limits[type],
+        typeRemaining,
+        remainingGlobal: globalRemaining - globalSentThisRun,
+        totalSentToday:  sentBeforeRun[type],
       })
 
       for (const candidate of queue) {
@@ -347,11 +407,12 @@ export async function runFollowUpAgent(): Promise<void> {
         }
       }
 
-      logger.info('followup', `[PIPELINE_STAGE] ${fuLabel} complete`, {
+      logger.info('followup', `[${fuLabel}_DEBUG] ${fuLabel} done`, {
         sent:               sent[type],
         global_sent_so_far: globalSentThisRun,
         global_remaining:   globalRemaining - globalSentThisRun,
       })
+      logger.info('followup', `[PIPELINE_STAGE] ${fuLabel} complete`, { sent: sent[type] })
     }
 
     logger.info('followup', '[FOLLOWUP_SENT]', {
