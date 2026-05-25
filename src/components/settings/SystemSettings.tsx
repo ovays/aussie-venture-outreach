@@ -266,24 +266,24 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
             </div>
           </div>
 
-          {/* Email limit */}
+          {/* Initial outreach limit */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
             <div>
-              <p className="text-sm text-white">Daily Email Limit</p>
-              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Max emails to send per day</p>
+              <p className="text-sm text-white">Daily Initial Outreach Limit</p>
+              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Max new cold outreach emails per day (does not affect follow-ups)</p>
             </div>
             <div className="flex items-center gap-2">
               <input
                 type="number"
-                value={getNum('daily_email_limit')}
-                onChange={(e) => setSettings((p) => ({ ...p, daily_email_limit: e.target.value }))}
-                onBlur={(e) => updateSetting('daily_email_limit', e.target.value)}
-                min={1}
+                value={getNum('daily_initial_outreach_limit')}
+                onChange={(e) => setSettings((p) => ({ ...p, daily_initial_outreach_limit: e.target.value }))}
+                onBlur={(e) => updateSetting('daily_initial_outreach_limit', e.target.value)}
+                min={0}
                 max={500}
                 className="w-full sm:w-24 px-3 py-2 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
                 style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
               />
-              <SaveIndicator k="daily_email_limit" />
+              <SaveIndicator k="daily_initial_outreach_limit" />
             </div>
           </div>
 

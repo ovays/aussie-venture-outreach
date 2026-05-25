@@ -107,7 +107,7 @@ Database-backed settings that affect discovery and quotas:
 | Setting | Purpose |
 |---------|---------|
 | `primary_search_api` | Selects `google_maps` or `outscraper` as the preferred provider. |
-| `daily_email_limit` | Caps new outreach emails prepared/sent per day. |
+| `daily_initial_outreach_limit` | Caps new cold outreach emails sent per day. Does not affect follow-up queues. |
 | `daily_dm_limit` | Caps DM queue additions per day. |
 | `daily_lead_limit` | Caps total lead volume for a pipeline run/day. |
 | `daily_outscraper_limit` | Guards estimated Outscraper spend. |

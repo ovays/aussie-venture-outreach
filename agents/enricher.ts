@@ -149,24 +149,23 @@ export async function runEnricherAgent(): Promise<number> {
   }
 
   // Read quota targets
-  const [emailLimitRow, dmLimitRow, leadLimitRow] = await Promise.all([
-    supabase.from('settings').select('value').eq('key', 'daily_email_limit').single(),
+  const [dmLimitRow, leadLimitRow] = await Promise.all([
     supabase.from('settings').select('value').eq('key', 'daily_dm_limit').single(),
     supabase.from('settings').select('value').eq('key', 'daily_lead_limit').single(),
   ])
 
-  const DAILY_EMAIL_LIMIT = parseInt(emailLimitRow.data?.value ?? '30', 10)
   const DAILY_DM_LIMIT = parseInt(dmLimitRow.data?.value ?? '10', 10)
   const TOTAL_TARGET = parseInt(leadLimitRow.data?.value ?? '50', 10)
-  const EMAIL_TARGET = Math.min(DAILY_EMAIL_LIMIT, TOTAL_TARGET)
-  const INSTA_TARGET = Math.min(DAILY_DM_LIMIT, Math.max(0, TOTAL_TARGET - EMAIL_TARGET))
+  // DM gets its capped slice; email queue gets the remainder.
+  // daily_initial_outreach_limit does not constrain discovery — it only gates the sender.
+  const INSTA_TARGET = Math.min(DAILY_DM_LIMIT, TOTAL_TARGET)
+  const EMAIL_QUEUE_TARGET = TOTAL_TARGET - INSTA_TARGET
 
-  console.log(`[enricher] Targets — email: ${EMAIL_TARGET}, instagram: ${INSTA_TARGET}, total: ${TOTAL_TARGET}`)
-  console.log('[NEW_OUTREACH_ALLOCATION]', {
-    daily_lead_limit: TOTAL_TARGET,
-    email_allocation: EMAIL_TARGET,
-    dm_allocation: INSTA_TARGET,
-    configured_daily_email_limit: DAILY_EMAIL_LIMIT,
+  console.log(`[enricher] Targets — email queue: ${EMAIL_QUEUE_TARGET}, instagram: ${INSTA_TARGET}, total: ${TOTAL_TARGET}`)
+  console.log('[LEAD_DISCOVERY_ALLOCATION]', {
+    lead_discovery_target:     TOTAL_TARGET,
+    email_queue_target:        EMAIL_QUEUE_TARGET,
+    dm_target:                 INSTA_TARGET,
     configured_daily_dm_limit: DAILY_DM_LIMIT,
   })
 
@@ -190,7 +189,7 @@ export async function runEnricherAgent(): Promise<number> {
   const overflowIds: string[] = []
 
   for (const lead of pool) {
-    const emailFull = emailLeadIds.length >= EMAIL_TARGET
+    const emailFull = emailLeadIds.length >= EMAIL_QUEUE_TARGET
     const instaFull = instaLeadIds.length >= INSTA_TARGET
     const totalFull = emailLeadIds.length + instaLeadIds.length >= TOTAL_TARGET
 
@@ -271,7 +270,7 @@ export async function runEnricherAgent(): Promise<number> {
   }
 
   const total = emailLeadIds.length + instaLeadIds.length
-  console.log(`[enricher] Done — Email leads: ${emailLeadIds.length}/${EMAIL_TARGET}, Instagram leads: ${instaLeadIds.length}/${INSTA_TARGET}`)
+  console.log(`[enricher] Done — Email leads: ${emailLeadIds.length}/${EMAIL_QUEUE_TARGET}, Instagram leads: ${instaLeadIds.length}/${INSTA_TARGET}`)
 
   await supabase.from('activity_log').insert({
     event_type: 'enricher_complete',
@@ -280,7 +279,7 @@ export async function runEnricherAgent(): Promise<number> {
       email_leads: emailLeadIds.length,
       insta_leads: instaLeadIds.length,
       overflow_deleted: overflowIds.length,
-      email_target: EMAIL_TARGET,
+      email_target: EMAIL_QUEUE_TARGET,
       insta_target: INSTA_TARGET,
     },
   })

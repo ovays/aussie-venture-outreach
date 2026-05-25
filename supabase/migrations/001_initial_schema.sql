@@ -126,7 +126,7 @@ CREATE TABLE settings (
 -- Default settings
 INSERT INTO settings (key, value, description) VALUES
   ('daily_lead_limit', '50', 'Maximum new leads to find per day'),
-  ('daily_email_limit', '50', 'Maximum emails to send per day'),
+  ('daily_initial_outreach_limit', '50', 'Maximum initial cold outreach emails to send per day (does not affect follow-up queues)'),
   ('follow_up_1_days', '7', 'Days before sending first follow-up'),
   ('follow_up_2_days', '14', 'Days before sending second follow-up'),
   ('dead_lead_days', '21', 'Days before marking lead as dead'),

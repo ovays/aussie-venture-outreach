@@ -15,9 +15,9 @@ export const SETTINGS_DEFAULTS = {
     value: '10',
     description: 'Maximum DMs to queue per day (Instagram + Facebook)',
   },
-  daily_email_limit: {
+  daily_initial_outreach_limit: {
     value: '50',
-    description: 'Maximum emails to send per day',
+    description: 'Maximum initial cold outreach emails to send per day (does not affect follow-up queues)',
   },
   daily_followup1_limit: {
     value: '20',

@@ -170,7 +170,7 @@ Database settings:
 |---------|---------|
 | `primary_search_api` | Selects `google_maps` or `outscraper`. |
 | `daily_lead_limit` | Caps total lead throughput. |
-| `daily_email_limit` | Caps email outreach volume. |
+| `daily_initial_outreach_limit` | Caps new cold outreach emails per day. Does not affect follow-up queues. |
 | `daily_dm_limit` | Caps DM queue volume. |
 | `daily_outscraper_limit` | Guards estimated Outscraper spend. |
 | `google_maps_monthly_limit` | Guards Google Maps spend. |

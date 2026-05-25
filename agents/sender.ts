@@ -23,11 +23,10 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
   const { data: limitSetting } = await supabase
     .from('settings')
     .select('value')
-    .eq('key', 'daily_email_limit')
+    .eq('key', 'daily_initial_outreach_limit')
     .single()
 
   const dailyLimit = parseInt(limitSetting?.value ?? '50', 10)
-  logger.info('sender', `daily_email_limit = ${dailyLimit}`)
 
   const today = getAnalyticsDayRange()
   const { count: sentToday } = await supabase
@@ -39,11 +38,11 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .lt('sent_at', today.end)
 
   const remainingToday = Math.max(0, dailyLimit - (sentToday ?? 0))
-  logger.info('sender', '[OUTREACH_SENT]', {
-    new_outreach_sent_today: sentToday ?? 0,
-    daily_email_limit: dailyLimit,
-    remaining_new_outreach_email_capacity: remainingToday,
-    today_range: today,
+  logger.info('sender', `INITIAL_OUTREACH_TARGET = ${remainingToday}`, {
+    daily_initial_outreach_limit: dailyLimit,
+    sent_today:                   sentToday ?? 0,
+    remaining:                    remainingToday,
+    today_range:                  today,
   })
 
 
@@ -131,12 +130,24 @@ console.log("FILTERED PENDING", pendingEmails)
     return { sent: 0, failed: 0 }
   }
 
+  if (remainingToday === 0) {
+    logger.info('sender', '[PIPELINE_STAGE] Sender exiting', {
+      reason: 'daily_initial_outreach_limit_reached',
+      daily_initial_outreach_limit: dailyLimit,
+      sent_today: sentToday ?? 0,
+    })
+    return { sent: 0, failed: 0 }
+  }
+
+  // Apply hard cap: never send more initial outreach than remaining quota allows.
+  const toSend = pendingEmails.slice(0, remainingToday)
+
   let sent = 0
   let failed = 0
-  const total = pendingEmails.length
+  const total = toSend.length
 
-  for (let i = 0; i < pendingEmails.length; i++) {
-    const emailRecord = pendingEmails[i]
+  for (let i = 0; i < toSend.length; i++) {
+    const emailRecord = toSend[i]
     const lead = emailRecord.leads as { id: string; email: string | null; business_name: string; status: string } | null
 
     if (!lead?.email) {
@@ -237,7 +248,7 @@ const result = await sendEmail({
   await supabase.from('activity_log').insert({
     event_type: 'sender_complete',
     description: `Sender agent completed - ${sent} sent, ${failed} failed`,
-    metadata: { sent, failed, daily_email_limit: dailyLimit, initial_pitch_sent_before_run: sentToday ?? 0 },
+    metadata: { sent, failed, daily_initial_outreach_limit: dailyLimit, initial_pitch_sent_before_run: sentToday ?? 0 },
   })
 
   // Haiku writing (~$0.001/email) + Resend API (free tier / ~$0.0001/email)

@@ -16,7 +16,7 @@ const MAILTO_REGEX = /href=["']mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z
 const INSTAGRAM_REGEX = /instagram\.com\/([a-zA-Z0-9_.]{3,30})/i
 const INSTAGRAM_SKIP = new Set(['p', 'reel', 'reels', 'stories', 'explore', 'accounts', 'share', 'sharer'])
 
-// Phase 1 — first 4 categories are capped at EMAIL_TARGET/4 each to ensure variety
+// Phase 1 — first 4 categories are capped at EMAIL_QUEUE_TARGET/4 each to ensure variety across categories
 // Remaining categories fill whatever quota is left
 // {city} is replaced at runtime with the active suburb being searched
 export type FinderEmailCategory = {
@@ -1171,26 +1171,25 @@ export async function runFinderAgent(): Promise<number> {
     return 0
   }
 
-  const [emailLimitRow, dmLimitRow, totalLimitRow, dailyOutscraperLimitRow] = await Promise.all([
-    supabase.from('settings').select('value').eq('key', 'daily_email_limit').single(),
+  const [dmLimitRow, totalLimitRow, dailyOutscraperLimitRow] = await Promise.all([
     supabase.from('settings').select('value').eq('key', 'daily_dm_limit').single(),
     supabase.from('settings').select('value').eq('key', 'daily_lead_limit').single(),
     supabase.from('settings').select('value').eq('key', 'daily_outscraper_limit').single(),
   ])
 
-  const DAILY_EMAIL_LIMIT      = parseInt(emailLimitRow.data?.value ?? '30', 10)
   const DAILY_DM_LIMIT         = parseInt(dmLimitRow.data?.value   ?? '10', 10)
   const TOTAL_TARGET           = parseInt(totalLimitRow.data?.value ?? '40', 10)
-  const EMAIL_TARGET           = Math.min(DAILY_EMAIL_LIMIT, TOTAL_TARGET)
-  const DM_TARGET              = Math.min(DAILY_DM_LIMIT, Math.max(0, TOTAL_TARGET - EMAIL_TARGET))
+  // DM gets its capped allocation; email queue gets whatever remains from the lead budget.
+  // Neither is constrained by daily_initial_outreach_limit — that limit only gates the sender.
+  const DM_TARGET              = Math.min(DAILY_DM_LIMIT, TOTAL_TARGET)
+  const EMAIL_QUEUE_TARGET     = TOTAL_TARGET - DM_TARGET
   const DAILY_OUTSCRAPER_LIMIT = parseFloat(dailyOutscraperLimitRow.data?.value ?? '1.00')
 
-  logger.info('finder', 'Targets', { emailTarget: EMAIL_TARGET, dmTarget: DM_TARGET, totalTarget: TOTAL_TARGET })
-  logger.info('finder', '[NEW_OUTREACH_ALLOCATION]', {
-    daily_lead_limit: TOTAL_TARGET,
-    email_allocation: EMAIL_TARGET,
-    dm_allocation: DM_TARGET,
-    configured_daily_email_limit: DAILY_EMAIL_LIMIT,
+  logger.info('finder', 'Targets', { leadDiscoveryTarget: TOTAL_TARGET, emailQueueTarget: EMAIL_QUEUE_TARGET, dmTarget: DM_TARGET })
+  logger.info('finder', '[LEAD_DISCOVERY_ALLOCATION]', {
+    lead_discovery_target:     TOTAL_TARGET,
+    email_queue_target:        EMAIL_QUEUE_TARGET,
+    dm_target:                 DM_TARGET,
     configured_daily_dm_limit: DAILY_DM_LIMIT,
   })
   logger.info('finder', `Daily cost limit: $${DAILY_OUTSCRAPER_LIMIT}`)
@@ -1214,11 +1213,12 @@ export async function runFinderAgent(): Promise<number> {
   })
 
   const activeCategoryCount = finderCategories.length > 0 ? finderCategories.length : 1
-  const cappedLimit         = EMAIL_TARGET > 0 ? Math.max(1, Math.ceil(EMAIL_TARGET / activeCategoryCount)) : 0
+  const cappedLimit         = EMAIL_QUEUE_TARGET > 0 ? Math.max(1, Math.ceil(EMAIL_QUEUE_TARGET / activeCategoryCount)) : 0
 
   logger.info('finder', `ACTIVE_CATEGORY_COUNT = ${activeCategoryCount}`)
   logger.info('finder', `CATEGORY_CAP_VALUE = ${cappedLimit}`)
-  logger.info('finder', `GLOBAL_EMAIL_TARGET = ${EMAIL_TARGET}`)
+  logger.info('finder', `LEAD_DISCOVERY_TARGET = ${TOTAL_TARGET}`)
+  logger.info('finder', `EMAIL_QUEUE_TARGET = ${EMAIL_QUEUE_TARGET}`)
 
   // FIX 1: read active_cities from settings — source of truth for which cities to search
   const { data: activeCitySetting } = await supabase
@@ -1363,31 +1363,31 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
   let safetyLimitHit      = false
   let safetyLimitReason   = ''
 
-  logger.info('finder', `DAILY_EMAIL_TARGET = ${EMAIL_TARGET}`, {
-    email_target:      EMAIL_TARGET,
-    daily_email_limit: DAILY_EMAIL_LIMIT,
-    total_target:      TOTAL_TARGET,
+  logger.info('finder', `LEAD_DISCOVERY_TARGET = ${TOTAL_TARGET}`, {
+    lead_discovery_target: TOTAL_TARGET,
+    email_queue_target:    EMAIL_QUEUE_TARGET,
+    dm_target:             DM_TARGET,
   })
   logger.info('finder', `PER_CATEGORY_CAP = ${cappedLimit}`, {
     per_category_cap:    cappedLimit,
-    formula:             `ceil(${EMAIL_TARGET} / ${activeCategoryCount}) = ${cappedLimit}`,
+    formula:             `ceil(${EMAIL_QUEUE_TARGET} / ${activeCategoryCount}) = ${cappedLimit}`,
     capped_categories:   finderCategories.filter((c) => c.capped).length,
     uncapped_categories: finderCategories.filter((c) => !c.capped).length,
   })
-  logger.info('finder', `CURRENT_SUCCESSFUL_LEADS = 0 / ${EMAIL_TARGET}`, {
-    email_count:  0,
-    email_target: EMAIL_TARGET,
-    remaining:    EMAIL_TARGET,
+  logger.info('finder', `CURRENT_SUCCESSFUL_LEADS = 0 / ${EMAIL_QUEUE_TARGET}`, {
+    email_count:        0,
+    email_queue_target: EMAIL_QUEUE_TARGET,
+    remaining:          EMAIL_QUEUE_TARGET,
   })
 
   logger.info('finder', 'Phase 1: Email Leads')
 
   for (const category of finderCategories) {
-    if (emailCount >= EMAIL_TARGET) break
+    if (emailCount >= EMAIL_QUEUE_TARGET) break
     if (emailCount + dmCount >= TOTAL_TARGET) break
     if (costGuardHit) break
 
-    const categoryLimit = category.capped ? cappedLimit : EMAIL_TARGET - emailCount
+    const categoryLimit = category.capped ? cappedLimit : EMAIL_QUEUE_TARGET - emailCount
     let categoryEmailCount = 0
     const shouldApplyHalalQualification = isHalalFilterCategory(category.name)
     logger.info('finder', `Category: ${category.name}`, { limit: categoryLimit })
@@ -1397,7 +1397,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
 
     keywordSuburbLoop:
     for (const keyword of category.queries) {
-      if (emailCount >= EMAIL_TARGET) break
+      if (emailCount >= EMAIL_QUEUE_TARGET) break
       if (emailCount + dmCount >= TOTAL_TARGET) break
       if (categoryEmailCount >= categoryLimit) break
       if (costGuardHit || safetyLimitHit) break
@@ -1425,7 +1425,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
       }
 
       for (const { suburb, city, state, priority } of rotatedLocations) {
-        if (emailCount >= EMAIL_TARGET) break keywordSuburbLoop
+        if (emailCount >= EMAIL_QUEUE_TARGET) break keywordSuburbLoop
         if (emailCount + dmCount >= TOTAL_TARGET) break keywordSuburbLoop
         if (categoryEmailCount >= categoryLimit) break keywordSuburbLoop
         if (costGuardHit || safetyLimitHit) break keywordSuburbLoop
@@ -1483,7 +1483,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
         let skip = 0
         let exhaustedThisQuery = false
         while (true) {
-          if (emailCount >= EMAIL_TARGET) break
+          if (emailCount >= EMAIL_QUEUE_TARGET) break
           if (emailCount + dmCount >= TOTAL_TARGET) break
           if (categoryEmailCount >= categoryLimit) break
           if (costGuardHit) break
@@ -1554,7 +1554,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           let newLeadsThisBatch = 0
 
           for (const result of results) {
-            if (emailCount >= EMAIL_TARGET) break
+            if (emailCount >= EMAIL_QUEUE_TARGET) break
             if (emailCount + dmCount >= TOTAL_TARGET) break
             if (categoryEmailCount >= categoryLimit) break
             if (Date.now() - runStartTime >= MAX_RUNTIME_MS) {
@@ -1873,21 +1873,21 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               comboNewLeads++
               logger.info('finder', `Email lead: ${name}`, { email: foundEmail, source: emailSource })
 
-              logger.info('finder', `SUCCESSFUL_LEAD_PROGRESS = ${emailCount}/${EMAIL_TARGET} (category ${categoryEmailCount}/${categoryLimit})`, {
+              logger.info('finder', `SUCCESSFUL_LEAD_PROGRESS = ${emailCount}/${EMAIL_QUEUE_TARGET} (category ${categoryEmailCount}/${categoryLimit})`, {
                 category:          category.name,
                 category_progress: `${categoryEmailCount}/${categoryLimit}`,
-                global_progress:   `${emailCount}/${EMAIL_TARGET}`,
+                global_progress:   `${emailCount}/${EMAIL_QUEUE_TARGET}`,
                 category_count:    categoryEmailCount,
                 category_cap:      categoryLimit,
                 email_count:       emailCount,
-                email_target:      EMAIL_TARGET,
-                remaining:         EMAIL_TARGET - emailCount,
+                email_target:      EMAIL_QUEUE_TARGET,
+                remaining:         EMAIL_QUEUE_TARGET - emailCount,
               })
 
-              if (emailCount >= EMAIL_TARGET) {
-                logger.info('finder', 'DAILY_TARGET_REACHED', {
+              if (emailCount >= EMAIL_QUEUE_TARGET) {
+                logger.info('finder', 'LEAD_DISCOVERY_TARGET_REACHED', {
                   email_count:         emailCount,
-                  email_target:        EMAIL_TARGET,
+                  email_queue_target:  EMAIL_QUEUE_TARGET,
                   businesses_processed: businessesProcessed,
                   queries_executed:    seenQueries.size,
                   elapsed_ms:          Date.now() - runStartTime,
@@ -1917,7 +1917,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           // Log progress after every batch regardless of yield
           logger.info('finder', 'DAILY_TARGET_PROGRESS', {
             email_count: emailCount,
-            email_target: EMAIL_TARGET,
+            email_target: EMAIL_QUEUE_TARGET,
             new_leads_this_batch: newLeadsThisBatch,
             businesses_processed: businessesProcessed,
             queries_executed: seenQueries.size,
@@ -1925,13 +1925,13 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           })
 
           if (categoryEmailCount >= categoryLimit) {
-            logger.info('finder', `CATEGORY_CAP_REACHED = ${category.name} (${categoryEmailCount}/${categoryLimit}) global ${emailCount}/${EMAIL_TARGET}`, {
+            logger.info('finder', `CATEGORY_CAP_REACHED = ${category.name} (${categoryEmailCount}/${categoryLimit}) global ${emailCount}/${EMAIL_QUEUE_TARGET}`, {
               category:          category.name,
               category_cap:      categoryLimit,
               category_count:    categoryEmailCount,
-              global_progress:   `${emailCount}/${EMAIL_TARGET}`,
+              global_progress:   `${emailCount}/${EMAIL_QUEUE_TARGET}`,
               email_count:       emailCount,
-              email_target:      EMAIL_TARGET,
+              email_target:      EMAIL_QUEUE_TARGET,
               capped:            category.capped,
             })
             break
@@ -1954,8 +1954,8 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
             logger.info('finder', 'SEARCH_CONTINUING_FOR_TARGET', {
               query,
               skip,
-              global_progress:      `${emailCount}/${EMAIL_TARGET}`,
-              remaining_needed:     EMAIL_TARGET - emailCount,
+              global_progress:      `${emailCount}/${EMAIL_QUEUE_TARGET}`,
+              remaining_needed:     EMAIL_QUEUE_TARGET - emailCount,
               category_progress:    `${categoryEmailCount}/${categoryLimit}`,
               queries_executed:     seenQueries.size,
               queries_remaining:    Math.max(0, MAX_QUERIES_EXECUTED - seenQueries.size),
@@ -2024,16 +2024,16 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
   })
 
   const finderStopReason =
-    emailCount >= EMAIL_TARGET ? 'DAILY_TARGET_REACHED'
+    emailCount >= EMAIL_QUEUE_TARGET ? 'LEAD_DISCOVERY_TARGET_REACHED'
     : costGuardHit             ? 'COST_GUARD_HIT'
     : safetyLimitHit           ? 'SAFETY_LIMIT_REACHED'
     :                            'ALL_QUERIES_EXHAUSTED'
 
-  logger.info('finder', `FINDER_STOP_REASON = ${finderStopReason} (${emailCount}/${EMAIL_TARGET})`, {
+  logger.info('finder', `FINDER_STOP_REASON = ${finderStopReason} (${emailCount}/${EMAIL_QUEUE_TARGET})`, {
     reason:               finderStopReason,
     email_count:          emailCount,
-    email_target:         EMAIL_TARGET,
-    global_progress:      `${emailCount}/${EMAIL_TARGET}`,
+    email_target:         EMAIL_QUEUE_TARGET,
+    global_progress:      `${emailCount}/${EMAIL_QUEUE_TARGET}`,
     cost_guard_hit:       costGuardHit,
     safety_limit_hit:     safetyLimitHit,
     safety_limit_reason:  safetyLimitReason || null,
@@ -2042,12 +2042,12 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
     elapsed_ms:           Date.now() - runStartTime,
   })
 
-  logger.info('finder', 'Phase 1 complete', { emailCount, target: EMAIL_TARGET })
+  logger.info('finder', 'Phase 1 complete', { emailCount, target: EMAIL_QUEUE_TARGET })
 
-  if (emailCount < EMAIL_TARGET) {
+  if (emailCount < EMAIL_QUEUE_TARGET) {
     logger.info('finder', 'SEARCH_EXHAUSTED_BEFORE_TARGET', {
       email_count: emailCount,
-      email_target: EMAIL_TARGET,
+      email_target: EMAIL_QUEUE_TARGET,
       businesses_processed: businessesProcessed,
       queries_executed: seenQueries.size,
       elapsed_ms: Date.now() - runStartTime,
@@ -2154,7 +2154,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
       email_leads: emailCount,
       dm_leads: dmCount,
       total_leads: leadsKept,
-      email_target: EMAIL_TARGET,
+      email_target: EMAIL_QUEUE_TARGET,
       dm_target: DM_TARGET,
       total_target: TOTAL_TARGET,
     },
@@ -2177,7 +2177,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
     metadata: {
       email_leads:        emailCount,
       dm_leads:           dmCount,
-      email_target:       EMAIL_TARGET,
+      email_target:       EMAIL_QUEUE_TARGET,
       dm_target:          DM_TARGET,
       total_target:       TOTAL_TARGET,
       outscraper_calls:   callCount,
@@ -2209,7 +2209,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
   const combinationsProcessed = seenQueries.size
 
   const pipelineExitReason =
-    emailCount >= EMAIL_TARGET                                          ? 'EMAIL_TARGET_REACHED'
+    emailCount >= EMAIL_QUEUE_TARGET                                          ? 'EMAIL_QUEUE_TARGET_REACHED'
     : costGuardHit                                                      ? 'COST_GUARD_HIT'
     : safetyLimitHit && safetyLimitReason.includes('max_runtime')      ? 'MAX_RUNTIME_REACHED'
     : safetyLimitHit && safetyLimitReason.includes('max_queries')      ? 'MAX_QUERIES_REACHED'
@@ -2323,7 +2323,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
   logger.info('finder', '[PIPELINE_FUNNEL_METRICS]', {
     run_id: runId,
     run_at: new Date().toISOString(),
-    targets: { email: EMAIL_TARGET, dm: DM_TARGET, total: TOTAL_TARGET },
+    targets: { email: EMAIL_QUEUE_TARGET, dm: DM_TARGET, total: TOTAL_TARGET },
     api: {
       outscraper_calls:           callCount,
       total_results_fetched:      totalResultsFetched,
@@ -2376,7 +2376,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
   const { error: metricsInsertError } = await supabase.from('discovery_run_metrics').insert({
     run_id:                     runId,
     run_at:                     new Date().toISOString(),
-    email_target:               EMAIL_TARGET,
+    email_target:               EMAIL_QUEUE_TARGET,
     dm_target:                  DM_TARGET,
     total_target:               TOTAL_TARGET,
     outscraper_calls:           callCount,
