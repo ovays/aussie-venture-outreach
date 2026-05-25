@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react'
 import type { LifecycleLead } from '@/types/lifecycle'
+import { useLeadDrawer } from '@/lib/lead-drawer-context'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -13,7 +14,7 @@ interface Summary {
   dead_today: number
 }
 
-type FilterKey = 'all' | 'fu1' | 'fu2' | 'reactivation' | 'awaiting_dead' | 'dead'
+type FilterKey = 'all' | 'fu1_due' | 'fu2_due' | 'fu1' | 'fu2' | 'fu_due' | 'overdue' | 'reactivation' | 'awaiting_dead' | 'dead'
 type SortKey = 'next_action_date' | 'days_since_initial' | 'stage'
 type SortDir = 'asc' | 'desc'
 
@@ -86,31 +87,118 @@ function resolveDate(isoDate: string | null, isOverdue: boolean): {
 }
 
 // ── Summary cards ──────────────────────────────────────────────────────────────
+// Each card shows an ACTIONABLE count and clicks into the filter that shows
+// exactly those leads. subtext clarifies what the number represents.
 
 const CARDS: {
   key: string
   label: string
+  subtext: string
   accent: string
   filterKey: FilterKey
 }[] = [
-  { key: 'fu1_due',          label: 'FU1 Due',         accent: '#38bdf8', filterKey: 'fu1'          },
-  { key: 'fu2_due',          label: 'FU2 Due',          accent: '#a78bfa', filterKey: 'fu2'          },
-  { key: 'reactivation_due', label: 'Reactivation Due', accent: '#fb923c', filterKey: 'reactivation' },
-  { key: 'awaiting_dead',    label: 'Awaiting Dead',    accent: '#f59e0b', filterKey: 'awaiting_dead' },
-  { key: 'dead_today',       label: 'Dead Today',       accent: '#f87171', filterKey: 'dead'         },
+  {
+    key: 'fu1_due', label: 'FU1 Due', subtext: 'overdue for first follow-up',
+    accent: '#38bdf8', filterKey: 'fu1_due',
+  },
+  {
+    key: 'fu2_due', label: 'FU2 Due', subtext: 'overdue for second follow-up',
+    accent: '#a78bfa', filterKey: 'fu2_due',
+  },
+  {
+    key: 'reactivation_due', label: 'Reactivation Due', subtext: 'ready for DM outreach',
+    accent: '#fb923c', filterKey: 'reactivation',
+  },
+  {
+    key: 'awaiting_dead', label: 'Awaiting Dead', subtext: 'post-reactivation timeout',
+    accent: '#f59e0b', filterKey: 'awaiting_dead',
+  },
+  {
+    key: 'dead_today', label: 'Dead Today', subtext: 'marked dead in last 24 h',
+    accent: '#f87171', filterKey: 'dead',
+  },
 ]
 
 // ── Filter pill definitions ────────────────────────────────────────────────────
+// Pill tooltip explains whether the filter shows an ACTIONABLE QUEUE or a STAGE TOTAL.
 
-type PillDef = { key: FilterKey; label: string; fn: (l: LifecycleLead) => boolean }
+type PillDef = {
+  key: FilterKey
+  label: string
+  tooltip: string
+  fn: (l: LifecycleLead) => boolean
+}
+
+const VALID_FILTER_KEYS = new Set<FilterKey>([
+  'all', 'fu1_due', 'fu2_due', 'fu1', 'fu2', 'fu_due', 'overdue', 'reactivation', 'awaiting_dead', 'dead',
+])
+
+function toFilterKey(raw: string | undefined): FilterKey {
+  if (raw && VALID_FILTER_KEYS.has(raw as FilterKey)) return raw as FilterKey
+  return 'all'
+}
 
 const PILLS: PillDef[] = [
-  { key: 'all',          label: 'All',          fn: () => true },
-  { key: 'fu1',         label: 'FU1',          fn: (l) => l.filter_key === 'fu1' },
-  { key: 'fu2',         label: 'FU2',          fn: (l) => l.filter_key === 'fu2' },
-  { key: 'reactivation', label: 'Reactivation', fn: (l) => l.filter_key === 'reactivation' && l.stage !== 'Awaiting Dead' },
-  { key: 'awaiting_dead', label: 'Awaiting Dead', fn: (l) => l.stage === 'Awaiting Dead' },
-  { key: 'dead',         label: 'Dead',         fn: (l) => l.filter_key === 'dead' },
+  {
+    key: 'all',
+    label: 'All',
+    tooltip: 'All leads in the lifecycle pipeline',
+    fn: () => true,
+  },
+  {
+    key: 'fu_due',
+    label: 'FU Due',
+    tooltip: 'Actionable queue — leads overdue for FU1 or FU2 (matches Dashboard "Follow-ups Due" card)',
+    fn: (l) => (l.filter_key === 'fu1' || l.filter_key === 'fu2') && l.is_overdue,
+  },
+  {
+    key: 'fu1_due',
+    label: 'FU1 Overdue',
+    tooltip: 'Actionable queue — leads past their FU1 send date right now',
+    fn: (l) => l.filter_key === 'fu1' && l.is_overdue,
+  },
+  {
+    key: 'fu2_due',
+    label: 'FU2 Overdue',
+    tooltip: 'Actionable queue — leads past their FU2 send date right now',
+    fn: (l) => l.filter_key === 'fu2' && l.is_overdue,
+  },
+  {
+    key: 'overdue',
+    label: 'All Overdue',
+    tooltip: 'Every lead past any action deadline — FU1, FU2, reactivation, post-reactivation',
+    fn: (l) => l.is_overdue,
+  },
+  {
+    key: 'fu1',
+    label: 'FU1 Stage',
+    tooltip: 'Stage total — all leads awaiting their first follow-up, including ones not yet due',
+    fn: (l) => l.filter_key === 'fu1',
+  },
+  {
+    key: 'fu2',
+    label: 'FU2 Stage',
+    tooltip: 'Stage total — all leads awaiting their second follow-up, including ones not yet due',
+    fn: (l) => l.filter_key === 'fu2',
+  },
+  {
+    key: 'reactivation',
+    label: 'Reactivation',
+    tooltip: 'Leads in the reactivation lifecycle — ready for DM or already reactivated',
+    fn: (l) => l.filter_key === 'reactivation' && l.stage !== 'Awaiting Dead',
+  },
+  {
+    key: 'awaiting_dead',
+    label: 'Awaiting Dead',
+    tooltip: 'Post-reactivation leads past the deadline — action needed to mark them dead',
+    fn: (l) => l.stage === 'Awaiting Dead',
+  },
+  {
+    key: 'dead',
+    label: 'Dead',
+    tooltip: 'All leads marked dead',
+    fn: (l) => l.filter_key === 'dead',
+  },
 ]
 
 // ── Sorting ────────────────────────────────────────────────────────────────────
@@ -156,11 +244,12 @@ function SortTh({
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export function LifecycleTable() {
+export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
+  const { openDrawer } = useLeadDrawer()
   const tableRef = useRef<HTMLDivElement>(null)
   const [leads, setLeads] = useState<LifecycleLead[]>([])
   const [summary, setSummary] = useState<Summary | null>(null)
-  const [filter, setFilter] = useState<FilterKey>('all')
+  const [filter, setFilter] = useState<FilterKey>(() => toFilterKey(initialFilter))
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('next_action_date')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
@@ -210,8 +299,9 @@ export function LifecycleTable() {
         className="grid grid-cols-2 md:grid-cols-5 gap-3 p-4 md:p-5 border-b"
         style={{ borderColor: '#2a2d3e' }}
       >
-        {CARDS.map(({ key, label, accent, filterKey: cardFilterKey }) => {
+        {CARDS.map(({ key, label, subtext, accent, filterKey: cardFilterKey }) => {
           const isActive = filter === cardFilterKey
+          const count = loading ? null : ((summary as unknown as Record<string, number>)?.[key] ?? 0)
           return (
             <button
               key={key}
@@ -229,13 +319,16 @@ export function LifecycleTable() {
               onMouseLeave={(e) => {
                 if (!isActive) e.currentTarget.style.background = '#13151f'
               }}
-              title={`Filter by ${label}`}
+              title={`${count ?? '…'} ${subtext} — click to filter`}
             >
-              <p className="text-xs uppercase tracking-wide font-medium mb-2" style={{ color: isActive ? accent : '#475569' }}>
+              <p className="text-xs uppercase tracking-wide font-medium mb-1.5" style={{ color: isActive ? accent : '#475569' }}>
                 {label}
               </p>
               <p className="text-2xl md:text-3xl font-bold leading-none" style={{ color: accent }}>
-                {loading ? '—' : ((summary as unknown as Record<string, number>)?.[key] ?? 0)}
+                {count ?? '—'}
+              </p>
+              <p className="text-[0.625rem] mt-1.5 leading-snug" style={{ color: '#334155' }}>
+                {subtext}
               </p>
             </button>
           )
@@ -267,13 +360,14 @@ export function LifecycleTable() {
 
         {/* Filter pills */}
         <div className="flex flex-wrap items-center gap-1.5">
-          {PILLS.map(({ key, label }) => {
+          {PILLS.map(({ key, label, tooltip }) => {
             const active = filter === key
             const count = (pillCounts[key] as number) ?? 0
             return (
               <button
                 key={key}
                 onClick={() => selectFilter(key)}
+                title={tooltip}
                 className="px-2.5 py-1 rounded-full text-xs font-medium transition-colors"
                 style={
                   active
@@ -343,8 +437,9 @@ export function LifecycleTable() {
                 return (
                   <tr
                     key={lead.id}
-                    className="border-b"
+                    className="border-b cursor-pointer"
                     style={{ borderColor: '#1a1d2a' }}
+                    onClick={() => openDrawer(lead.id)}
                     onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.018)' }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = '' }}
                   >

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/lib/rateLimit'
+import { STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
 
 const patchLeadSchema = z.object({
   id: z.string().uuid(),
@@ -16,6 +17,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(request.url)
 
   const status = searchParams.get('status')
+  const stage = searchParams.get('stage') as LeadStage | null
   const category = searchParams.get('category')
   const city = searchParams.get('city')
   const search = searchParams.get('search')
@@ -25,7 +27,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   let query = supabase.from('leads').select('*', { count: 'exact' })
 
-  if (status) query = query.eq('status', status)
+  // `stage` expands to all canonical statuses for that stage (e.g. negotiating → negotiating+interested)
+  // `status` is an exact single-status match (backward compat)
+  if (stage && STAGE_STATUSES[stage]) {
+    query = query.in('status', STAGE_STATUSES[stage] as string[])
+  } else if (status) {
+    query = query.eq('status', status)
+  }
   if (category) query = query.eq('category_name', category)
   if (city) query = query.eq('city', city)
   if (search) query = query.ilike('business_name', `%${search}%`)

@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { KanbanCard } from './KanbanCard'
-import { LeadDetailPanel } from '@/components/leads/LeadDetailPanel'
+import { useLeadDrawer } from '@/lib/lead-drawer-context'
+import { STAGE_STATUSES } from '@/lib/lead-status'
 
 interface Lead {
   id: string
@@ -29,13 +30,15 @@ interface Lead {
   halal_reasons?: string[] | null
 }
 
+// Each column uses the canonical stage statuses from lead-status.ts.
+// This ensures Kanban counts match Dashboard stage counts exactly.
 const COLUMNS = [
-  { key: 'new', label: 'New', color: '#60a5fa' },
-  { key: 'contacted', label: 'Contacted', color: '#fb923c' },
-  { key: 'replied', label: 'Replied 🔥', color: '#4ade80' },
-  { key: 'negotiating', label: 'Negotiating', color: '#2dd4bf' },
-  { key: 'closed', label: 'Closed ✅', color: '#34d399' },
-  { key: 'dead', label: 'Dead ❌', color: '#6b7280' },
+  { key: 'new',         label: 'New',          color: '#60a5fa', statuses: ['new'] as string[] },
+  { key: 'contacted',   label: 'Contacted',    color: '#fb923c', statuses: STAGE_STATUSES.contacted   as string[] },
+  { key: 'replied',     label: 'Replied 🔥',   color: '#4ade80', statuses: STAGE_STATUSES.replied     as string[] },
+  { key: 'negotiating', label: 'Negotiating',  color: '#2dd4bf', statuses: STAGE_STATUSES.negotiating as string[] },
+  { key: 'closed',      label: 'Closed ✅',    color: '#34d399', statuses: STAGE_STATUSES.closed      as string[] },
+  { key: 'dead',        label: 'Dead ❌',      color: '#6b7280', statuses: STAGE_STATUSES.dead        as string[] },
 ]
 
 interface KanbanBoardProps {
@@ -43,13 +46,8 @@ interface KanbanBoardProps {
 }
 
 export function KanbanBoard({ leads: initialLeads }: KanbanBoardProps) {
+  const { openDrawer } = useLeadDrawer()
   const [leads, setLeads] = useState(initialLeads)
-  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
-
-  function updateLead(id: string, updates: Partial<Lead>) {
-    setLeads((prev) => prev.map((l) => l.id === id ? { ...l, ...updates } : l))
-    if (selectedLead?.id === id) setSelectedLead((prev) => prev ? { ...prev, ...updates } : prev)
-  }
 
   async function moveCard(leadId: string, newStatus: string) {
     await fetch('/api/leads', {
@@ -57,13 +55,14 @@ export function KanbanBoard({ leads: initialLeads }: KanbanBoardProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: leadId, status: newStatus }),
     })
-    updateLead(leadId, { status: newStatus })
+    setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, status: newStatus } : l))
   }
 
   return (
     <div className="flex gap-3 overflow-x-auto pb-4 p-3 md:p-6 min-h-0 flex-1 snap-x snap-mandatory">
-      {COLUMNS.map(({ key, label, color }) => {
-        const columnLeads = leads.filter((l) => l.status === key)
+      {COLUMNS.map((col) => {
+        const { key, label, color } = col
+        const columnLeads = leads.filter((l) => col.statuses.includes(l.status))
 
         return (
           <div
@@ -97,7 +96,7 @@ export function KanbanBoard({ leads: initialLeads }: KanbanBoardProps) {
                   draggable
                   onDragStart={(e) => e.dataTransfer.setData('text/plain', lead.id)}
                 >
-                  <KanbanCard lead={lead} onClick={() => setSelectedLead(lead)} />
+                  <KanbanCard lead={lead} onClick={() => openDrawer(lead.id)} />
                 </div>
               ))}
               {columnLeads.length === 0 && (
@@ -107,14 +106,6 @@ export function KanbanBoard({ leads: initialLeads }: KanbanBoardProps) {
           </div>
         )
       })}
-
-      {selectedLead && (
-        <LeadDetailPanel
-          lead={selectedLead}
-          onClose={() => setSelectedLead(null)}
-          onUpdate={updateLead}
-        />
-      )}
     </div>
   )
 }

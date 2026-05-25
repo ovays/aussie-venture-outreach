@@ -12,6 +12,7 @@ import { DailyActivity } from '@/components/dashboard/DailyActivity'
 import { Card } from '@/components/ui/Card'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { getDashboardMetrics, logAnalyticsMetrics } from '@/lib/analytics'
+import { stageCount, buildStageCounts } from '@/lib/lead-status'
 import type { HotLead } from '@/components/dashboard/HotLeadsPanel'
 import { Send, MessageSquare, TrendingUp, RotateCcw, AlertTriangle, Flame, Zap } from 'lucide-react'
 
@@ -59,7 +60,16 @@ export default async function DashboardPage() {
   }
   const pipelineCounts = Object.entries(statusMap).map(([status, count]) => ({ status, count }))
 
-  const negotiationsActive = (statusMap['negotiating'] ?? 0) + (statusMap['interested'] ?? 0)
+  // Use canonical stage groupings — matches Pipeline Kanban column counts exactly
+  const stageCounts = buildStageCounts(statusMap)
+  const negotiationsActive = stageCounts.negotiating  // negotiating + interested
+
+  console.log('[STAGE_COUNTS_DASHBOARD]', {
+    source: 'leads.status (no limit)',
+    raw_status_map: statusMap,
+    stage_counts: stageCounts,
+    note: 'negotiating = negotiating+interested, closed = closed+closed_won+closed_manual',
+  })
 
   const weeklyRevenue: Array<{ week: string; revenue: number }> = []
   for (let i = 11; i >= 0; i--) {
@@ -110,12 +120,12 @@ export default async function DashboardPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-3.5">
             <ActionQueueCard
               icon={<Send size={18} strokeWidth={1.8} />}
-              count={analytics.followupStats.pending}
+              count={analytics.followupStats.fuDue}
               title="Follow-ups Due"
-              subtitle="Queued for sending"
-              detail={`FU1 ${analytics.followupStats.pendingFollowUp1} · FU2 ${analytics.followupStats.pendingFollowUp2} · FU3 ${analytics.followupStats.pendingFollowUp3}`}
+              subtitle="Overdue & ready to send"
+              detail={`FU1 ${analytics.followupStats.fu1Due} · FU2 ${analytics.followupStats.fu2Due}`}
               ctaLabel="Send Follow-ups"
-              ctaHref="/dashboard/leads"
+              ctaHref="/dashboard/lifecycle?filter=fu_due"
               accent="#8b5cf6"
               urgency="medium"
             />
@@ -126,7 +136,7 @@ export default async function DashboardPage() {
               subtitle="Awaiting your response"
               detail={`Today: ${analytics.replyStats.repliesToday} · Rate: ${analytics.replyStats.replyRate}%`}
               ctaLabel="Review Replies"
-              ctaHref="/dashboard/leads"
+              ctaHref="/dashboard/leads?status=replied"
               accent="#38bdf8"
               urgency="high"
             />
@@ -137,29 +147,29 @@ export default async function DashboardPage() {
               subtitle="In active discussion"
               detail={`Negotiating: ${statusMap['negotiating'] ?? 0} · Interested: ${statusMap['interested'] ?? 0}`}
               ctaLabel="View Deals"
-              ctaHref="/dashboard/deals"
+              ctaHref="/dashboard/leads?stage=negotiating"
               accent="#34d399"
               urgency="normal"
             />
             <ActionQueueCard
               icon={<RotateCcw size={18} strokeWidth={1.8} />}
-              count={statusMap['dead'] ?? 0}
+              count={analytics.followupStats.reactivationTotal}
               title="Reactivation Queue"
               subtitle="Cold leads to re-engage"
               detail="DM outreach recommended"
               ctaLabel="Open DM Queue"
-              ctaHref="/dashboard/dm-queue"
+              ctaHref="/dashboard/lifecycle?filter=reactivation"
               accent="#fb923c"
               urgency="medium"
             />
             <ActionQueueCard
               icon={<AlertTriangle size={18} strokeWidth={1.8} />}
-              count={analytics.followupStats.pendingFollowUp3}
+              count={analytics.followupStats.overdueTotal}
               title="Overdue Leads"
-              subtitle="Past final follow-up window"
+              subtitle="Past their due date"
               detail="Needs immediate action"
               ctaLabel="Review Overdue"
-              ctaHref="/dashboard/leads"
+              ctaHref="/dashboard/lifecycle?filter=overdue"
               accent="#f87171"
               urgency="critical"
             />
@@ -168,12 +178,12 @@ export default async function DashboardPage() {
 
         {/* ── Today's Tasks / Workflow Queue ── */}
         <WorkflowQueue
-          fu1Due={analytics.followupStats.pendingFollowUp1}
-          fu2Due={analytics.followupStats.pendingFollowUp2}
-          fu3Overdue={analytics.followupStats.pendingFollowUp3}
+          fu1Due={analytics.followupStats.fu1Due}
+          fu2Due={analytics.followupStats.fu2Due}
+          fu3Overdue={analytics.followupStats.overdueTotal}
           repliesToReview={statusMap['replied'] ?? 0}
           negotiationsActive={negotiationsActive}
-          reactivationQueue={pendingDMs?.length ?? 0}
+          reactivationQueue={analytics.followupStats.reactivationTotal}
           initialSentToday={analytics.todayEmailStats.initialSent}
           fu1SentToday={analytics.followupStats.followUp1SentToday}
           fu2SentToday={analytics.followupStats.followUp2SentToday}

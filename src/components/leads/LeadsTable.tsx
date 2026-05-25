@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Search, Star, AtSign, Mail } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { LeadDetailPanel } from './LeadDetailPanel'
+import { useLeadDrawer } from '@/lib/lead-drawer-context'
 import { formatDate } from '@/lib/utils'
 
 interface Lead {
@@ -32,11 +32,12 @@ interface Lead {
   services: string | null
 }
 
-const STATUS_OPTIONS = ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'closed', 'closed_manual', 'dead']
+const STATUS_OPTIONS = ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual', 'dead']
 const CITIES = ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide']
 
 interface LeadsTableProps {
   initialStatus?: string
+  initialStage?: string
 }
 
 function HalalConfidenceBadge({ score }: { score: number | null }) {
@@ -72,12 +73,13 @@ function HalalConfidenceBadge({ score }: { score: number | null }) {
   )
 }
 
-export function LeadsTable({ initialStatus }: LeadsTableProps) {
+export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
+  const { openDrawer, refreshKey } = useLeadDrawer()
+
   const [leads, setLeads] = useState<Lead[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
-  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
 
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState(initialStatus ?? '')
@@ -87,7 +89,12 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
     setLoading(true)
     const params = new URLSearchParams({ page: String(page) })
     if (search) params.set('search', search)
-    if (status) params.set('status', status)
+    // initialStage expands to multiple statuses server-side (e.g. stage=negotiating → negotiating+interested)
+    if (initialStage && !status) {
+      params.set('stage', initialStage)
+    } else if (status) {
+      params.set('status', status)
+    }
     if (city) params.set('city', city)
 
     const res = await fetch(`/api/leads?${params}`)
@@ -99,10 +106,10 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
 
   useEffect(() => { fetchLeads() }, [fetchLeads])
 
-  function updateLead(id: string, updates: Partial<Lead>) {
-    setLeads((prev) => prev.map((l) => l.id === id ? { ...l, ...updates } : l))
-    if (selectedLead?.id === id) setSelectedLead((prev) => prev ? { ...prev, ...updates } : prev)
-  }
+  // Re-fetch when the drawer signals a lead was updated
+  useEffect(() => {
+    if (refreshKey > 0) fetchLeads()
+  }, [refreshKey, fetchLeads])
 
   const totalPages = Math.ceil(total / 50)
 
@@ -110,7 +117,6 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
     <div className="relative">
       {/* Filters */}
       <div className="flex flex-col sm:flex-row flex-wrap gap-2 p-3 md:p-4 border-b" style={{ borderColor: '#2a2d3e' }}>
-        {/* Search — full width on mobile */}
         <div
           className="flex items-center gap-2 w-full sm:flex-1 sm:min-w-48 px-3 py-2 rounded-lg"
           style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
@@ -125,7 +131,6 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
           />
         </div>
 
-        {/* Selects + clear */}
         <div className="flex flex-wrap gap-2 items-center">
           <select
             value={status}
@@ -192,7 +197,7 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
                   key={lead.id}
                   className="border-b cursor-pointer transition-colors hover:bg-white/2"
                   style={{ borderColor: '#1e2130' }}
-                  onClick={() => setSelectedLead(lead)}
+                  onClick={() => openDrawer(lead.id)}
                 >
                   <td className="px-4 py-3">
                     <span className="font-medium text-white">{lead.business_name}</span>
@@ -227,7 +232,7 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={(e) => { e.stopPropagation(); setSelectedLead(lead) }}
+                      onClick={(e) => { e.stopPropagation(); openDrawer(lead.id) }}
                     >
                       View
                     </Button>
@@ -250,15 +255,6 @@ export function LeadsTable({ initialStatus }: LeadsTableProps) {
             Next
           </Button>
         </div>
-      )}
-
-      {/* Detail Panel */}
-      {selectedLead && (
-        <LeadDetailPanel
-          lead={selectedLead}
-          onClose={() => setSelectedLead(null)}
-          onUpdate={updateLead}
-        />
       )}
     </div>
   )

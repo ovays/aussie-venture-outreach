@@ -20,6 +20,7 @@ interface EmailAnalyticsRow {
 interface ContactedFollowupLead {
   id: string
   status: string
+  reactivation_sent_at?: string | null
   emails?: EmailAnalyticsRow[] | null
 }
 
@@ -63,6 +64,12 @@ export interface FollowupStats {
   pendingFollowUp1: number
   pendingFollowUp2: number
   pendingFollowUp3: number
+  // Lifecycle-aligned counts (match destination filter counts)
+  fu1Due: number
+  fu2Due: number
+  fuDue: number
+  reactivationTotal: number
+  overdueTotal: number
 }
 
 export interface DailyActivityRow {
@@ -83,9 +90,14 @@ export interface DashboardMetrics {
   emailsSentThisWeek: number
 }
 
+import {
+  POSITIVE_RESPONSE_STATUSES as POSITIVE_RESPONSE_STATUSES_CANONICAL,
+  PITCHED_STATUSES,
+} from './lead-status'
+
 const FOLLOW_UP_TYPES: EmailType[] = ['follow_up_1', 'follow_up_2', 'follow_up_3']
-const POSITIVE_RESPONSE_STATUSES = ['replied', 'negotiating', 'interested', 'closed_won', 'closed']
-const CONTACTED_LEAD_STATUSES = ['contacted', 'replied', 'negotiating', 'interested', 'closed_won', 'closed', 'dead']
+const POSITIVE_RESPONSE_STATUSES: string[] = [...POSITIVE_RESPONSE_STATUSES_CANONICAL]
+const CONTACTED_LEAD_STATUSES: string[] = [...PITCHED_STATUSES]
 const FOLLOWUP_PENDING_LEAD_STATUSES = ['contacted']
 
 function getZonedParts(date: Date, timeZone = ANALYTICS_TIMEZONE) {
@@ -285,21 +297,24 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
     supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['follow_up_1_days', 'follow_up_2_days', 'dead_lead_days']),
+      .in('key', ['follow_up_1_days', 'follow_up_2_days', 'dead_lead_days', 'reactivation_delay_days', 'dead_after_reactivation_days', 'reactivation_enabled']),
     supabase
       .from('leads')
-      .select('id, status, emails(id, lead_id, type, status, sent_at, replied_at)')
+      .select('id, status, reactivation_sent_at, emails(id, lead_id, type, status, sent_at, replied_at)')
       .in('status', FOLLOWUP_PENDING_LEAD_STATUSES),
   ])
 
-  const settings: Record<string, number> = {}
+  const settingsMap: Record<string, string> = {}
   for (const row of settingsRows ?? []) {
-    settings[row.key] = parseInt(row.value, 10)
+    settingsMap[row.key] = row.value
   }
 
-  const followUp1Days = settings['follow_up_1_days'] ?? 7
-  const followUp2Days = settings['follow_up_2_days'] ?? 14
-  const followUp3Days = settings['dead_lead_days'] ?? 21
+  const followUp1Days = parseInt(settingsMap['follow_up_1_days'] ?? '7', 10)
+  const followUp2Days = parseInt(settingsMap['follow_up_2_days'] ?? '14', 10)
+  const followUp3Days = parseInt(settingsMap['dead_lead_days'] ?? '21', 10)
+  const reactivationDelayDays = parseInt(settingsMap['reactivation_delay_days'] ?? '60', 10)
+  const deadAfterReactivationDays = parseInt(settingsMap['dead_after_reactivation_days'] ?? '14', 10)
+  const reactivationEnabled = settingsMap['reactivation_enabled'] === 'true'
 
   let pendingFollowUp1 = 0
   let pendingFollowUp2 = 0
@@ -324,6 +339,60 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
     }
   }
 
+  // Lifecycle-aligned counts — same logic as computeLifecycle() in /api/lifecycle
+  let fu1Due = 0
+  let fu2Due = 0
+  let reactivationNotAwaitingDead = 0
+  let awaitingDead = 0
+  let overdueTotal = 0
+
+  for (const lead of (contactedLeads ?? []) as ContactedFollowupLead[]) {
+    const emailsList = lead.emails ?? []
+    const initialEmail = emailsList.find((e) => e.type === 'initial_pitch' && e.sent_at)
+    if (!initialEmail?.sent_at) continue
+
+    const daysSince = Math.floor((date.getTime() - new Date(initialEmail.sent_at).getTime()) / DAY_MS)
+    const fu1Sent = emailsList.some((e) => e.type === 'follow_up_1' && e.sent_at)
+    const fu2Sent = emailsList.some((e) => e.type === 'follow_up_2' && e.sent_at)
+
+    if (lead.reactivation_sent_at) {
+      const daysSinceReact = Math.floor((date.getTime() - new Date(lead.reactivation_sent_at).getTime()) / DAY_MS)
+      if (daysSinceReact >= deadAfterReactivationDays) {
+        awaitingDead++
+        overdueTotal++
+      } else {
+        reactivationNotAwaitingDead++
+      }
+      continue
+    }
+
+    if (fu2Sent) {
+      if (reactivationEnabled) {
+        reactivationNotAwaitingDead++
+        if (daysSince >= reactivationDelayDays) overdueTotal++
+      } else if (daysSince >= followUp3Days) {
+        overdueTotal++
+      }
+      continue
+    }
+
+    if (fu1Sent) {
+      if (daysSince >= followUp2Days) {
+        fu2Due++
+        overdueTotal++
+      }
+      continue
+    }
+
+    if (daysSince >= followUp1Days) {
+      fu1Due++
+      overdueTotal++
+    }
+  }
+
+  const fuDue = fu1Due + fu2Due
+  const reactivationTotal = reactivationNotAwaitingDead
+
   const followUp1SentToday = ((sentTodayByType ?? []) as Array<{ type: EmailType }>).filter(
     (email) => email.type === 'follow_up_1'
   ).length
@@ -336,12 +405,25 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
   const pending = pendingFollowUp1 + pendingFollowUp2 + pendingFollowUp3
 
   console.log('[DASHBOARD_FOLLOWUP_METRICS]', {
+    legacy_pending_fu1: pendingFollowUp1,
+    legacy_pending_fu2: pendingFollowUp2,
+    legacy_pending_fu3: pendingFollowUp3,
     fu1_sent_today: followUp1SentToday,
     fu2_sent_today: followUp2SentToday,
     fu3_sent_today: followUp3SentToday,
-    pending_fu1: pendingFollowUp1,
-    pending_fu2: pendingFollowUp2,
-    pending_fu3: pendingFollowUp3,
+  })
+
+  console.log('[LIFECYCLE_ALIGNED_METRICS]', {
+    filter: 'fu_due → (fu1||fu2) && is_overdue',
+    fu1_due: fu1Due,
+    fu2_due: fu2Due,
+    fu_due_total: fuDue,
+    filter_reactivation: 'filter_key=reactivation && stage!=AwaitingDead',
+    reactivation_total: reactivationTotal,
+    awaiting_dead: awaitingDead,
+    filter_overdue: 'is_overdue=true',
+    overdue_total: overdueTotal,
+    settings: { followUp1Days, followUp2Days, followUp3Days, reactivationDelayDays, deadAfterReactivationDays, reactivationEnabled },
   })
 
   return {
@@ -354,6 +436,11 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
     pendingFollowUp1,
     pendingFollowUp2,
     pendingFollowUp3,
+    fu1Due,
+    fu2Due,
+    fuDue,
+    reactivationTotal,
+    overdueTotal,
   }
 }
 

@@ -89,8 +89,10 @@ export function statusColor(status: string): string {
     contacted: 'bg-orange-500/20 text-orange-400',
     replied: 'bg-green-500/20 text-green-400',
     negotiating: 'bg-teal-500/20 text-teal-400',
+    interested: 'bg-violet-500/20 text-violet-400',
     closed: 'bg-emerald-500/20 text-emerald-400',
-    closed_manual: 'bg-orange-500/20 text-orange-400',
+    closed_won: 'bg-emerald-600/20 text-emerald-300',
+    closed_manual: 'bg-orange-600/20 text-orange-300',
     dead: 'bg-gray-500/20 text-gray-400',
   }
   return colors[status] ?? 'bg-gray-500/20 text-gray-400'
@@ -104,7 +106,9 @@ export function statusLabel(status: string): string {
     contacted: 'Contacted',
     replied: 'Replied',
     negotiating: 'Negotiating',
+    interested: 'Interested',
     closed: 'Closed',
+    closed_won: 'Closed Won',
     closed_manual: 'Closed (Manual)',
     dead: 'Dead',
   }

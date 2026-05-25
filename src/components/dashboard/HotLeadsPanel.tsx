@@ -1,6 +1,9 @@
+'use client'
+
 import Link from 'next/link'
 import { ExternalLink } from 'lucide-react'
 import { timeAgo } from '@/lib/utils'
+import { useLeadDrawer } from '@/lib/lead-drawer-context'
 
 export interface HotLeadEmail {
   id: string
@@ -65,6 +68,8 @@ interface HotLeadsPanelProps {
 }
 
 export function HotLeadsPanel({ leads }: HotLeadsPanelProps) {
+  const { openDrawer } = useLeadDrawer()
+
   const sorted = [...leads].sort(
     (a, b) => STATUS_PRIORITY.indexOf(a.status) - STATUS_PRIORITY.indexOf(b.status)
   )
@@ -91,7 +96,8 @@ export function HotLeadsPanel({ leads }: HotLeadsPanelProps) {
         return (
           <div
             key={lead.id}
-            className="group flex items-center gap-3.5 py-3.5 px-3 transition-colors duration-150 hover:bg-white/[0.025] rounded-xl cursor-default"
+            onClick={() => openDrawer(lead.id)}
+            className="group flex items-center gap-3.5 py-3.5 px-3 transition-colors duration-150 hover:bg-white/[0.025] rounded-xl cursor-pointer"
           >
             {/* Status accent bar */}
             <div
@@ -144,14 +150,14 @@ export function HotLeadsPanel({ leads }: HotLeadsPanelProps) {
                   {timeAgo(interaction.time)}
                 </span>
               )}
-              <Link
-                href={`/dashboard/leads`}
+              <button
+                onClick={(e) => { e.stopPropagation(); openDrawer(lead.id) }}
                 className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-150"
                 style={{ color: meta.color, background: meta.bg, border: `1px solid ${meta.ring}` }}
               >
                 <ExternalLink size={10} strokeWidth={2.2} />
                 <span>Open</span>
-              </Link>
+              </button>
             </div>
           </div>
         )

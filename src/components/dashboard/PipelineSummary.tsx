@@ -3,19 +3,22 @@
 import { Fragment, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
+import { STAGE_STATUSES, ALL_STATUSES } from '@/lib/lead-status'
 
 interface StatusCount {
   status: string
   count: number
 }
 
+// Non-cumulative funnel: each stage shows ONLY leads currently in that stage.
+// This ensures these counts match the Pipeline Kanban column counts exactly.
 const FUNNEL = [
   {
     id: 'all',
     label: 'All Leads',
     sub: 'Total pipeline',
     color: '#818cf8',
-    statuses: ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual'],
+    statuses: ALL_STATUSES as readonly string[],
     href: '/dashboard/leads',
   },
   {
@@ -23,7 +26,7 @@ const FUNNEL = [
     label: 'Contacted',
     sub: 'Pitch sent',
     color: '#fb923c',
-    statuses: ['contacted', 'replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual'],
+    statuses: STAGE_STATUSES.contacted as readonly string[],
     href: '/dashboard/leads?status=contacted',
   },
   {
@@ -31,7 +34,7 @@ const FUNNEL = [
     label: 'Replied',
     sub: 'Responded',
     color: '#4ade80',
-    statuses: ['replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual'],
+    statuses: STAGE_STATUSES.replied as readonly string[],
     href: '/dashboard/leads?status=replied',
   },
   {
@@ -39,18 +42,18 @@ const FUNNEL = [
     label: 'Negotiating',
     sub: 'Active deal',
     color: '#22d3ee',
-    statuses: ['negotiating', 'interested', 'closed', 'closed_won', 'closed_manual'],
-    href: '/dashboard/leads?status=negotiating',
+    statuses: STAGE_STATUSES.negotiating as readonly string[],
+    href: '/dashboard/leads?stage=negotiating',
   },
   {
     id: 'won',
     label: 'Won',
     sub: 'Deal closed',
     color: '#34d399',
-    statuses: ['closed', 'closed_won', 'closed_manual'],
-    href: '/dashboard/leads?status=closed',
+    statuses: STAGE_STATUSES.closed as readonly string[],
+    href: '/dashboard/leads?stage=closed',
   },
-] as const
+]
 
 function rateColor(pct: number): string {
   if (pct >= 25) return '#34d399'

@@ -1265,6 +1265,12 @@ export async function runFinderAgent(): Promise<number> {
   let socialOnlySkips      = 0
   let websiteNoEmailSkips  = 0
 
+  const runId = `finder_${Date.now()}`
+  const queryPerfLog: Array<{
+    query: string; keyword: string; suburb: string; city: string; category: string
+    googleResults: number; newLeads: number; duplicates: number; noWebsite: number; validationFailed: number
+  }> = []
+
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // PHASE 1 — EMAIL LEADS
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1903,6 +1909,18 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           })
         }
 
+        // Accumulate per-query stats for top/worst performance analysis
+        if (comboGoogleResults > 0) {
+          queryPerfLog.push({
+            query, keyword, suburb, city, category: category.name,
+            googleResults: comboGoogleResults,
+            newLeads:      comboNewLeads,
+            duplicates:    comboDuplicates,
+            noWebsite:     comboNoWebsite,
+            validationFailed: comboValidationFailed,
+          })
+        }
+
         if (costGuardHit || safetyLimitHit) break keywordSuburbLoop
       }
     }
@@ -2174,6 +2192,143 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
     runtime_limit_ms:           MAX_RUNTIME_MS,
     pipeline_exit_reason:       pipelineExitReason,
   })
+
+  // ─── PIPELINE_FUNNEL_METRICS ──────────────────────────────────────────────
+  // Derived rate calculations
+  const totalDupes              = earlyDuplicateSkips + dbDuplicateSkips + dedupeIndexSkips
+  const duplicateRatePct        = totalResultsFetched > 0 ? +((totalDupes / totalResultsFetched) * 100).toFixed(2) : 0
+  const qualificationRatePct    = totalResultsFetched > 0 ? +((qualifiedCandidates / totalResultsFetched) * 100).toFixed(2) : 0
+  const websiteCoveragePct      = totalResultsFetched > 0 ? +(((totalResultsFetched - noWebsiteSkips) / totalResultsFetched) * 100).toFixed(2) : 0
+  const withEmailOpportunity    = Math.max(0, totalResultsFetched - noWebsiteSkips - socialOnlySkips - earlyDuplicateSkips - keywordFilteredSkips - irrelevantSkips)
+  const emailExtractionRatePct  = withEmailOpportunity > 0 ? +((emailCount / withEmailOpportunity) * 100).toFixed(2) : 0
+  const efficiencyRatePct       = totalResultsFetched > 0 ? +(((emailCount + dmCount) / totalResultsFetched) * 100).toFixed(2) : 0
+
+  // Top/worst query analysis (queries with ≥1 Google result only)
+  const sortedByYield    = [...queryPerfLog].sort((a, b) => (b.newLeads / b.googleResults) - (a.newLeads / a.googleResults))
+  const sortedByDupRate  = [...queryPerfLog].sort((a, b) => (b.duplicates / b.googleResults) - (a.duplicates / a.googleResults))
+  const zeroYieldQueries = queryPerfLog.filter((q) => q.newLeads === 0)
+
+  const topYieldQueries = sortedByYield.slice(0, 5).map((q) => ({
+    keyword: q.keyword, suburb: q.suburb, category: q.category,
+    yield: q.newLeads, of: q.googleResults,
+    rate_pct: +((q.newLeads / q.googleResults) * 100).toFixed(1),
+  }))
+  const worstDuplicateQueries = sortedByDupRate.slice(0, 5).map((q) => ({
+    keyword: q.keyword, suburb: q.suburb, category: q.category,
+    duplicates: q.duplicates, of: q.googleResults,
+    rate_pct: +((q.duplicates / q.googleResults) * 100).toFixed(1),
+  }))
+  const worstSuburbOverlapQueries = zeroYieldQueries
+    .sort((a, b) => b.googleResults - a.googleResults)
+    .slice(0, 5)
+    .map((q) => ({
+      keyword: q.keyword, suburb: q.suburb, category: q.category,
+      google_results: q.googleResults, duplicates: q.duplicates,
+      no_website: q.noWebsite, validation_failed: q.validationFailed,
+    }))
+  const lowestQualificationQueries = sortedByYield.slice(-5).map((q) => ({
+    keyword: q.keyword, suburb: q.suburb, category: q.category,
+    yield: q.newLeads, of: q.googleResults,
+    rate_pct: +((q.newLeads / q.googleResults) * 100).toFixed(1),
+  }))
+
+  logger.info('finder', '[PIPELINE_FUNNEL_METRICS]', {
+    run_id: runId,
+    run_at: new Date().toISOString(),
+    targets: { email: EMAIL_TARGET, dm: DM_TARGET, total: TOTAL_TARGET },
+    api: {
+      outscraper_calls:           callCount,
+      total_results_fetched:      totalResultsFetched,
+      outscraper_results_fetched: outscraperResultsFetched,
+      businesses_processed:       businessesProcessed,
+      queries_executed:           seenQueries.size,
+    },
+    funnel: {
+      irrelevant_skips:          irrelevantSkips,
+      keyword_filtered_skips:    keywordFilteredSkips,
+      early_duplicate_skips:     earlyDuplicateSkips,
+      db_duplicate_skips:        dbDuplicateSkips,
+      dedupe_index_skips:        dedupeIndexSkips,
+      no_website_skips:          noWebsiteSkips,
+      social_only_skips:         socialOnlySkips,
+      website_no_email_skips:    websiteNoEmailSkips,
+      invalid_emails_removed:    invalidEmailsRemoved,
+      halal_confidence_recorded: halalConfidenceRecorded,
+      qualified_candidates:      qualifiedCandidates,
+    },
+    output: {
+      email_leads_saved: emailCount,
+      dm_leads_queued:   dmCount,
+      total_leads_saved: emailCount + dmCount,
+    },
+    rates: {
+      duplicate_rate_pct:       duplicateRatePct,
+      qualification_rate_pct:   qualificationRatePct,
+      website_coverage_pct:     websiteCoveragePct,
+      email_extraction_rate_pct: emailExtractionRatePct,
+      efficiency_pct:           efficiencyRatePct,
+    },
+    cost: { estimated_usd: parseFloat(estimatedCost) },
+    pipeline: {
+      exit_reason:         pipelineExitReason,
+      runtime_ms:          summaryElapsedMs,
+      safety_limit_hit:    safetyLimitHit,
+      safety_limit_reason: safetyLimitReason || null,
+      cost_guard_hit:      costGuardHit,
+    },
+    query_performance: {
+      total_queries_with_results:   queryPerfLog.length,
+      top_yield_queries:            topYieldQueries,
+      worst_duplicate_queries:      worstDuplicateQueries,
+      worst_suburb_overlap_queries: worstSuburbOverlapQueries,
+      lowest_qualification_queries: lowestQualificationQueries,
+    },
+  })
+
+  const { error: metricsInsertError } = await supabase.from('discovery_run_metrics').insert({
+    run_id:                     runId,
+    run_at:                     new Date().toISOString(),
+    email_target:               EMAIL_TARGET,
+    dm_target:                  DM_TARGET,
+    total_target:               TOTAL_TARGET,
+    outscraper_calls:           callCount,
+    total_results_fetched:      totalResultsFetched,
+    outscraper_results_fetched: outscraperResultsFetched,
+    businesses_processed:       businessesProcessed,
+    queries_executed:           seenQueries.size,
+    irrelevant_skips:           irrelevantSkips,
+    keyword_filtered_skips:     keywordFilteredSkips,
+    early_duplicate_skips:      earlyDuplicateSkips,
+    db_duplicate_skips:         dbDuplicateSkips,
+    dedupe_index_skips:         dedupeIndexSkips,
+    no_website_skips:           noWebsiteSkips,
+    social_only_skips:          socialOnlySkips,
+    website_no_email_skips:     websiteNoEmailSkips,
+    invalid_emails_removed:     invalidEmailsRemoved,
+    halal_confidence_recorded:  halalConfidenceRecorded,
+    qualified_candidates:       qualifiedCandidates,
+    email_leads_saved:          emailCount,
+    dm_leads_queued:            dmCount,
+    total_leads_saved:          emailCount + dmCount,
+    duplicate_rate_pct:         duplicateRatePct,
+    qualification_rate_pct:     qualificationRatePct,
+    website_coverage_pct:       websiteCoveragePct,
+    email_extraction_rate_pct:  emailExtractionRatePct,
+    efficiency_pct:             efficiencyRatePct,
+    estimated_cost_usd:         parseFloat(estimatedCost),
+    exit_reason:                pipelineExitReason,
+    runtime_ms:                 summaryElapsedMs,
+    safety_limit_hit:           safetyLimitHit,
+    safety_limit_reason:        safetyLimitReason || null,
+    cost_guard_hit:             costGuardHit,
+    top_yield_queries:          topYieldQueries,
+    worst_duplicate_queries:    worstDuplicateQueries,
+    worst_suburb_overlap_queries: worstSuburbOverlapQueries,
+    lowest_qualification_queries: lowestQualificationQueries,
+  })
+  if (metricsInsertError) {
+    logger.error('finder', 'Failed to persist discovery_run_metrics', { error: metricsInsertError.message })
+  }
 
   return leadsKept
 
