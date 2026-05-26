@@ -298,7 +298,7 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
     supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['follow_up_1_days', 'follow_up_2_days', 'dead_lead_days', 'reactivation_delay_days', 'dead_after_reactivation_days', 'reactivation_enabled']),
+      .in('key', ['follow_up_1_days', 'follow_up_2_days', 'follow_up_3_days', 'dead_lead_days', 'reactivation_delay_days', 'dead_after_reactivation_days', 'reactivation_enabled']),
     supabase
       .from('leads')
       .select('id, status, reactivation_sent_at, emails(id, lead_id, type, status, sent_at, replied_at)')
@@ -312,7 +312,7 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
 
   const followUp1Days = parseInt(settingsMap['follow_up_1_days'] ?? '7', 10)
   const followUp2Days = parseInt(settingsMap['follow_up_2_days'] ?? '14', 10)
-  const followUp3Days = parseInt(settingsMap['dead_lead_days'] ?? '21', 10)
+  const followUp3Days = parseInt(settingsMap['follow_up_3_days'] ?? '21', 10)
   const reactivationDelayDays = parseInt(settingsMap['reactivation_delay_days'] ?? '60', 10)
   const deadAfterReactivationDays = parseInt(settingsMap['dead_after_reactivation_days'] ?? '14', 10)
   const reactivationEnabled = settingsMap['reactivation_enabled'] === 'true'

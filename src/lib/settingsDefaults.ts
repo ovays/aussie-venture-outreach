@@ -67,6 +67,10 @@ export const SETTINGS_DEFAULTS = {
     value: '14',
     description: 'Days before sending second follow-up',
   },
+  follow_up_3_days: {
+    value: '21',
+    description: 'Days before sending third follow-up',
+  },
   google_maps_cost_per_request: {
     value: '0.032',
     description: 'Google Maps API cost per request in USD - update if pricing changes',

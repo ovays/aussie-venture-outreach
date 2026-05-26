@@ -56,9 +56,11 @@ async function sentTodayCount(
 
 function buildFollowUpEmail(type: FollowUpType, leadName: string, initialSubject: string) {
   if (type === 'follow_up_1') {
-    const body = `Hey ${leadName},
+    const body = `Hey ${leadName}!
 
-Bumping this in case my last email got buried. Would love to hear back when you get a chance.
+Still keen to feature your business on Aussie Venture — our audience genuinely loves discovering great local spots, and I think you'd be a wonderful fit.
+
+Happy to keep things simple on your end. Let me know if you're open to it!
 
 Cheers,
 Owais
@@ -75,11 +77,16 @@ hello@aussieventure.com`
   if (type === 'follow_up_2') {
     const body = `Hey ${leadName},
 
-Last message from me on this one. If you ever want to do a collab down the track, just email us at hello@aussieventure.com.
+Timing can always be tricky — no worries if things have been busy on your end!
+
+A feature on Aussie Venture is a simple way to connect your business with a genuinely engaged local audience, and we keep it as easy as possible from your side.
+
+If it sounds like something worth exploring, I'd love to hear your thoughts.
 
 Cheers,
 Owais
-Aussie Venture`
+Aussie Venture
+hello@aussieventure.com`
 
     return {
       subject: `Re: ${initialSubject}`,
@@ -88,9 +95,14 @@ Aussie Venture`
     }
   }
 
+  // follow_up_3
   const body = `Hey ${leadName},
 
-Last message from me on this one. If you ever want to do a collab down the track, just email us at hello@aussieventure.com.
+No worries at all if the timing hasn't been right — these things don't always line up!
+
+If a feature on Aussie Venture ever sounds like a good fit down the track, we'd genuinely love to hear from you at hello@aussieventure.com.
+
+Wishing you and the team all the best — hope the business keeps going from strength to strength!
 
 Cheers,
 Owais
@@ -176,6 +188,7 @@ export async function runFollowUpAgent(): Promise<void> {
       .in('key', [
         'follow_up_1_days',
         'follow_up_2_days',
+        'follow_up_3_days',
         'dead_lead_days',
         'daily_lead_limit',
         'daily_followup1_limit',
@@ -195,7 +208,7 @@ export async function runFollowUpAgent(): Promise<void> {
 
     const followUp1Days = settings['follow_up_1_days'] ?? 7
     const followUp2Days = settings['follow_up_2_days'] ?? 14
-    const followUp3Days = settings['dead_lead_days'] ?? 21
+    const followUp3Days = settings['follow_up_3_days'] ?? 21
 
     const configuredGlobalLimit = settings['daily_lead_limit'] ?? 100
 

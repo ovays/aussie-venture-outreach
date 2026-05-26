@@ -83,6 +83,7 @@ async function main() {
       'system_active',
       'follow_up_1_days',
       'follow_up_2_days',
+      'follow_up_3_days',
       'dead_lead_days',
       'daily_lead_limit',
       'daily_followup1_limit',
@@ -103,7 +104,7 @@ async function main() {
   const reactivationEnabled = sm['reactivation_enabled'] === 'true'
   const followUp1Days      = parseInt(sm['follow_up_1_days'] ?? '7', 10)
   const followUp2Days      = parseInt(sm['follow_up_2_days'] ?? '14', 10)
-  const followUp3Days      = parseInt(sm['dead_lead_days'] ?? '21', 10)
+  const followUp3Days      = parseInt(sm['follow_up_3_days'] ?? '21', 10)
   const configuredGlobalLimit = parseInt(sm['daily_lead_limit'] ?? '100', 10)
 
   const limits: Record<FollowUpType, number> = {
@@ -371,6 +372,61 @@ async function main() {
         type,
         daysSince:    c.daysSince,
       })
+const preview =
+  type === 'follow_up_1'
+    ? `
+Subject: Quick follow-up from Aussie Venture
+
+Hi ${c.lead.business_name},
+
+Just wanted to reach out once more as we’d still love to explore a possible collaboration with you.
+
+We work with Aussie food and travel audiences across social platforms and thought your business could be a great fit for some authentic exposure.
+
+No pressure at all — if it’s something you’d be open to discussing, we’d be happy to share a few ideas.
+
+Thanks again and hope you have a great week.
+
+– Aussie Venture
+`
+    : type === 'follow_up_2'
+    ? `
+Subject: Collaboration opportunity with Aussie Venture
+
+Hi ${c.lead.business_name},
+
+Thought I’d send one more quick follow-up as we’d still genuinely love to feature your business.
+
+We’ve worked with a range of venues and experiences across Sydney and always aim to create content that feels natural and valuable for both sides.
+
+Completely understand timing can get busy, but if collaborations are something you’re open to, we’d be happy to chat further whenever convenient.
+
+Appreciate your time either way.
+
+– Aussie Venture
+`
+    : `
+Subject: Keeping the door open
+
+Hi ${c.lead.business_name},
+
+Just wanted to send a final quick note and say thanks for taking the time to read our earlier messages.
+
+No worries at all if the timing isn’t right at the moment — we’d still be happy to connect in the future if collaboration opportunities come up down the track.
+
+Wishing you and the team all the best.
+
+– Aussie Venture
+`
+
+console.log(`
+----- EMAIL PREVIEW -----
+
+${preview}
+
+-------------------------
+`)
+
     }
   }
 

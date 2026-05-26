@@ -430,6 +430,7 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
           {[
             { key: 'follow_up_1_days', label: 'Follow-up 1 delay', description: 'Days before sending first follow-up' },
             { key: 'follow_up_2_days', label: 'Follow-up 2 delay', description: 'Days before sending second follow-up' },
+            { key: 'follow_up_3_days', label: 'Follow-up 3 delay', description: 'Days before sending third follow-up' },
             { key: 'dead_lead_days', label: 'Mark dead after', description: 'Days of no reply before marking lead as dead' },
           ].map(({ key, label, description }) => (
             <div key={key} className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>

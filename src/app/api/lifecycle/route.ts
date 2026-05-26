@@ -20,6 +20,7 @@ interface LeadRow {
 interface Settings {
   fu1Days: number
   fu2Days: number
+  fu3Days: number
   deadLeadDays: number
   reactivationDelayDays: number
   deadAfterReactivationDays: number
@@ -80,7 +81,7 @@ function computeLifecycle(lead: LeadRow, s: Settings, now = new Date()): Lifecyc
     !!fu1Email,
     !!fu2Email,
     !!fu3Email,
-    { fu1Days: s.fu1Days, fu2Days: s.fu2Days, fu3Days: s.deadLeadDays },
+    { fu1Days: s.fu1Days, fu2Days: s.fu2Days, fu3Days: s.fu3Days },
     now
   )
 
@@ -162,6 +163,7 @@ export async function GET(): Promise<NextResponse> {
         .in('key', [
           'follow_up_1_days',
           'follow_up_2_days',
+          'follow_up_3_days',
           'dead_lead_days',
           'reactivation_delay_days',
           'dead_after_reactivation_days',
@@ -191,6 +193,7 @@ export async function GET(): Promise<NextResponse> {
   const settings: Settings = {
     fu1Days: parseInt(sm['follow_up_1_days'] ?? '7', 10),
     fu2Days: parseInt(sm['follow_up_2_days'] ?? '14', 10),
+    fu3Days: parseInt(sm['follow_up_3_days'] ?? '21', 10),
     deadLeadDays: parseInt(sm['dead_lead_days'] ?? '21', 10),
     reactivationDelayDays: parseInt(sm['reactivation_delay_days'] ?? '60', 10),
     deadAfterReactivationDays: parseInt(sm['dead_after_reactivation_days'] ?? '14', 10),
