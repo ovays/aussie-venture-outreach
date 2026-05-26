@@ -1358,7 +1358,7 @@ export async function runFinderAgent(): Promise<number> {
   // PHASE 1 — EMAIL LEADS
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // Safety limits: prevent runaway searching when leads are scarce
-const MAX_BUSINESSES_PROCESSED = 1200
+const MAX_BUSINESSES_PROCESSED = 1500
 const MAX_QUERIES_EXECUTED = 300
 const MAX_RUNTIME_MS = 45 * 60 * 1000
   const runStartTime             = Date.now()
@@ -1570,8 +1570,6 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               break
             }
 
-            businessesProcessed++
-
             const name       = result.name
             const rawWebsite = result.website || null
             let normalizedWebsite = rawWebsite
@@ -1669,6 +1667,12 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                   earlyDuplicateSkips++
                   comboDuplicates++
                   duplicatesRemoved++
+                  logger.info('finder', '[BUSINESS_SKIPPED]', {
+                    reason:         'early_duplicate',
+                    business_name:  name,
+                    domain,
+                    matched_source: matchedSource,
+                  })
                   continue
                 }
                 logger.info('finder', '[DEDUPE_DOMAIN_REGISTERED]', {
@@ -1783,6 +1787,10 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               comboDuplicates++
               duplicatesRemoved++
               logger.info('finder', `Skip duplicate: ${name}`)
+              logger.info('finder', '[BUSINESS_SKIPPED]', {
+                reason:        'db_duplicate',
+                business_name: name,
+              })
               continue
             }
 
@@ -1835,9 +1843,19 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                 dedupeIndexSkips++
                 comboDuplicates++
                 duplicatesRemoved++
+                logger.info('finder', '[BUSINESS_SKIPPED]', {
+                  reason:        'dedupe_index_duplicate',
+                  business_name: name,
+                })
                 continue
               }
 
+              businessesProcessed++
+              logger.info('finder', '[BUSINESS_PROCESSING]', {
+                businessesProcessed,
+                business_name: name,
+                reason: 'candidate_accepted',
+              })
               qualifiedCandidates++
               const { data: insertedLead, error } = await supabase.from('leads').insert({
                 business_name:        name,
