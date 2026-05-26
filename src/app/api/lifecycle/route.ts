@@ -94,15 +94,28 @@ function computeLifecycle(lead: LeadRow, s: Settings, now = new Date()): Lifecyc
     daysUntilDue: eligibility.daysUntilDue,
   })
 
-  // FU2 already sent (nextFuType is 'follow_up_3' or null) → reactivation or dead path
-  if (eligibility.nextFuType === null || eligibility.nextFuType === 'follow_up_3') {
+  // FU2 sent, FU3 pending
+  if (eligibility.nextFuType === 'follow_up_3') {
+    const fu3Date = addDays(initialEmail.sent_at, s.fu3Days)
+    return {
+      ...base,
+      stage: 'Follow-up 2 Sent',
+      next_action: 'Send Follow-up 3',
+      next_action_date: fu3Date,
+      days_since_initial: eligibility.daysSince,
+      filter_key: 'fu3',
+      is_overdue: eligibility.isDue,
+    }
+  }
+
+  // All FUs sent (nextFuType === null) → reactivation or dead path
+  if (eligibility.nextFuType === null) {
     if (s.reactivationEnabled) {
       const reactDate = addDays(initialEmail.sent_at, s.reactivationDelayDays)
       const isOverdue = eligibility.daysSince >= s.reactivationDelayDays
-      const baseStage = fu3Email ? 'Follow-up 3 Sent' : 'Follow-up 2 Sent'
       return {
         ...base,
-        stage: isOverdue ? 'Reactivation Due' : baseStage,
+        stage: isOverdue ? 'Reactivation Due' : 'Follow-up 3 Sent',
         next_action: 'Send Reactivation',
         next_action_date: reactDate,
         days_since_initial: eligibility.daysSince,
@@ -112,10 +125,9 @@ function computeLifecycle(lead: LeadRow, s: Settings, now = new Date()): Lifecyc
     } else {
       const deadDate = addDays(initialEmail.sent_at, s.deadLeadDays)
       const isOverdue = eligibility.daysSince >= s.deadLeadDays
-      const baseStage = fu3Email ? 'Follow-up 3 Sent' : 'Follow-up 2 Sent'
       return {
         ...base,
-        stage: baseStage,
+        stage: 'Follow-up 3 Sent',
         next_action: 'Mark Dead',
         next_action_date: deadDate,
         days_since_initial: eligibility.daysSince,
@@ -209,6 +221,7 @@ export async function GET(): Promise<NextResponse> {
   const summary = {
     fu1_due: leads.filter((l) => l.filter_key === 'fu1' && l.is_overdue).length,
     fu2_due: leads.filter((l) => l.filter_key === 'fu2' && l.is_overdue).length,
+    fu3_due: leads.filter((l) => l.filter_key === 'fu3' && l.is_overdue).length,
     reactivation_due: leads.filter((l) => l.stage === 'Reactivation Due').length,
     awaiting_dead: leads.filter((l) => l.stage === 'Awaiting Dead').length,
     dead_today: deadTodayCount ?? 0,

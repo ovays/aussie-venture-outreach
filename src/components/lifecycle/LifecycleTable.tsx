@@ -9,12 +9,13 @@ import { useLeadDrawer } from '@/lib/lead-drawer-context'
 interface Summary {
   fu1_due: number
   fu2_due: number
+  fu3_due: number
   reactivation_due: number
   awaiting_dead: number
   dead_today: number
 }
 
-type FilterKey = 'all' | 'fu1_due' | 'fu2_due' | 'fu1' | 'fu2' | 'fu_due' | 'overdue' | 'reactivation' | 'awaiting_dead' | 'dead'
+type FilterKey = 'all' | 'fu1_due' | 'fu2_due' | 'fu3_due' | 'fu1' | 'fu2' | 'fu3' | 'fu_due' | 'overdue' | 'reactivation' | 'awaiting_dead' | 'dead'
 type SortKey = 'next_action_date' | 'days_since_initial' | 'stage'
 type SortDir = 'asc' | 'desc'
 
@@ -32,21 +33,22 @@ const BADGE: Record<string, { bg: string; text: string }> = {
   'Unknown':           { bg: 'rgba(100,116,139,0.08)', text: '#475569' },
 }
 
-// ── Mini timeline: 4 dots representing Init → FU1 → FU2 → React ───────────────
+// ── Mini timeline: 5 dots representing Init → FU1 → FU2 → FU3 → React ─────────
 
 function stepsCompleted(stage: string): number {
   if (stage === 'Initial Sent') return 1
   if (stage === 'Follow-up 1 Sent') return 2
-  if (['Follow-up 2 Sent', 'Follow-up 3 Sent', 'Reactivation Due'].includes(stage)) return 3
-  return 4 // Reactivated, Awaiting Dead, Dead
+  if (stage === 'Follow-up 2 Sent') return 3
+  if (['Follow-up 3 Sent', 'Reactivation Due'].includes(stage)) return 4
+  return 5 // Reactivated, Awaiting Dead, Dead
 }
 
 function MiniTimeline({ stage }: { stage: string }) {
   const done = stepsCompleted(stage)
   const isTerminal = stage === 'Awaiting Dead' || stage === 'Dead'
   return (
-    <div className="flex items-center gap-1" title={`${done} / 4 steps`}>
-      {[0, 1, 2, 3].map((i) => {
+    <div className="flex items-center gap-1" title={`${done} / 5 steps`}>
+      {[0, 1, 2, 3, 4].map((i) => {
         const complete = i < done
         const next = i === done && !isTerminal
         return (
@@ -106,6 +108,10 @@ const CARDS: {
     accent: '#a78bfa', filterKey: 'fu2_due',
   },
   {
+    key: 'fu3_due', label: 'FU3 Due', subtext: 'overdue for third follow-up',
+    accent: '#818cf8', filterKey: 'fu3_due',
+  },
+  {
     key: 'reactivation_due', label: 'Reactivation Due', subtext: 'ready for DM outreach',
     accent: '#fb923c', filterKey: 'reactivation',
   },
@@ -130,7 +136,7 @@ type PillDef = {
 }
 
 const VALID_FILTER_KEYS = new Set<FilterKey>([
-  'all', 'fu1_due', 'fu2_due', 'fu1', 'fu2', 'fu_due', 'overdue', 'reactivation', 'awaiting_dead', 'dead',
+  'all', 'fu1_due', 'fu2_due', 'fu3_due', 'fu1', 'fu2', 'fu3', 'fu_due', 'overdue', 'reactivation', 'awaiting_dead', 'dead',
 ])
 
 function toFilterKey(raw: string | undefined): FilterKey {
@@ -148,8 +154,8 @@ const PILLS: PillDef[] = [
   {
     key: 'fu_due',
     label: 'FU Due',
-    tooltip: 'Actionable queue — leads overdue for FU1 or FU2 (matches Dashboard "Follow-ups Due" card)',
-    fn: (l) => (l.filter_key === 'fu1' || l.filter_key === 'fu2') && l.is_overdue,
+    tooltip: 'Actionable queue — leads overdue for any follow-up (FU1, FU2, or FU3)',
+    fn: (l) => (l.filter_key === 'fu1' || l.filter_key === 'fu2' || l.filter_key === 'fu3') && l.is_overdue,
   },
   {
     key: 'fu1_due',
@@ -162,6 +168,12 @@ const PILLS: PillDef[] = [
     label: 'FU2 Overdue',
     tooltip: 'Actionable queue — leads past their FU2 send date right now',
     fn: (l) => l.filter_key === 'fu2' && l.is_overdue,
+  },
+  {
+    key: 'fu3_due',
+    label: 'FU3 Overdue',
+    tooltip: 'Actionable queue — leads past their FU3 send date right now',
+    fn: (l) => l.filter_key === 'fu3' && l.is_overdue,
   },
   {
     key: 'overdue',
@@ -180,6 +192,12 @@ const PILLS: PillDef[] = [
     label: 'FU2 Stage',
     tooltip: 'Stage total — all leads awaiting their second follow-up, including ones not yet due',
     fn: (l) => l.filter_key === 'fu2',
+  },
+  {
+    key: 'fu3',
+    label: 'FU3 Stage',
+    tooltip: 'Stage total — all leads awaiting their third follow-up, including ones not yet due',
+    fn: (l) => l.filter_key === 'fu3',
   },
   {
     key: 'reactivation',
@@ -296,7 +314,7 @@ export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
     <div>
       {/* ── Summary cards ── */}
       <div
-        className="grid grid-cols-2 md:grid-cols-5 gap-3 p-4 md:p-5 border-b"
+        className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-4 md:p-5 border-b"
         style={{ borderColor: '#2a2d3e' }}
       >
         {CARDS.map(({ key, label, subtext, accent, filterKey: cardFilterKey }) => {
