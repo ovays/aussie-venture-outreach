@@ -20,6 +20,7 @@ interface EmailAnalyticsRow {
 interface ContactedFollowupLead {
   id: string
   status: string
+  email?: string | null
   reactivation_sent_at?: string | null
   emails?: EmailAnalyticsRow[] | null
 }
@@ -302,7 +303,7 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
       .in('key', ['follow_up_1_days', 'follow_up_2_days', 'follow_up_3_days', 'dead_lead_days', 'reactivation_delay_days', 'dead_after_reactivation_days', 'reactivation_enabled']),
     supabase
       .from('leads')
-      .select('id, status, reactivation_sent_at, emails(id, lead_id, type, status, sent_at, replied_at)')
+      .select('id, status, email, reactivation_sent_at, emails(id, lead_id, type, status, sent_at, replied_at)')
       .in('status', FOLLOWUP_PENDING_LEAD_STATUSES),
   ])
 
@@ -323,6 +324,7 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
   let pendingFollowUp3 = 0
 
   for (const lead of (contactedLeads ?? []) as ContactedFollowupLead[]) {
+    if (!lead.email) continue
     const emailsList = lead.emails ?? []
     const initialEmail = emailsList.find((email) => email.type === 'initial_pitch' && email.sent_at)
     if (!initialEmail?.sent_at) continue
@@ -356,6 +358,7 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
   let overdueTotal = 0
 
   for (const lead of (contactedLeads ?? []) as ContactedFollowupLead[]) {
+    if (!lead.email) continue
     const emailsList = lead.emails ?? []
     const initialEmail = emailsList.find((e) => e.type === 'initial_pitch' && e.sent_at)
     if (!initialEmail?.sent_at) continue
