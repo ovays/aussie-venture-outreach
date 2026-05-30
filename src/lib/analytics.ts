@@ -456,6 +456,8 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
     settings: { followUp1Days, followUp2Days, followUp3Days, reactivationDelayDays, deadAfterReactivationDays, reactivationEnabled },
   })
 
+  console.log('[ANALYTICS_FU_DEBUG]', { fu1Due, fu2Due, fu3Due, fuDue })
+
   return {
     sentToday: sentToday ?? 0,
     totalSent: totalSent ?? 0,
