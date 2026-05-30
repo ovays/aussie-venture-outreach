@@ -123,7 +123,7 @@ export default async function DashboardPage() {
               count={analytics.followupStats.fuDue}
               title="Follow-ups Due"
               subtitle="Overdue & ready to send"
-              detail={`FU1 ${analytics.followupStats.fu1Due} · FU2 ${analytics.followupStats.fu2Due}`}
+              detail={`FU1 ${analytics.followupStats.fu1Due} · FU2 ${analytics.followupStats.fu2Due} · FU3 ${analytics.followupStats.fu3Due}`}
               ctaLabel="Send Follow-ups"
               ctaHref="/dashboard/lifecycle?filter=fu_due"
               accent="#8b5cf6"

@@ -67,6 +67,7 @@ export interface FollowupStats {
   // Lifecycle-aligned counts (match destination filter counts)
   fu1Due: number
   fu2Due: number
+  fu3Due: number
   fuDue: number
   reactivationTotal: number
   overdueTotal: number
@@ -349,6 +350,7 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
   // Lifecycle-aligned counts — same logic as computeLifecycle() in /api/lifecycle
   let fu1Due = 0
   let fu2Due = 0
+  let fu3Due = 0
   let reactivationNotAwaitingDead = 0
   let awaitingDead = 0
   let overdueTotal = 0
@@ -382,8 +384,17 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
       continue
     }
 
-    // FU2 sent (nextFuType is 'follow_up_3' or null) → reactivation or dead path
-    if (eligibility.nextFuType === null || eligibility.nextFuType === 'follow_up_3') {
+    // FU2 sent, FU3 pending
+    if (eligibility.nextFuType === 'follow_up_3') {
+      if (eligibility.isDue) {
+        fu3Due++
+        overdueTotal++
+      }
+      continue
+    }
+
+    // All FUs sent (nextFuType === null) → reactivation or dead path
+    if (eligibility.nextFuType === null) {
       if (reactivationEnabled) {
         reactivationNotAwaitingDead++
         if (eligibility.daysSince >= reactivationDelayDays) overdueTotal++
@@ -405,7 +416,7 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
     }
   }
 
-  const fuDue = fu1Due + fu2Due
+  const fuDue = fu1Due + fu2Due + fu3Due
   const reactivationTotal = reactivationNotAwaitingDead
 
   const followUp1SentToday = ((sentTodayByType ?? []) as Array<{ type: EmailType }>).filter(
@@ -429,9 +440,10 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
   })
 
   console.log('[LIFECYCLE_ALIGNED_METRICS]', {
-    filter: 'fu_due → (fu1||fu2) && is_overdue',
+    filter: 'fu_due → (fu1||fu2||fu3) && is_overdue',
     fu1_due: fu1Due,
     fu2_due: fu2Due,
+    fu3_due: fu3Due,
     fu_due_total: fuDue,
     filter_reactivation: 'filter_key=reactivation && stage!=AwaitingDead',
     reactivation_total: reactivationTotal,
@@ -453,6 +465,7 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
     pendingFollowUp3,
     fu1Due,
     fu2Due,
+    fu3Due,
     fuDue,
     reactivationTotal,
     overdueTotal,

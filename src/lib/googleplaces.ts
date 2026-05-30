@@ -1,4 +1,5 @@
 import type { OutscraperResult } from './outscraper'
+import { logger } from './logger'
 
 interface GooglePlace {
   id?: string
@@ -43,10 +44,13 @@ export async function searchBusinessesGoogle(query: string, limit: number): Prom
   const results: OutscraperResult[] = []
   let nextPageToken: string | undefined
 
+  logger.info('googleplaces', `[GOOGLE_SEARCH] query="${query}" limit=${limit}`)
+
   while (results.length < limit) {
+    const pageLimit = Math.min(20, limit - results.length)
     const body: Record<string, unknown> = {
       textQuery: query,
-      maxResultCount: Math.min(20, limit - results.length),
+      maxResultCount: pageLimit,
       languageCode: 'en',
       regionCode: 'AU',
     }
@@ -68,6 +72,9 @@ export async function searchBusinessesGoogle(query: string, limit: number): Prom
     }
 
     const data = await response.json() as GoogleSearchResponse
+
+    logger.info('googleplaces', `[GOOGLE_SEARCH_RESULT] query="${query}" requested=${pageLimit} returned=${data.places?.length ?? 0} hasNextPage=${!!data.nextPageToken}`)
+
     if (!data.places?.length) break
 
     results.push(...data.places.map(mapGooglePlace))

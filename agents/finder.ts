@@ -63,7 +63,7 @@ export async function loadFinderCategories(
       name: category.name,
       queries: category.search_keywords?.filter(Boolean) ?? [],
       capped: index < 4,
-      batchSize: index < 2 ? 5 : 3,
+      batchSize: 20,
       usePrioritySuburbs: category.use_priority_suburbs ?? false,
     }))
     .filter((category) => category.queries.length > 0)
