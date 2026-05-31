@@ -1482,6 +1482,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
         let comboNoWebsite        = 0
         let comboValidationFailed = 0
         let comboBlockedKeyword   = 0
+        let comboNoEmail          = 0
 
         let skip = 0
         let exhaustedThisQuery = false
@@ -1611,6 +1612,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                 const blockedDomain = rootHost(rawWebsite) ?? rawWebsite
                 socialOnlySkips++
                 comboValidationFailed++
+                comboNoEmail++
                 console.log(`[SOCIAL_DOMAIN_SKIP] domain=${blockedDomain} business=${name}`)
                 logger.info('finder', '[SOCIAL_DOMAIN_SKIP]', { domain: blockedDomain, business_name: name, url: rawWebsite })
                 noOutreachMethodsRemoved++
@@ -1619,6 +1621,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               if (blockType === 'marketplace') {
                 const blockedDomain = rootHost(rawWebsite) ?? rawWebsite
                 comboValidationFailed++
+                comboNoEmail++
                 console.log(`[MARKETPLACE_DOMAIN_SKIP] domain=${blockedDomain} business=${name}`)
                 logger.info('finder', '[MARKETPLACE_DOMAIN_SKIP]', { domain: blockedDomain, business_name: name, url: rawWebsite })
                 noOutreachMethodsRemoved++
@@ -1627,6 +1630,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               if (blockType === 'platform') {
                 const blockedDomain = rootHost(rawWebsite) ?? rawWebsite
                 comboValidationFailed++
+                comboNoEmail++
                 console.log(`[PLATFORM_DOMAIN_BLOCKED]\n${JSON.stringify({ domain: blockedDomain, business: name, reason: 'hosted_ordering_platform' }, null, 2)}`)
                 logger.info('finder', '[PLATFORM_DOMAIN_BLOCKED]', { domain: blockedDomain, business_name: name, reason: 'hosted_ordering_platform', url: rawWebsite })
                 noOutreachMethodsRemoved++
@@ -1638,6 +1642,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
             if (rawWebsite && INSTAGRAM_REGEX.test(rawWebsite)) {
               socialOnlySkips++
               comboValidationFailed++
+              comboNoEmail++
               logger.info('finder', `Skip Instagram website: ${name}`)
               noOutreachMethodsRemoved++
               continue
@@ -1923,6 +1928,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
             } else {
               websiteNoEmailSkips++
               comboValidationFailed++
+              comboNoEmail++
               noOutreachMethodsRemoved++
               logger.info('finder', 'No email found after website validation', {
                 business_name: name,
@@ -2017,6 +2023,8 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
             reason_breakdown: reasonBreakdown,
           })
         }
+
+        console.log(`[QUERY_SUMMARY]\nquery="${query}"\ngoogleReturned=${comboGoogleResults}\nduplicateDomains=${comboDuplicates}\nnoWebsite=${comboNoWebsite}\nnoEmail=${comboNoEmail}\nleadsCreated=${comboNewLeads}`)
 
         // Accumulate per-query stats for top/worst performance analysis
         if (comboGoogleResults > 0) {
