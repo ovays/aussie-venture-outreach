@@ -167,7 +167,7 @@ function computeLifecycle(lead: LeadRow, s: Settings, now = new Date()): Lifecyc
 export async function GET(): Promise<NextResponse> {
   const supabase = await createClient()
 
-  const [{ data: settingsRows }, { data: contactedLeads }, { data: deadLeads }, { count: deadTodayCount }] =
+  const [{ data: settingsRows }, { data: deadLeads }, { count: deadTodayCount }] =
     await Promise.all([
       supabase
         .from('settings')
@@ -184,11 +184,6 @@ export async function GET(): Promise<NextResponse> {
       supabase
         .from('leads')
         .select('id, business_name, email, status, reactivation_sent_at, emails(type, sent_at)')
-        .eq('status', 'contacted')
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('leads')
-        .select('id, business_name, email, status, reactivation_sent_at, emails(type, sent_at)')
         .eq('status', 'dead')
         .order('created_at', { ascending: false })
         .limit(200),
@@ -198,6 +193,24 @@ export async function GET(): Promise<NextResponse> {
         .eq('event_type', 'lead_marked_dead')
         .gte('created_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString()),
     ])
+
+  const LIFECYCLE_BATCH_SIZE = 1000
+  const contactedLeads: LeadRow[] = []
+  let lifecycleOffset = 0
+  while (true) {
+    const { data: batch } = await supabase
+      .from('leads')
+      .select('id, business_name, email, status, reactivation_sent_at, emails(type, sent_at)')
+      .eq('status', 'contacted')
+      .order('created_at', { ascending: false })
+      .range(lifecycleOffset, lifecycleOffset + LIFECYCLE_BATCH_SIZE - 1)
+    if (!batch?.length) break
+    contactedLeads.push(...(batch as LeadRow[]))
+    if (batch.length < LIFECYCLE_BATCH_SIZE) break
+    lifecycleOffset += LIFECYCLE_BATCH_SIZE
+  }
+
+  console.log('[LIFECYCLE_CONTACTED_LEADS_TOTAL]', contactedLeads.length)
 
   const sm: Record<string, string> = {}
   for (const row of settingsRows ?? []) sm[row.key] = row.value
@@ -213,7 +226,7 @@ export async function GET(): Promise<NextResponse> {
   }
 
   const now = new Date()
-  const allLeads = [...(contactedLeads ?? []), ...(deadLeads ?? [])] as LeadRow[]
+  const allLeads = [...contactedLeads, ...(deadLeads ?? [])] as LeadRow[]
   const leads = allLeads
     .filter((l) => l.email)
     .map((l) => computeLifecycle(l, settings, now))

@@ -276,7 +276,6 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
     { count: totalSent },
     { data: sentTodayByType },
     { data: settingsRows },
-    { data: contactedLeads },
   ] = await Promise.all([
     supabase
       .from('emails')
@@ -301,11 +300,24 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
       .from('settings')
       .select('key, value')
       .in('key', ['follow_up_1_days', 'follow_up_2_days', 'follow_up_3_days', 'dead_lead_days', 'reactivation_delay_days', 'dead_after_reactivation_days', 'reactivation_enabled']),
-    supabase
+  ])
+
+  const FU_STATS_BATCH_SIZE = 1000
+  const contactedLeads: ContactedFollowupLead[] = []
+  let fuStatsOffset = 0
+  while (true) {
+    const { data: batch } = await supabase
       .from('leads')
       .select('id, status, email, reactivation_sent_at, emails(id, lead_id, type, status, sent_at, replied_at)')
-      .in('status', FOLLOWUP_PENDING_LEAD_STATUSES),
-  ])
+      .in('status', FOLLOWUP_PENDING_LEAD_STATUSES)
+      .range(fuStatsOffset, fuStatsOffset + FU_STATS_BATCH_SIZE - 1)
+    if (!batch?.length) break
+    contactedLeads.push(...(batch as ContactedFollowupLead[]))
+    if (batch.length < FU_STATS_BATCH_SIZE) break
+    fuStatsOffset += FU_STATS_BATCH_SIZE
+  }
+
+  console.log('[DASHBOARD_CONTACTED_LEADS_TOTAL]', contactedLeads.length)
 
   const settingsMap: Record<string, string> = {}
   for (const row of settingsRows ?? []) {
@@ -323,7 +335,7 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
   let pendingFollowUp2 = 0
   let pendingFollowUp3 = 0
 
-  for (const lead of (contactedLeads ?? []) as ContactedFollowupLead[]) {
+  for (const lead of contactedLeads) {
     if (!lead.email) continue
     const emailsList = lead.emails ?? []
     const initialEmail = emailsList.find((email) => email.type === 'initial_pitch' && email.sent_at)
@@ -357,7 +369,7 @@ export async function getFollowupStats(supabase: QueryClient, date = new Date())
   let awaitingDead = 0
   let overdueTotal = 0
 
-  for (const lead of (contactedLeads ?? []) as ContactedFollowupLead[]) {
+  for (const lead of contactedLeads) {
     if (!lead.email) continue
     const emailsList = lead.emails ?? []
     const initialEmail = emailsList.find((e) => e.type === 'initial_pitch' && e.sent_at)
