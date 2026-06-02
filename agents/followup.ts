@@ -272,25 +272,6 @@ export async function runFollowUpAgent(): Promise<void> {
     logger.info('followup', `FU2_LIMIT = ${limits.follow_up_2}`)
     logger.info('followup', `FU3_LIMIT = ${limits.follow_up_3}`)
 
-    logger.info('followup', '[FU_ELIGIBILITY] querying contacted leads')
-    const { data: contactedLeads, error: contactedLeadsErr } = await supabase
-      .from('leads')
-      .select('*, emails(id, type, subject, sent_at, status)')
-      .eq('status', 'contacted')
-
-    if (contactedLeadsErr) {
-      logger.error('followup', '[FU_ELIGIBILITY] contacted leads query failed', { error: contactedLeadsErr.message })
-      throw contactedLeadsErr
-    }
-
-    logger.info('followup', `[FU_ELIGIBILITY] contacted leads fetched: ${contactedLeads?.length ?? 0}`)
-
-    if (!contactedLeads?.length) {
-      logger.info('followup', 'No contacted leads to follow up')
-      logger.info('followup', '[FOLLOWUP_QUEUE]', { pending_follow_up_1: 0, pending_follow_up_2: 0, pending_follow_up_3: 0 })
-      return
-    }
-
     const queues: Record<FollowUpType, FollowUpCandidate[]> = {
       follow_up_1: [],
       follow_up_2: [],
@@ -305,95 +286,130 @@ export async function runFollowUpAgent(): Promise<void> {
 
     const now = new Date()
 
-    for (const lead of contactedLeads as ContactedLead[]) {
-      if (!lead.email) {
-        skipNoEmail++
-        continue
+    logger.info('followup', '[FU_ELIGIBILITY] querying contacted leads (paginated)')
+
+    const FU_BATCH_SIZE = 1000
+    let fuOffset = 0
+    let totalProcessed = 0
+
+    while (true) {
+      const { data: batch, error: batchErr } = await supabase
+        .from('leads')
+        .select('*, emails(id, type, subject, sent_at, status)')
+        .eq('status', 'contacted')
+        .range(fuOffset, fuOffset + FU_BATCH_SIZE - 1)
+
+      if (batchErr) {
+        logger.error('followup', '[FU_ELIGIBILITY] contacted leads query failed', { error: batchErr.message, offset: fuOffset })
+        throw batchErr
       }
 
-      const emailsList = lead.emails ?? []
-      const initialPitchRows = emailsList.filter((email) => email.type === 'initial_pitch')
-      const initialEmail = initialPitchRows.find((email) => isFuEmailSent(email))
+      if (!batch?.length) break
 
-      logger.info('followup', '[FU_INITIAL_DEBUG]', {
-        lead_id:           lead.id,
-        initial_pitch_rows: initialPitchRows.map((e) => ({ id: e.id, status: e.status, sent_at: e.sent_at ?? null })),
-        chosen_sent_at:    initialEmail?.sent_at ?? null,
-      })
+      totalProcessed += batch.length
+      logger.info('followup', '[FU_ELIGIBILITY] batch fetched', { offset: fuOffset, batchSize: batch.length, totalSoFar: totalProcessed })
 
-      if (!initialEmail?.sent_at) {
-        skipNoInitialEmail++
-        logger.info('followup', '[FU_SKIP] no sent initial_pitch email', {
-          lead_id:   lead.id,
-          lead_name: lead.business_name,
-          emails:    emailsList.map((e) => ({ type: e.type, status: e.status, sent_at: e.sent_at ?? null })),
-        })
-        continue
-      }
-
-      const hasFu1Sent = emailsList.some((email) => email.type === 'follow_up_1' && isFuEmailSent(email))
-      const hasFu2Sent = emailsList.some((email) => email.type === 'follow_up_2' && isFuEmailSent(email))
-      const hasFu3Sent = emailsList.some((email) => email.type === 'follow_up_3' && isFuEmailSent(email))
-
-      const eligibility = computeFollowUpEligibility(
-        initialEmail.sent_at,
-        hasFu1Sent,
-        hasFu2Sent,
-        hasFu3Sent,
-        { fu1Days: followUp1Days, fu2Days: followUp2Days, fu3Days: followUp3Days },
-        now
-      )
-
-      logger.info('followup', '[FU_DUE_DEBUG]', {
-        lead_id:        lead.id,
-        next_fu_type:   eligibility.nextFuType,
-        initial_sent_at: initialEmail.sent_at,
-        days_since:     eligibility.daysSince,
-        due_at_days:    eligibility.dueAtDays,
-        days_until_due: eligibility.daysUntilDue,
-        is_due:         eligibility.isDue,
-        now_utc:        now.toISOString(),
-      })
-
-      // All FUs sent — consider dead-marking when reactivation is disabled.
-      // When reactivation is enabled, the reactivation agent handles dead-marking instead.
-      if (eligibility.nextFuType === null) {
-        const fu3Email = emailsList.find((email) => email.type === 'follow_up_3' && isFuEmailSent(email))
-        if (!reactivationEnabled && fu3Email?.sent_at && fu3Email.sent_at < today.start && eligibility.daysSince >= followUp3Days) {
-          await supabase.from('leads').update({ status: 'dead' }).eq('id', lead.id)
-          await supabase.from('activity_log').insert({
-            event_type: 'lead_marked_dead',
-            lead_id: lead.id,
-            description: `Lead marked as dead: ${lead.business_name} (${eligibility.daysSince} days no reply)`,
-            metadata: { days_since: eligibility.daysSince },
-          })
-          logger.info('followup', `Marked dead: ${lead.business_name}`, { daysSince: eligibility.daysSince })
-          markedDead++
+      for (const lead of batch as ContactedLead[]) {
+        if (!lead.email) {
+          skipNoEmail++
           continue
         }
-        skipAllSent++
-        continue
-      }
 
-      const candidate = { lead, initialEmail, daysSince: eligibility.daysSince }
+        const emailsList = lead.emails ?? []
+        const initialPitchRows = emailsList.filter((email) => email.type === 'initial_pitch')
+        const initialEmail = initialPitchRows.find((email) => isFuEmailSent(email))
 
-      if (eligibility.isDue) {
-        queues[eligibility.nextFuType].push(candidate)
-      } else {
-        skipNotYetDue++
-        logger.info('followup', '[FU_SKIP] not yet due', {
-          lead_id:        lead.id,
-          lead_name:      lead.business_name,
-          days_since:     eligibility.daysSince,
-          days_until_due: eligibility.daysUntilDue,
-          next_fu_type:   eligibility.nextFuType,
-          due_at_days:    eligibility.dueAtDays,
+        logger.info('followup', '[FU_INITIAL_DEBUG]', {
+          lead_id:           lead.id,
+          initial_pitch_rows: initialPitchRows.map((e) => ({ id: e.id, status: e.status, sent_at: e.sent_at ?? null })),
+          chosen_sent_at:    initialEmail?.sent_at ?? null,
         })
+
+        if (!initialEmail?.sent_at) {
+          skipNoInitialEmail++
+          logger.info('followup', '[FU_SKIP] no sent initial_pitch email', {
+            lead_id:   lead.id,
+            lead_name: lead.business_name,
+            emails:    emailsList.map((e) => ({ type: e.type, status: e.status, sent_at: e.sent_at ?? null })),
+          })
+          continue
+        }
+
+        const hasFu1Sent = emailsList.some((email) => email.type === 'follow_up_1' && isFuEmailSent(email))
+        const hasFu2Sent = emailsList.some((email) => email.type === 'follow_up_2' && isFuEmailSent(email))
+        const hasFu3Sent = emailsList.some((email) => email.type === 'follow_up_3' && isFuEmailSent(email))
+
+        const eligibility = computeFollowUpEligibility(
+          initialEmail.sent_at,
+          hasFu1Sent,
+          hasFu2Sent,
+          hasFu3Sent,
+          { fu1Days: followUp1Days, fu2Days: followUp2Days, fu3Days: followUp3Days },
+          now
+        )
+
+        logger.info('followup', '[FU_DUE_DEBUG]', {
+          lead_id:        lead.id,
+          next_fu_type:   eligibility.nextFuType,
+          initial_sent_at: initialEmail.sent_at,
+          days_since:     eligibility.daysSince,
+          due_at_days:    eligibility.dueAtDays,
+          days_until_due: eligibility.daysUntilDue,
+          is_due:         eligibility.isDue,
+          now_utc:        now.toISOString(),
+        })
+
+        // All FUs sent — consider dead-marking when reactivation is disabled.
+        // When reactivation is enabled, the reactivation agent handles dead-marking instead.
+        if (eligibility.nextFuType === null) {
+          const fu3Email = emailsList.find((email) => email.type === 'follow_up_3' && isFuEmailSent(email))
+          if (!reactivationEnabled && fu3Email?.sent_at && fu3Email.sent_at < today.start && eligibility.daysSince >= followUp3Days) {
+            await supabase.from('leads').update({ status: 'dead' }).eq('id', lead.id)
+            await supabase.from('activity_log').insert({
+              event_type: 'lead_marked_dead',
+              lead_id: lead.id,
+              description: `Lead marked as dead: ${lead.business_name} (${eligibility.daysSince} days no reply)`,
+              metadata: { days_since: eligibility.daysSince },
+            })
+            logger.info('followup', `Marked dead: ${lead.business_name}`, { daysSince: eligibility.daysSince })
+            markedDead++
+            continue
+          }
+          skipAllSent++
+          continue
+        }
+
+        const candidate = { lead, initialEmail, daysSince: eligibility.daysSince }
+
+        if (eligibility.isDue) {
+          queues[eligibility.nextFuType].push(candidate)
+        } else {
+          skipNotYetDue++
+          logger.info('followup', '[FU_SKIP] not yet due', {
+            lead_id:        lead.id,
+            lead_name:      lead.business_name,
+            days_since:     eligibility.daysSince,
+            days_until_due: eligibility.daysUntilDue,
+            next_fu_type:   eligibility.nextFuType,
+            due_at_days:    eligibility.dueAtDays,
+          })
+        }
       }
+
+      if (batch.length < FU_BATCH_SIZE) break
+      fuOffset += FU_BATCH_SIZE
+    }
+
+    logger.info('followup', `[FU_ELIGIBILITY] contacted leads fetched: ${totalProcessed}`)
+
+    if (totalProcessed === 0) {
+      logger.info('followup', 'No contacted leads to follow up')
+      logger.info('followup', '[FOLLOWUP_QUEUE]', { pending_follow_up_1: 0, pending_follow_up_2: 0, pending_follow_up_3: 0 })
+      return
     }
 
     logger.info('followup', '[FU_ELIGIBILITY] queue build complete', {
-      contacted_leads_total: contactedLeads.length,
+      contacted_leads_total: totalProcessed,
       fu1_eligible:   queues.follow_up_1.length,
       fu2_eligible:   queues.follow_up_2.length,
       fu3_eligible:   queues.follow_up_3.length,
