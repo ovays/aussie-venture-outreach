@@ -46,7 +46,12 @@
       "Bash(Get-ChildItem -Path \"C:\\\\agents\\\\aussie-venture-outreach\" -Recurse -Directory)",
       "Bash(Sort-Object)",
       "Bash(Get-ChildItem -Path \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\\\\app\\\\api\" -Recurse -Filter \"*.ts\")",
-      "Bash(Remove-Item *)"
+      "Bash(Remove-Item *)",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); counts={}; [counts.update\\({r['status']: counts.get\\(r['status'],0\\)+1}\\) for r in data]; print\\(json.dumps\\(counts, indent=2\\)\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(python3)",
+      "Bash(curl -s 'https://obppfnujusqiwjhwzosv.supabase.co/rest/v1/leads?select=id&limit=1000' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9icHBmbnVqdXNxaXdqaHd6b3N2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjU5OTAyMCwiZXhwIjoyMDkyMTc1MDIwfQ.YJBXrpGS6FFyoy2nEtO3IhM4DOZnhMjYVKWxQFJjMko' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9icHBmbnVqdXNxaXdqaHd6b3N2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjU5OTAyMCwiZXhwIjoyMDkyMTc1MDIwfQ.YJBXrpGS6FFyoy2nEtO3IhM4DOZnhMjYVKWxQFJjMko')",
+      "Bash(curl -s 'https://obppfnujusqiwjhwzosv.supabase.co/rest/v1/leads?select=id,business_name,status,emails\\(replied_at\\)&status=eq.replied' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9icHBmbnVqdXNxaXdqaHd6b3N2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjU5OTAyMCwiZXhwIjoyMDkyMTc1MDIwfQ.YJBXrpGS6FFyoy2nEtO3IhM4DOZnhMjYVKWxQFJjMko' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9icHBmbnVqdXNxaXdqaHd6b3N2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjU5OTAyMCwiZXhwIjoyMDkyMTc1MDIwfQ.YJBXrpGS6FFyoy2nEtO3IhM4DOZnhMjYVKWxQFJjMko')"
     ]
   }
 }

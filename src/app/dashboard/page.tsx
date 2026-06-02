@@ -18,6 +18,23 @@ import { Send, MessageSquare, TrendingUp, RotateCcw, AlertTriangle, Flame, Zap }
 
 export const revalidate = 60
 
+async function getAllLeadStatuses(supabase: Awaited<ReturnType<typeof createClient>>) {
+  const PAGE = 1000
+  const rows: { status: string }[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await supabase
+      .from('leads')
+      .select('status')
+      .range(from, from + PAGE - 1)
+    if (error || !data?.length) break
+    rows.push(...data)
+    if (data.length < PAGE) break
+    from += PAGE
+  }
+  return { data: rows }
+}
+
 export default async function DashboardPage() {
   const supabase = await createClient()
   const twelveWeeksAgo = new Date(Date.now() - 84 * 86_400_000).toISOString()
@@ -32,7 +49,7 @@ export default async function DashboardPage() {
     { data: hotLeadsRaw },
   ] = await Promise.all([
     getDashboardMetrics(supabase),
-    supabase.from('leads').select('status'),
+    getAllLeadStatuses(supabase),
     supabase.from('activity_log').select('*').order('created_at', { ascending: false }).limit(20),
     supabase.from('dm_queue').select('id').eq('status', 'pending'),
     supabase.from('deals').select('deal_value').gte('closed_at', new Date(Date.now() - 30 * 86_400_000).toISOString()),
