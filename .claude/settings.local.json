@@ -44,7 +44,9 @@
       "Bash(Get-ChildItem -Path \"C:\\\\agents\\\\aussie-venture-outreach\" -Directory -Recurse)",
       "Bash(Get-ChildItem -Recurse -Filter \"*.ts\" C:\\\\agents\\\\aussie-venture-outreach\\\\agents)",
       "Bash(Get-ChildItem -Path \"C:\\\\agents\\\\aussie-venture-outreach\" -Recurse -Directory)",
-      "Bash(Sort-Object)"
+      "Bash(Sort-Object)",
+      "Bash(Get-ChildItem -Path \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\\\\app\\\\api\" -Recurse -Filter \"*.ts\")",
+      "Bash(Remove-Item *)"
     ]
   }
 }

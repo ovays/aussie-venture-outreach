@@ -100,13 +100,13 @@ export async function runReactivationAgent(): Promise<void> {
       }
 
       // Reactivation eligibility.
-      // Must have completed follow_up_2 to ensure lead went through the full outreach flow.
+      // Must have completed follow_up_3 to ensure lead went through the full outreach flow.
       // Timing is relative to initial outreach date (NOT dead date or followup date).
       const initialEmail = emailsList.find((e) => e.type === 'initial_pitch' && e.sent_at)
       if (!initialEmail?.sent_at) continue
 
-      const hasFollowUp2 = emailsList.some((e) => e.type === 'follow_up_2' && e.sent_at)
-      if (!hasFollowUp2) continue
+      const hasFollowUp3 = emailsList.some((e) => e.type === 'follow_up_3' && e.sent_at)
+      if (!hasFollowUp3) continue
 
       const daysSinceInitial = Math.floor(
         (Date.now() - new Date(initialEmail.sent_at).getTime()) / 86_400_000
