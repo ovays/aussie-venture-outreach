@@ -125,26 +125,13 @@ async function main(): Promise<void> {
     console.log('\n  ⚠  system_active=false — production agent would exit immediately')
   }
 
-  // ── Primary query — IDENTICAL to agents/followup.ts ──────────────────────
-  // Production sender: .from('leads').select('*, emails(...)').eq('status','contacted')
-  console.log('\nQuerying contacted leads…')
-  const { data: contactedLeads, error: contactedErr } = await supabase
-    .from('leads')
-    .select('*, emails(id, type, subject, sent_at, status)')
-    .eq('status', 'contacted')
-
-  if (contactedErr) {
-    console.error('✗ Failed to query contacted leads:', contactedErr.message)
-    process.exit(1)
-  }
-
   // ── Supplemental counts — leads the sender never queries ─────────────────
   const [{ count: repliedCount }, { count: deadCount }] = await Promise.all([
     supabase.from('leads').select('*', { count: 'exact', head: true }).eq('status', 'replied'),
     supabase.from('leads').select('*', { count: 'exact', head: true }).eq('status', 'dead'),
   ])
 
-  // ── Eligibility loop — MIRRORS agents/followup.ts exactly ─────────────────
+  // ── Paginated query + eligibility loop — IDENTICAL to agents/followup.ts ──
   const eligible: Record<FollowUpType, Sample[]> = {
     follow_up_1: [],
     follow_up_2: [],
@@ -156,57 +143,84 @@ async function main(): Promise<void> {
   const skipAllSent:   string[]  = []
 
   const now = new Date()
+  const FU_BATCH_SIZE = 1000
+  let fuOffset = 0
+  let totalFetched = 0
+  let batchesProcessed = 0
 
-  for (const lead of (contactedLeads ?? []) as ContactedLead[]) {
-    // Step 1: skip leads with no email address
-    if (!lead.email) {
-      skipNoEmail.push(lead.business_name)
-      continue
+  console.log('\nQuerying contacted leads (paginated)…')
+
+  while (true) {
+    const { data: batch, error: batchErr } = await supabase
+      .from('leads')
+      .select('*, emails(id, type, subject, sent_at, status)')
+      .eq('status', 'contacted')
+      .range(fuOffset, fuOffset + FU_BATCH_SIZE - 1)
+
+    if (batchErr) {
+      console.error(`✗ Failed to query contacted leads (offset ${fuOffset}):`, batchErr.message)
+      process.exit(1)
     }
 
-    const emails           = lead.emails ?? []
-    const initialPitchRows = emails.filter((e) => e.type === 'initial_pitch')
-    const initialEmail     = initialPitchRows.find((e) => isFuEmailSent(e))
+    if (!batch?.length) break
 
-    // Step 2: skip leads with no sent initial_pitch email
-    if (!initialEmail?.sent_at) {
-      skipNoInitial.push(lead.business_name)
-      continue
+    totalFetched += batch.length
+    batchesProcessed++
+
+    for (const lead of batch as ContactedLead[]) {
+      // Step 1: skip leads with no email address
+      if (!lead.email) {
+        skipNoEmail.push(lead.business_name)
+        continue
+      }
+
+      const emails           = lead.emails ?? []
+      const initialPitchRows = emails.filter((e) => e.type === 'initial_pitch')
+      const initialEmail     = initialPitchRows.find((e) => isFuEmailSent(e))
+
+      // Step 2: skip leads with no sent initial_pitch email
+      if (!initialEmail?.sent_at) {
+        skipNoInitial.push(lead.business_name)
+        continue
+      }
+
+      const hasFu1Sent = emails.some((e) => e.type === 'follow_up_1' && isFuEmailSent(e))
+      const hasFu2Sent = emails.some((e) => e.type === 'follow_up_2' && isFuEmailSent(e))
+      const hasFu3Sent = emails.some((e) => e.type === 'follow_up_3' && isFuEmailSent(e))
+
+      // Step 3: compute eligibility using shared production function
+      const eligibility = computeFollowUpEligibility(
+        initialEmail.sent_at,
+        hasFu1Sent,
+        hasFu2Sent,
+        hasFu3Sent,
+        { fu1Days, fu2Days, fu3Days },
+        now
+      )
+
+      // Step 4: all FUs sent — nothing left for this lead
+      if (eligibility.nextFuType === null) {
+        skipAllSent.push(lead.business_name)
+        continue
+      }
+
+      const sample: Sample = {
+        name:         lead.business_name,
+        daysSince:    eligibility.daysSince,
+        dueAtDays:    eligibility.dueAtDays,
+        daysUntilDue: eligibility.daysUntilDue,
+      }
+
+      // Step 5: due today → eligible; not due → waiting
+      if (eligibility.isDue) {
+        eligible[eligibility.nextFuType].push(sample)
+      } else {
+        notYetDue.push(sample)
+      }
     }
 
-    const hasFu1Sent = emails.some((e) => e.type === 'follow_up_1' && isFuEmailSent(e))
-    const hasFu2Sent = emails.some((e) => e.type === 'follow_up_2' && isFuEmailSent(e))
-    const hasFu3Sent = emails.some((e) => e.type === 'follow_up_3' && isFuEmailSent(e))
-
-    // Step 3: compute eligibility using shared production function
-    const eligibility = computeFollowUpEligibility(
-      initialEmail.sent_at,
-      hasFu1Sent,
-      hasFu2Sent,
-      hasFu3Sent,
-      { fu1Days, fu2Days, fu3Days },
-      now
-    )
-
-    // Step 4: all FUs sent — nothing left for this lead
-    if (eligibility.nextFuType === null) {
-      skipAllSent.push(lead.business_name)
-      continue
-    }
-
-    const sample: Sample = {
-      name:         lead.business_name,
-      daysSince:    eligibility.daysSince,
-      dueAtDays:    eligibility.dueAtDays,
-      daysUntilDue: eligibility.daysUntilDue,
-    }
-
-    // Step 5: due today → eligible; not due → waiting
-    if (eligibility.isDue) {
-      eligible[eligibility.nextFuType].push(sample)
-    } else {
-      notYetDue.push(sample)
-    }
+    if (batch.length < FU_BATCH_SIZE) break
+    fuOffset += FU_BATCH_SIZE
   }
 
   // ── Summary ───────────────────────────────────────────────────────────────
@@ -226,7 +240,8 @@ async function main(): Promise<void> {
   console.log(`Skipped - replied: ${repliedCount ?? 0}  ← status='replied', sender never queries these`)
   console.log(`Skipped - dead:    ${deadCount ?? 0}  ← status='dead', sender never queries these`)
   console.log('')
-  console.log(`Total contacted leads fetched: ${contactedLeads?.length ?? 0}`)
+  console.log(`Total contacted leads fetched: ${totalFetched}`)
+  console.log(`Batches processed:            ${batchesProcessed}`)
 
   // ── Sample leads ──────────────────────────────────────────────────────────
   console.log('\n' + DIV)
