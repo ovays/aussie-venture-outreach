@@ -17,6 +17,7 @@ export const dailyPipelineJob = schedules.task({
     console.log("Starting scheduled daily pipeline...")
 
     let leadsFound = 0
+    let runtimeLimitHit = false
 
     // ── Discovery pipeline (stages 1–4) ────────────────────────────────────
     // Finder discovers leads → Researcher enriches → Writer drafts emails →
@@ -28,42 +29,52 @@ export const dailyPipelineJob = schedules.task({
     //
     // Exception: a 402 (Outscraper balance exhausted) is fatal — it aborts
     // everything including follow-up to prevent charging further.
+    //
+    // When Finder hits the runtime limit, Researcher/Writer/Sender are skipped
+    // to avoid cascading into a second long stage — Follow-up and Reactivation
+    // still run regardless.
 
     try {
       console.log("[PIPELINE_STAGE] Finder starting")
-      leadsFound = await runFinderAgent()
-      console.log("[PIPELINE_STAGE] Finder complete", { leadsFound })
+      const finderResult = await runFinderAgent()
+      leadsFound = finderResult.leadsFound
+      runtimeLimitHit = finderResult.runtimeLimitHit
+      console.log("[PIPELINE_STAGE] Finder complete", { leadsFound, runtimeLimitHit })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (message.includes("402")) throw new Error(`Pipeline failed at Finder: ${message}`)
       console.error("PIPELINE ERROR at Finder (follow-up will still run):", message)
     }
 
-    try {
-      console.log("[PIPELINE_STAGE] Researcher starting", { leadsFound })
-      const researched = await runResearcherAgent()
-      console.log("[PIPELINE_STAGE] Researcher complete", { researched })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error("PIPELINE ERROR at Researcher (follow-up will still run):", message)
-    }
+    if (runtimeLimitHit) {
+      console.log("[PIPELINE_STAGE] Skipping Researcher/Writer/Sender — Finder hit runtime limit")
+    } else {
+      try {
+        console.log("[PIPELINE_STAGE] Researcher starting", { leadsFound })
+        const researched = await runResearcherAgent()
+        console.log("[PIPELINE_STAGE] Researcher complete", { researched })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error("PIPELINE ERROR at Researcher (follow-up will still run):", message)
+      }
 
-    try {
-      console.log("[PIPELINE_STAGE] Writer starting")
-      await runWriterAgent()
-      console.log("[PIPELINE_STAGE] Writer complete")
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error("PIPELINE ERROR at Writer (follow-up will still run):", message)
-    }
+      try {
+        console.log("[PIPELINE_STAGE] Writer starting")
+        await runWriterAgent()
+        console.log("[PIPELINE_STAGE] Writer complete")
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error("PIPELINE ERROR at Writer (follow-up will still run):", message)
+      }
 
-    try {
-      console.log("[PIPELINE_STAGE] Sender starting")
-      const senderResult = await runSenderAgent()
-      console.log("[PIPELINE_STAGE] Sender complete", senderResult)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error("PIPELINE ERROR at Sender (follow-up will still run):", message)
+      try {
+        console.log("[PIPELINE_STAGE] Sender starting")
+        const senderResult = await runSenderAgent()
+        console.log("[PIPELINE_STAGE] Sender complete", senderResult)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error("PIPELINE ERROR at Sender (follow-up will still run):", message)
+      }
     }
 
     // ── Follow-up pipeline (stage 5) ────────────────────────────────────────

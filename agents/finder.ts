@@ -1156,7 +1156,7 @@ async function cleanupDmQueue(supabase: ReturnType<typeof createServiceClient>):
 
 // ── Main agent ───────────────────────────────────────────────────────────────
 
-export async function runFinderAgent(): Promise<number> {
+export async function runFinderAgent(): Promise<{ leadsFound: number; runtimeLimitHit: boolean }> {
   const supabase = createServiceClient()
 
   try {
@@ -1168,7 +1168,7 @@ export async function runFinderAgent(): Promise<number> {
 
   if (systemSetting?.value !== 'true') {
     logger.info('finder', 'System paused - skipped')
-    return 0
+    return { leadsFound: 0, runtimeLimitHit: false }
   }
 
   const [emailLimitRow, dmLimitRow, totalLimitRow, dailyOutscraperLimitRow] = await Promise.all([
@@ -2089,6 +2089,11 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
   // PHASE 2 — MANUAL INSTAGRAM DM QUEUE
   // No Outscraper calls — queue existing leads for manual Instagram outreach
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  const runtimeLimitHit = safetyLimitHit && safetyLimitReason.includes('max_runtime')
+
+  if (runtimeLimitHit) {
+    logger.info('finder', 'Phase 2 skipped — runtime limit hit')
+  } else {
   logger.info('finder', 'Phase 2: Instagram DM Queue (free)')
 
   await cleanupDmQueue(supabase)
@@ -2153,6 +2158,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
   }
 
   logger.info('finder', 'Phase 2 complete', { dmCount, target: DM_TARGET })
+  } // end if (!runtimeLimitHit)
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // SUMMARY
@@ -2447,7 +2453,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
     logger.error('finder', 'Failed to persist discovery_run_metrics', { error: metricsInsertError.message })
   }
 
-  return leadsKept
+  return { leadsFound: leadsKept, runtimeLimitHit }
 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
