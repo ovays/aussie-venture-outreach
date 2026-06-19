@@ -25,24 +25,27 @@ export async function POST(
     return NextResponse.json({ error: 'Lead has no email address' }, { status: 400 })
   }
 
-  // Try to reuse most recent email draft for this lead
-  const { data: existingEmail } = await supabase
+  // Look for the existing pending_send draft — the same record we will mark sent.
+  const { data: pendingEmail } = await supabase
     .from('emails')
-    .select('subject, body_html, body_text')
+    .select('id, subject, body_html, body_text')
     .eq('lead_id', id)
-    .order('created_at', { ascending: false })
+    .eq('type', 'initial_pitch')
+    .eq('status', 'pending_send')
     .limit(1)
     .maybeSingle()
 
+  let emailRowId: string | null = pendingEmail?.id ?? null
   let subject: string
   let bodyHtml: string
   let bodyText: string
 
-  if (existingEmail?.subject && existingEmail?.body_html) {
-    subject  = existingEmail.subject
-    bodyHtml = existingEmail.body_html
-    bodyText = existingEmail.body_text ?? ''
+  if (pendingEmail?.subject && pendingEmail?.body_html) {
+    subject  = pendingEmail.subject
+    bodyHtml = pendingEmail.body_html
+    bodyText = pendingEmail.body_text ?? ''
   } else {
+    // No draft yet (lead is new/researched) — generate content on the fly.
     const isSydney = lead.city?.toLowerCase() === 'sydney'
     const VISIT_ELIGIBLE = [
       'Halal Restaurants', 'Halal Cafes', 'Halal Bakeries / Dessert Shops',
@@ -79,23 +82,39 @@ export async function POST(
     return NextResponse.json({ error: 'Failed to send email — check Resend API key' }, { status: 500 })
   }
 
-  await Promise.all([
-    supabase.from('emails').insert({
+  const sentAt = new Date().toISOString()
+
+  if (emailRowId) {
+    // Update the existing pending_send row in place — same record, now sent.
+    await supabase.from('emails').update({
+      status:    'sent',
+      resend_id: result.id,
+      sent_at:   sentAt,
+    }).eq('id', emailRowId)
+  } else {
+    // No pre-existing draft — insert the single sent record.
+    const { data: inserted } = await supabase.from('emails').insert({
       lead_id:   id,
       type:      'initial_pitch',
       subject,
       body_html: bodyHtml,
       body_text: bodyText,
       status:    'sent',
-    }),
+      resend_id: result.id,
+      sent_at:   sentAt,
+    }).select('id').single()
+    emailRowId = inserted?.id ?? null
+  }
+
+  await Promise.all([
     supabase.from('leads').update({
       status:     'contacted',
-      updated_at: new Date().toISOString(),
+      updated_at: sentAt,
     }).eq('id', id),
     supabase.from('activity_log').insert({
       event_type:  'email_sent',
       lead_id:     id,
-      description: `Email resent to ${lead.business_name} (${lead.email})`,
+      description: `Email sent to ${lead.business_name} (${lead.email})`,
       metadata:    { subject, resend_id: result.id },
     }),
   ])

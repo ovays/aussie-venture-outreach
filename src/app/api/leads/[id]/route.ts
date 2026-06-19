@@ -18,7 +18,7 @@ export async function GET(
     supabase.from('leads').select('*').eq('id', id).single(),
     supabase
       .from('emails')
-      .select('id, type, subject, status, sent_at, replied_at, created_at')
+      .select('id, type, subject, body_text, status, sent_at, replied_at, created_at')
       .eq('lead_id', id)
       .order('created_at', { ascending: true }),
     supabase
@@ -76,4 +76,27 @@ export async function PATCH(
   }
 
   return NextResponse.json({ data })
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const supabase = await createClient()
+
+  const { data: lead } = await supabase.from('leads').select('id').eq('id', id).single()
+  if (!lead) return NextResponse.json({ error: 'Lead not found' }, { status: 404 })
+
+  // Delete child records in dependency order (follow_ups references emails via email_id)
+  await supabase.from('follow_ups').delete().eq('lead_id', id)
+  await supabase.from('dm_queue').delete().eq('lead_id', id)
+  await supabase.from('deals').delete().eq('lead_id', id)
+  await supabase.from('activity_log').delete().eq('lead_id', id)
+  await supabase.from('emails').delete().eq('lead_id', id)
+
+  const { error } = await supabase.from('leads').delete().eq('id', id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ success: true })
 }

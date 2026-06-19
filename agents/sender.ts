@@ -114,6 +114,7 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     .eq('status', 'pending_send')
     .eq('type', 'initial_pitch')
     .eq('leads.status', 'email_ready')
+    .neq('leads.source', 'manual')
 
   if (eligibleCountErr) {
     logger.error('sender', '[SENDER_QUERY] Eligible count failed', { error: eligibleCountErr.message })
@@ -132,14 +133,14 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
 
 const { data: pendingEmailsRaw, error: pendingEmailsErr } = await supabase
   .from('emails')
-  .select('*, leads!inner(id, email, business_name, status)')
+  .select('*, leads!inner(id, email, business_name, status, source)')
   .eq('status', 'pending_send')
   .eq('type', 'initial_pitch')
   .order('created_at', { ascending: true })
 .limit(100)
 
   const pendingEmails = (pendingEmailsRaw || []).filter(
-  (email) => email.leads?.status === 'email_ready'
+  (email) => email.leads?.status === 'email_ready' && email.leads?.source !== 'manual'
 )
 console.log("RAW PENDING", pendingEmailsRaw)
 console.log("FILTERED PENDING", pendingEmails)
@@ -174,7 +175,7 @@ console.log("FILTERED PENDING", pendingEmails)
 
   for (let i = 0; i < toSend.length; i++) {
     const emailRecord = toSend[i]
-    const lead = emailRecord.leads as { id: string; email: string | null; business_name: string; status: string } | null
+    const lead = emailRecord.leads as { id: string; email: string | null; business_name: string; status: string; source: string | null } | null
 
     if (!lead?.email) {
       logger.info('sender', `#${i + 1}/${total} SKIP — no email address for lead`, { lead_id: emailRecord.lead_id })

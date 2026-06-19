@@ -1,0 +1,238 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Modal } from '@/components/ui/Modal'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { Select } from '@/components/ui/Select'
+
+interface Category {
+  id: string
+  name: string
+  status: string
+}
+
+interface Props {
+  open: boolean
+  onClose: () => void
+  onCreated: () => void
+}
+
+const CITIES = ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide']
+const cityOptions = CITIES.map((c) => ({ value: c, label: c }))
+
+export function AddLeadModal({ open, onClose, onCreated }: Props) {
+  const [businessName, setBusinessName] = useState('')
+  const [email, setEmail] = useState('')
+  const [website, setWebsite] = useState('')
+  const [suburb, setSuburb] = useState('')
+  const [city, setCity] = useState('Sydney')
+  const [categoryId, setCategoryId] = useState('')
+  const [categories, setCategories] = useState<Category[]>([])
+  const [loading, setLoading] = useState(false)
+  const [drafting, setDrafting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [draftError, setDraftError] = useState<string | null>(null)
+  const [domainWarning, setDomainWarning] = useState<{ domain: string; existing: { id: string; business_name: string } } | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    fetch('/api/categories')
+      .then((r) => r.json())
+      .then((json: { data?: Category[] }) => {
+        const all = json.data ?? []
+        setCategories(all)
+        if (all.length > 0) setCategoryId(all[0].id)
+      })
+      .catch(() => {})
+  }, [open])
+
+  function reset() {
+    setBusinessName('')
+    setEmail('')
+    setWebsite('')
+    setSuburb('')
+    setCity('Sydney')
+    setCategoryId('')
+    setError(null)
+    setDraftError(null)
+    setDomainWarning(null)
+  }
+
+  function handleClose() {
+    reset()
+    onClose()
+  }
+
+  async function submitLead(force = false) {
+    setError(null)
+    setDraftError(null)
+    setDomainWarning(null)
+    const selectedCategory = categories.find((c) => c.id === categoryId)
+    if (!selectedCategory) {
+      setError('Please select a category')
+      return
+    }
+
+    // Phase 1: create the lead
+    setLoading(true)
+    let leadId: string | null = null
+    try {
+      const res = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          business_name: businessName,
+          email,
+          website: website || undefined,
+          suburb,
+          city,
+          category_id: selectedCategory.id,
+          category_name: selectedCategory.name,
+          ...(force && { force: true }),
+        }),
+      })
+      const json = await res.json() as {
+        data?: { id: string }
+        error?: string
+        type?: string
+        domain?: string
+        existing?: { id: string; business_name: string }
+      }
+      if (!res.ok) {
+        if (res.status === 409 && json.type === 'domain_duplicate' && json.domain && json.existing) {
+          setDomainWarning({ domain: json.domain, existing: json.existing })
+        } else {
+          setError(json.error ?? 'Failed to create lead')
+        }
+        return
+      }
+      leadId = json.data?.id ?? null
+      onCreated()
+    } finally {
+      setLoading(false)
+    }
+
+    if (!leadId) return
+
+    // Phase 2: generate draft immediately
+    setDrafting(true)
+    try {
+      const draftRes = await fetch(`/api/leads/${leadId}/generate-draft`, { method: 'POST' })
+      if (!draftRes.ok) {
+        const draftJson = await draftRes.json() as { error?: string }
+        setDraftError(draftJson.error ?? 'Draft generation failed. The scheduled writer will create a draft later.')
+        return
+      }
+      onCreated() // refresh again — lead is now email_ready
+      reset()
+      onClose()
+    } catch {
+      setDraftError('Draft generation failed. The scheduled writer will create a draft later.')
+    } finally {
+      setDrafting(false)
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    await submitLead(false)
+  }
+
+  const categoryOptions = categories.map((c) => ({ value: c.id, label: c.name }))
+  const isValid = businessName.trim() && email.trim() && suburb.trim() && categoryId
+
+  return (
+    <Modal open={open} onClose={handleClose} title="Add Lead">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Input
+          label="Business Name *"
+          value={businessName}
+          onChange={(e) => setBusinessName(e.target.value)}
+          placeholder="e.g. Bondi Bites Café"
+          required
+          autoFocus
+        />
+        <Input
+          label="Email *"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="contact@example.com"
+          required
+        />
+        <Input
+          label="Website"
+          type="url"
+          value={website}
+          onChange={(e) => setWebsite(e.target.value)}
+          placeholder="https://example.com"
+        />
+        <Input
+          label="Suburb *"
+          value={suburb}
+          onChange={(e) => setSuburb(e.target.value)}
+          placeholder="e.g. Bondi"
+          required
+        />
+        <Select
+          label="City *"
+          value={city}
+          onChange={(e) => setCity(e.target.value)}
+          options={cityOptions}
+          required
+        />
+        <Select
+          label="Category *"
+          value={categoryId}
+          onChange={(e) => setCategoryId(e.target.value)}
+          options={categoryOptions}
+          placeholder={categories.length === 0 ? 'Loading categories…' : undefined}
+          required
+        />
+
+        {error && (
+          <p className="text-sm text-red-400">{error}</p>
+        )}
+
+        {domainWarning && (
+          <div className="rounded-lg p-3 text-sm" style={{ background: 'rgba(251,146,60,0.08)', border: '1px solid rgba(251,146,60,0.2)' }}>
+            <p className="text-yellow-400 mb-2.5">
+              A lead already exists for <span className="font-semibold">{domainWarning.domain}</span>{' '}
+              ({domainWarning.existing.business_name}). Add this lead anyway?
+            </p>
+            <div className="flex gap-2">
+              <Button type="button" variant="ghost" onClick={() => setDomainWarning(null)} disabled={loading || drafting}>
+                Cancel
+              </Button>
+              <Button type="button" onClick={() => submitLead(true)} disabled={loading || drafting}>
+                {loading ? 'Adding…' : 'Add Anyway'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {draftError && (
+          <p className="text-sm text-yellow-400">Lead created. {draftError}</p>
+        )}
+
+        {!domainWarning && (
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="ghost" onClick={handleClose} disabled={loading || drafting}>
+              Cancel
+            </Button>
+            {draftError ? (
+              <Button type="button" onClick={handleClose}>
+                Close
+              </Button>
+            ) : (
+              <Button type="submit" disabled={loading || drafting || !isValid}>
+                {loading ? 'Adding…' : drafting ? 'Generating draft…' : 'Add Lead'}
+              </Button>
+            )}
+          </div>
+        )}
+      </form>
+    </Modal>
+  )
+}

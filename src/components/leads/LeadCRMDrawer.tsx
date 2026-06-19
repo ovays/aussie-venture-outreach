@@ -5,7 +5,7 @@ import {
   X, Copy, ExternalLink, Phone, Star, Globe, Mail, AtSign,
   Send, MessageSquare, TrendingUp, RotateCcw, Trophy, Skull,
   StickyNote, Zap, Activity, CheckCircle2, AlertTriangle, Clock,
-  ChevronDown, ChevronUp, Flame, Eye, EyeOff,
+  ChevronDown, ChevronUp, Flame, Eye, EyeOff, Pencil, Edit2, Trash2,
 } from 'lucide-react'
 import { useLeadDrawer } from '@/lib/lead-drawer-context'
 import { timeAgo, formatDate, formatDateTime } from '@/lib/utils'
@@ -16,6 +16,7 @@ interface Email {
   id: string
   type: string
   subject: string | null
+  body_text: string | null
   status: string | null
   sent_at: string | null
   replied_at: string | null
@@ -240,7 +241,7 @@ interface ActionDef {
   icon: React.ReactNode
   accent: string
   bg: string
-  action: 'status' | 'resend' | 'reactivate'
+  action: 'status' | 'resend' | 'reactivate' | 'mark-initial-sent'
   value?: string
   confirm?: boolean
   variant?: 'danger'
@@ -252,6 +253,10 @@ function getQuickActions(status: string): ActionDef[] {
   if (['new', 'researched', 'email_ready'].includes(status)) {
     actions.push({ label: 'Send Initial Email', icon: <Send size={12} />, accent: '#38bdf8', bg: 'rgba(56,189,248,0.1)', action: 'resend' })
     actions.push({ label: 'Mark Contacted', icon: <Mail size={12} />, accent: '#fb923c', bg: 'rgba(251,146,60,0.1)', action: 'status', value: 'contacted' })
+  }
+
+  if (status === 'email_ready') {
+    actions.push({ label: 'Mark Initial Sent', icon: <CheckCircle2 size={12} />, accent: '#4ade80', bg: 'rgba(74,222,128,0.1)', action: 'mark-initial-sent' })
   }
 
   if (status === 'contacted') {
@@ -362,11 +367,22 @@ export function LeadCRMDrawer() {
   const [addingNote, setAddingNote] = useState(false)
   const [noteAdded, setNoteAdded] = useState(false)
 
-  // Edit states
+  // Edit states (lead email address)
   const [editingEmail, setEditingEmail] = useState(false)
   const [emailInput, setEmailInput] = useState('')
   const [savingEmail, setSavingEmail] = useState(false)
   const [expandedEmailId, setExpandedEmailId] = useState<string | null>(null)
+
+  // Draft email edit states
+  const [editingEmailId, setEditingEmailId] = useState<string | null>(null)
+  const [draftSubject, setDraftSubject] = useState('')
+  const [draftBody, setDraftBody] = useState('')
+  const [savingDraftEmail, setSavingDraftEmail] = useState(false)
+
+  // Delete states
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const isOpen = !!leadId
@@ -381,6 +397,13 @@ export function LeadCRMDrawer() {
       setLead(json.data)
       setEmailInput(json.data.email ?? '')
       setNoteText('')
+      const pendingDraft = json.data.emails.find(
+        (e: Email) => e.status === 'pending_send' && e.type === 'initial_pitch'
+      )
+      if (pendingDraft) {
+        setEmailsCollapsed(false)
+        setExpandedEmailId(pendingDraft.id)
+      }
     } catch {
       setError('Failed to load lead')
     } finally {
@@ -397,6 +420,9 @@ export function LeadCRMDrawer() {
       setDetailsCollapsed(true)
       setConfirmAction(null)
       setEditingEmail(false)
+      setEditingEmailId(null)
+      setDeleteConfirm(false)
+      setDeleteError(null)
       scrollRef.current?.scrollTo(0, 0)
     } else {
       setLead(null)
@@ -436,6 +462,13 @@ export function LeadCRMDrawer() {
         const json = await res.json() as { success?: boolean }
         if (json.success) {
           setLead((prev) => prev ? { ...prev, status: 'contacted' } : prev)
+          triggerRefresh()
+          await fetchLead(lead.id)
+        }
+      } else if (action.action === 'mark-initial-sent') {
+        const res = await fetch(`/api/leads/${lead.id}/mark-initial-sent`, { method: 'POST' })
+        const json = await res.json() as { success?: boolean }
+        if (json.success) {
           triggerRefresh()
           await fetchLead(lead.id)
         }
@@ -479,6 +512,28 @@ export function LeadCRMDrawer() {
     triggerRefresh()
   }
 
+  function startEditEmail(email: Email) {
+    setEditingEmailId(email.id)
+    setDraftSubject(email.subject ?? '')
+    setDraftBody(email.body_text ?? '')
+  }
+
+  async function saveDraftEmail() {
+    if (!editingEmailId || !lead) return
+    setSavingDraftEmail(true)
+    try {
+      await fetch(`/api/emails/${editingEmailId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: draftSubject, body_text: draftBody }),
+      })
+      setEditingEmailId(null)
+      await fetchLead(lead.id)
+    } finally {
+      setSavingDraftEmail(false)
+    }
+  }
+
   async function changeStatus(status: string) {
     if (!lead) return
     await fetch(`/api/leads/${lead.id}`, {
@@ -488,6 +543,24 @@ export function LeadCRMDrawer() {
     })
     setLead((prev) => prev ? { ...prev, status } : prev)
     triggerRefresh()
+  }
+
+  async function deleteLead() {
+    if (!lead) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const res = await fetch(`/api/leads/${lead.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const json = await res.json() as { error?: string }
+        setDeleteError(json.error ?? 'Failed to delete lead')
+        return
+      }
+      triggerRefresh()
+      closeDrawer()
+    } finally {
+      setDeleting(false)
+    }
   }
 
   async function toggleField(field: 'content_created' | 'payment_received', value: boolean) {
@@ -802,6 +875,50 @@ export function LeadCRMDrawer() {
                         })}
                       </div>
                     </div>
+
+                    {/* Delete Lead */}
+                    <div className="mt-4 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                      {deleteConfirm ? (
+                        <div
+                          className="px-3 py-2.5 rounded-xl flex items-center justify-between gap-3"
+                          style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)' }}
+                        >
+                          <p className="text-xs" style={{ color: '#fca5a5' }}>
+                            Delete this lead and all associated data?
+                          </p>
+                          <div className="flex gap-2 flex-shrink-0">
+                            <button
+                              onClick={deleteLead}
+                              disabled={deleting}
+                              className="text-xs font-semibold px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50"
+                              style={{ background: 'rgba(248,113,113,0.2)', color: '#f87171' }}
+                            >
+                              {deleting ? 'Deleting…' : 'Delete'}
+                            </button>
+                            <button
+                              onClick={() => { setDeleteConfirm(false); setDeleteError(null) }}
+                              disabled={deleting}
+                              className="text-xs px-2.5 py-1 rounded-lg transition-colors"
+                              style={{ color: '#64748b' }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => { setDeleteError(null); setDeleteConfirm(true) }}
+                          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition-all duration-150"
+                          style={{ color: '#f87171', background: 'rgba(248,113,113,0.07)', border: '1px solid rgba(248,113,113,0.15)' }}
+                        >
+                          <Trash2 size={12} />
+                          Delete Lead
+                        </button>
+                      )}
+                      {deleteError && (
+                        <p className="mt-2 text-xs" style={{ color: '#f87171' }}>{deleteError}</p>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -939,11 +1056,12 @@ export function LeadCRMDrawer() {
                         .map((email) => {
                           const isExpanded = expandedEmailId === email.id
                           const hasReply = !!email.replied_at
+                          const isPending = email.status === 'pending_send'
                           return (
                             <div
                               key={email.id}
                               className="rounded-xl overflow-hidden"
-                              style={{ background: '#161927', border: '1px solid rgba(255,255,255,0.05)' }}
+                              style={{ background: '#161927', border: `1px solid ${isPending ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.05)'}` }}
                             >
                               <button
                                 onClick={() => setExpandedEmailId(isExpanded ? null : email.id)}
@@ -952,15 +1070,15 @@ export function LeadCRMDrawer() {
                                 <div
                                   className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
                                   style={{
-                                    background: hasReply ? 'rgba(74,222,128,0.1)' : 'rgba(56,189,248,0.1)',
-                                    color: hasReply ? '#4ade80' : '#38bdf8',
+                                    background: isPending ? 'rgba(251,191,36,0.1)' : (hasReply ? 'rgba(74,222,128,0.1)' : 'rgba(56,189,248,0.1)'),
+                                    color: isPending ? '#fbbf24' : (hasReply ? '#4ade80' : '#38bdf8'),
                                   }}
                                 >
-                                  {hasReply ? <MessageSquare size={11} /> : <Send size={11} />}
+                                  {isPending ? <Pencil size={11} /> : (hasReply ? <MessageSquare size={11} /> : <Send size={11} />)}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <p className="text-xs font-semibold leading-snug truncate" style={{ color: '#cbd5e1' }}>
-                                    {EMAIL_TYPE_LABELS[email.type] ?? email.type}
+                                    {isPending ? 'Initial Draft' : (EMAIL_TYPE_LABELS[email.type] ?? email.type)}
                                   </p>
                                   {email.subject && (
                                     <p className="text-[0.625rem] truncate" style={{ color: '#475569' }}>{email.subject}</p>
@@ -976,7 +1094,7 @@ export function LeadCRMDrawer() {
                                     </span>
                                   )}
                                   <span className="text-[0.625rem] font-mono" style={{ color: '#334155' }}>
-                                    {email.sent_at ? timeAgo(email.sent_at) : '—'}
+                                    {isPending ? 'Draft' : (email.sent_at ? timeAgo(email.sent_at) : '—')}
                                   </span>
                                   {isExpanded
                                     ? <EyeOff size={10} style={{ color: '#334155' }} />
@@ -985,20 +1103,90 @@ export function LeadCRMDrawer() {
                               </button>
 
                               {isExpanded && (
-                                <div
-                                  className="px-3 pb-3 pt-0 space-y-1.5 text-xs"
-                                  style={{ borderTop: '1px solid rgba(255,255,255,0.04)', color: '#475569' }}
-                                >
-                                  {email.sent_at && (
-                                    <p className="pt-2"><span style={{ color: '#334155' }}>Sent:</span> {formatDateTime(email.sent_at)}</p>
-                                  )}
-                                  {email.replied_at && (
-                                    <p><span style={{ color: '#4ade80' }}>Replied:</span> {formatDateTime(email.replied_at)}</p>
-                                  )}
-                                  {email.status && (
-                                    <p><span style={{ color: '#334155' }}>Status:</span> <span style={{ color: '#64748b' }}>{email.status}</span></p>
-                                  )}
-                                </div>
+                                isPending ? (
+                                  <div className="px-3 pb-3 pt-2 space-y-2 text-xs" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                                    {editingEmailId === email.id ? (
+                                      <div className="space-y-2">
+                                        <div>
+                                          <p className="text-[0.625rem] font-bold uppercase tracking-widest mb-1" style={{ color: '#334155' }}>Subject</p>
+                                          <input
+                                            type="text"
+                                            value={draftSubject}
+                                            onChange={(e) => setDraftSubject(e.target.value)}
+                                            className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none"
+                                            style={{ background: '#0f1117', border: '1px solid #38bdf8', color: '#f1f5f9' }}
+                                          />
+                                        </div>
+                                        <div>
+                                          <p className="text-[0.625rem] font-bold uppercase tracking-widest mb-1" style={{ color: '#334155' }}>Body</p>
+                                          <textarea
+                                            value={draftBody}
+                                            onChange={(e) => setDraftBody(e.target.value)}
+                                            rows={12}
+                                            className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none resize-y"
+                                            style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#cbd5e1', lineHeight: '1.65', fontFamily: 'inherit' }}
+                                          />
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            onClick={saveDraftEmail}
+                                            disabled={savingDraftEmail}
+                                            className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg disabled:opacity-50"
+                                            style={{ background: 'rgba(56,189,248,0.15)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.2)' }}
+                                          >
+                                            <CheckCircle2 size={11} /> {savingDraftEmail ? 'Saving…' : 'Save'}
+                                          </button>
+                                          <button
+                                            onClick={() => setEditingEmailId(null)}
+                                            className="text-xs px-2.5 py-1.5 rounded-lg"
+                                            style={{ color: '#64748b' }}
+                                          >
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-2">
+                                        <div>
+                                          <p className="text-[0.625rem] font-bold uppercase tracking-widest mb-0.5" style={{ color: '#334155' }}>Subject</p>
+                                          <p className="text-xs font-medium" style={{ color: '#94a3b8' }}>{email.subject}</p>
+                                        </div>
+                                        {email.body_text && (
+                                          <div>
+                                            <p className="text-[0.625rem] font-bold uppercase tracking-widest mb-0.5" style={{ color: '#334155' }}>Body</p>
+                                            <p className="text-xs leading-relaxed whitespace-pre-wrap" style={{ color: '#64748b' }}>
+                                              {email.body_text.length > 400 ? email.body_text.slice(0, 400) + '…' : email.body_text}
+                                            </p>
+                                          </div>
+                                        )}
+                                        <div className="flex items-center gap-2 pt-1">
+                                          <button
+                                            onClick={() => startEditEmail(email)}
+                                            className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg"
+                                            style={{ background: 'rgba(56,189,248,0.1)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.15)' }}
+                                          >
+                                            <Edit2 size={11} /> Edit
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div
+                                    className="px-3 pb-3 pt-0 space-y-1.5 text-xs"
+                                    style={{ borderTop: '1px solid rgba(255,255,255,0.04)', color: '#475569' }}
+                                  >
+                                    {email.sent_at && (
+                                      <p className="pt-2"><span style={{ color: '#334155' }}>Sent:</span> {formatDateTime(email.sent_at)}</p>
+                                    )}
+                                    {email.replied_at && (
+                                      <p><span style={{ color: '#4ade80' }}>Replied:</span> {formatDateTime(email.replied_at)}</p>
+                                    )}
+                                    {email.status && (
+                                      <p><span style={{ color: '#334155' }}>Status:</span> <span style={{ color: '#64748b' }}>{email.status}</span></p>
+                                    )}
+                                  </div>
+                                )
                               )}
                             </div>
                           )

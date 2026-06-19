@@ -59,7 +59,14 @@
       "Bash(where psql *)",
       "Read(//c/Program Files/**)",
       "PowerShell($env:SUPABASE_ACCESS_TOKEN; [System.Environment]::GetEnvironmentVariable\\(\"SUPABASE_ACCESS_TOKEN\", \"User\"\\); [System.Environment]::GetEnvironmentVariable\\(\"SUPABASE_ACCESS_TOKEN\", \"Machine\"\\))",
-      "Bash(tsx *)"
+      "Bash(tsx *)",
+      "Skill(run)",
+      "Bash(pnpm dev *)",
+      "Bash(echo \"Server PID: $!\")",
+      "Read(//tmp/**)",
+      "Bash(npx next *)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('compilerOptions',{}\\).get\\('paths',{}\\), indent=2\\)\\)\")"
     ]
   }
 }

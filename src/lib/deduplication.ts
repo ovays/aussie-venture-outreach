@@ -44,7 +44,7 @@ export type LeadDedupeIndex = {
 
 // Personal/shared email providers must never be used for domain-based dedup.
 // e.g. info@gmail.com and contact@gmail.com are unrelated businesses.
-const PERSONAL_EMAIL_PROVIDER_DOMAINS = new Set([
+export const PERSONAL_EMAIL_PROVIDER_DOMAINS = new Set([
   'gmail.com',
   'googlemail.com',
   'hotmail.com',
