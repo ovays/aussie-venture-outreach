@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
+import ws from 'ws'
 
 export async function createClient() {
   const cookieStore = await cookies()
@@ -35,6 +36,9 @@ export function createServiceClient() {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
+      },
+      realtime: {
+        transport: ws as unknown as typeof WebSocket,
       },
     }
   )
