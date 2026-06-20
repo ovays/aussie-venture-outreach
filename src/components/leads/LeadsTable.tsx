@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Search, Star, AtSign, Mail, Plus, Send, RefreshCw, Trash2, X } from 'lucide-react'
+import { Search, Star, AtSign, Mail, Plus, Send, RefreshCw, Trash2, X, Microscope } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { useLeadDrawer } from '@/lib/lead-drawer-context'
@@ -34,12 +34,13 @@ interface Lead {
   source: string | null
 }
 
-type BulkAction = 'send' | 'regenerate' | 'delete'
+type BulkAction = 'send' | 'regenerate' | 'delete' | 'research'
 
 interface BulkResult {
   sent?: number
   regenerated?: number
   deleted?: number
+  researched?: number
   failed: Array<{ lead_id: string; business_name?: string; reason: string }>
 }
 
@@ -96,28 +97,41 @@ interface BulkModalProps {
 }
 
 function BulkModal({ action, count, running, result, onConfirm, onClose }: BulkModalProps) {
-  const successCount = result?.sent ?? result?.regenerated ?? result?.deleted ?? 0
+  const successCount = result?.sent ?? result?.regenerated ?? result?.deleted ?? result?.researched ?? 0
   const failedCount  = result?.failed.length ?? 0
 
   const confirmLabel: Record<BulkAction, string> = {
     send:       'Send Initial Emails',
     regenerate: 'Regenerate Drafts',
     delete:     'Delete Leads',
+    research:   'Research Selected',
   }
   const confirmMessage: Record<BulkAction, string> = {
     send:       `Send initial outreach emails to ${count} selected lead${count === 1 ? '' : 's'}?`,
     regenerate: `Regenerate email drafts for ${count} selected lead${count === 1 ? '' : 's'}? Existing drafts will be replaced.`,
     delete:     `Permanently delete ${count} lead${count === 1 ? '' : 's'} and all associated data? This cannot be undone.`,
+    research:   `Run research on ${count} selected new lead${count === 1 ? '' : 's'}? This will find contact info and generate draft emails.`,
   }
   const runningLabel: Record<BulkAction, string> = {
     send:       'Sending…',
     regenerate: 'Regenerating…',
     delete:     'Deleting…',
+    research:   'Researching…',
   }
   const successVerb: Record<BulkAction, string> = {
     send:       'sent',
     regenerate: 'regenerated',
     delete:     'deleted',
+    research:   'researched',
+  }
+  const successUnit: Record<BulkAction, string> = {
+    send:       'email',
+    regenerate: 'email',
+    delete:     'lead',
+    research:   'lead',
+  }
+  const successNote: Partial<Record<BulkAction, string>> = {
+    research: 'Leads with emails will now appear in Email Ready.',
   }
 
   return (
@@ -140,9 +154,14 @@ function BulkModal({ action, count, running, result, onConfirm, onClose }: BulkM
             </div>
 
             {successCount > 0 && (
-              <p className="text-sm mb-2" style={{ color: '#4ade80' }}>
-                Successfully {successVerb[action]} {successCount} email{successCount === 1 ? '' : 's'}.
-              </p>
+              <>
+                <p className="text-sm mb-2" style={{ color: '#4ade80' }}>
+                  Successfully {successVerb[action]} {successCount} {successUnit[action]}{successCount === 1 ? '' : 's'}.
+                </p>
+                {successNote[action] && (
+                  <p className="text-xs mb-2" style={{ color: '#94a3b8' }}>{successNote[action]}</p>
+                )}
+              </>
             )}
 
             {failedCount > 0 && (
@@ -240,8 +259,16 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   // Clear selection when page changes
   useEffect(() => { setSelectedIds(new Set()) }, [page])
 
-  // Only non-manual email_ready leads are eligible for bulk actions
-  const bulkEligibleLeads = leads.filter(l => l.status === 'email_ready' && l.source !== 'manual')
+  // email_ready non-manual leads → send/regenerate/delete actions
+  const emailReadyEligibleLeads = leads.filter(l => l.status === 'email_ready' && l.source !== 'manual')
+  // new leads → research action
+  const researchEligibleLeads = leads.filter(l => l.status === 'new')
+  // combined for header checkbox and select-all
+  const bulkEligibleLeads = [...emailReadyEligibleLeads, ...researchEligibleLeads]
+
+  const selectedEmailReadyLeads = emailReadyEligibleLeads.filter(l => selectedIds.has(l.id))
+  const selectedNewLeads = researchEligibleLeads.filter(l => selectedIds.has(l.id))
+
   const allEligibleSelected = bulkEligibleLeads.length > 0 && bulkEligibleLeads.every(l => selectedIds.has(l.id))
   const someEligibleSelected = bulkEligibleLeads.some(l => selectedIds.has(l.id))
 
@@ -283,12 +310,17 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
       send:       'send_initial_emails',
       regenerate: 'regenerate_drafts',
       delete:     'delete',
+      research:   'research_leads',
     }
+    // Research only operates on new leads; other actions use the full selection
+    const leadIds = bulkAction === 'research'
+      ? selectedNewLeads.map(l => l.id)
+      : Array.from(selectedIds)
     try {
       const res = await fetch('/api/leads/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: actionMap[bulkAction], lead_ids: Array.from(selectedIds) }),
+        body: JSON.stringify({ action: actionMap[bulkAction], lead_ids: leadIds }),
       })
       const json = await res.json() as BulkResult
       setBulkResult(json)
@@ -405,30 +437,43 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
           </button>
 
           <div className="ml-auto flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              onClick={() => { setBulkResult(null); setBulkAction('send') }}
-            >
-              <Send size={12} />
-              Send Initial Emails
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => { setBulkResult(null); setBulkAction('regenerate') }}
-            >
-              <RefreshCw size={12} />
-              Regenerate Drafts
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => { setBulkResult(null); setBulkAction('delete') }}
-              style={{ color: '#f87171' }}
-            >
-              <Trash2 size={12} />
-              Delete
-            </Button>
+            {selectedNewLeads.length > 0 && (
+              <Button
+                size="sm"
+                onClick={() => { setBulkResult(null); setBulkAction('research') }}
+              >
+                <Microscope size={12} />
+                Research Selected ({selectedNewLeads.length})
+              </Button>
+            )}
+            {selectedEmailReadyLeads.length > 0 && (
+              <>
+                <Button
+                  size="sm"
+                  onClick={() => { setBulkResult(null); setBulkAction('send') }}
+                >
+                  <Send size={12} />
+                  Send Initial Emails
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => { setBulkResult(null); setBulkAction('regenerate') }}
+                >
+                  <RefreshCw size={12} />
+                  Regenerate Drafts
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => { setBulkResult(null); setBulkAction('delete') }}
+                  style={{ color: '#f87171' }}
+                >
+                  <Trash2 size={12} />
+                  Delete
+                </Button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -447,7 +492,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
                     checked={allEligibleSelected}
                     onChange={handleSelectAll}
                     onClick={(e) => e.stopPropagation()}
-                    title="Select all eligible Email Ready leads"
+                    title="Select all eligible leads"
                     className="w-3.5 h-3.5 rounded cursor-pointer"
                     style={{ accentColor: '#38bdf8' }}
                   />
@@ -477,8 +522,9 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
               leads.map((lead) => {
                 const isSelected    = selectedIds.has(lead.id)
                 const isEmailReady  = lead.status === 'email_ready'
+                const isNew         = lead.status === 'new'
                 const isManual      = lead.source === 'manual'
-                const isBulkEligible = isEmailReady && !isManual
+                const isBulkEligible = (isEmailReady && !isManual) || isNew
                 return (
                   <tr
                     key={lead.id}

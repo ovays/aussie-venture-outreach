@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   X, Copy, ExternalLink, Phone, Star, Globe, Mail, AtSign,
-  Send, MessageSquare, TrendingUp, RotateCcw, Trophy, Skull,
+  Send, MessageSquare, TrendingUp, RotateCcw, RefreshCw, Trophy, Skull,
   StickyNote, Zap, Activity, CheckCircle2, AlertTriangle, Clock,
   ChevronDown, ChevronUp, Flame, Eye, EyeOff, Pencil, Edit2, Trash2,
 } from 'lucide-react'
@@ -241,14 +241,29 @@ interface ActionDef {
   icon: React.ReactNode
   accent: string
   bg: string
-  action: 'status' | 'resend' | 'reactivate' | 'mark-initial-sent'
+  action: 'status' | 'resend' | 'reactivate' | 'mark-initial-sent' | 'retry-research'
   value?: string
   confirm?: boolean
   variant?: 'danger'
 }
 
-function getQuickActions(status: string): ActionDef[] {
+function getQuickActions(status: string, emails: Email[], activityLog: ActivityEvent[]): ActionDef[] {
   const actions: ActionDef[] = []
+
+  const isRetryEligible =
+    status === 'researched' &&
+    emails.length === 0 &&
+    activityLog[0]?.event_type === 'agent_error'
+
+  if (isRetryEligible) {
+    actions.push({
+      label: 'Retry Research',
+      icon: <RefreshCw size={12} />,
+      accent: '#a78bfa',
+      bg: 'rgba(167,139,250,0.1)',
+      action: 'retry-research',
+    })
+  }
 
   if (['new', 'researched', 'email_ready'].includes(status)) {
     actions.push({ label: 'Send Initial Email', icon: <Send size={12} />, accent: '#38bdf8', bg: 'rgba(56,189,248,0.1)', action: 'resend' })
@@ -472,6 +487,10 @@ export function LeadCRMDrawer() {
           triggerRefresh()
           await fetchLead(lead.id)
         }
+      } else if (action.action === 'retry-research') {
+        await fetch(`/api/leads/${lead.id}/retry-research`, { method: 'POST' })
+        triggerRefresh()
+        await fetchLead(lead.id)
       }
     } finally {
       setActionLoading(null)
@@ -582,7 +601,7 @@ export function LeadCRMDrawer() {
 
   const statusMeta = lead ? (STATUS_META[lead.status] ?? STATUS_META.new) : null
   const timeline = lead ? buildTimeline(lead.emails, lead.activity_log) : []
-  const quickActions = lead ? getQuickActions(lead.status) : []
+  const quickActions = lead ? getQuickActions(lead.status, lead.emails, lead.activity_log) : []
   const emailCount = lead?.emails.length ?? 0
   const replyCount = lead?.emails.filter((e) => e.replied_at).length ?? 0
   const latestEmail = lead?.emails

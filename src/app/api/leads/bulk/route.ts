@@ -4,17 +4,14 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
 import { writeOutreachEmail } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
+import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
+import { researchOneLead } from '@/lib/research-lead'
+import { writeOneLead, VISIT_ELIGIBLE_CATEGORIES, type DmState } from '@/lib/write-lead'
 
 const bulkSchema = z.object({
-  action: z.enum(['send_initial_emails', 'regenerate_drafts', 'delete']),
+  action: z.enum(['send_initial_emails', 'regenerate_drafts', 'delete', 'research_leads']),
   lead_ids: z.array(z.string().uuid()).min(1).max(200),
 })
-
-const VISIT_ELIGIBLE = [
-  'Halal Restaurants', 'Halal Cafes', 'Halal Bakeries / Dessert Shops',
-  'Nail Salons', 'Hair Salons', 'Beauty / Lash Studios',
-  'Spas / Massage Studios', 'Hotels / Resorts',
-]
 
 type FailedItem = { lead_id: string; business_name: string; reason: string }
 
@@ -137,14 +134,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           .eq('type', 'initial_pitch')
           .eq('status', 'pending_send')
 
-        const contentType = (lead.city?.toLowerCase() === 'sydney' && VISIT_ELIGIBLE.includes(lead.category_name))
-          ? 'visit' : 'remote'
+        const contentType =
+          lead.city?.toLowerCase() === 'sydney' && VISIT_ELIGIBLE_CATEGORIES.includes(lead.category_name ?? '')
+            ? 'visit'
+            : 'remote'
 
         const emailResult = await writeOutreachEmail({
           business_name: lead.business_name,
-          category:      lead.category_name,
+          category:      lead.category_name as string,
           suburb:        lead.suburb ?? '',
-          city:          lead.city,
+          city:          lead.city as string,
           website:       lead.website ?? '',
           description:   lead.description ?? '',
           services:      lead.services ?? '',
@@ -195,6 +194,74 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     return NextResponse.json({ deleted, failed })
+  }
+
+  // ── Research Leads ───────────────────────────────────────────────────────────
+  if (action === 'research_leads') {
+    let researched = 0
+    const failed: FailedItem[] = []
+
+    // Initialise DM state — needed if any selected leads have no email
+    const { data: dmLimitSetting } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'daily_dm_limit')
+      .single()
+    const dailyDmLimit = parseInt(dmLimitSetting?.value ?? '10', 10)
+
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    const { count: todayDmCount } = await supabase
+      .from('dm_queue')
+      .select('*', { count: 'exact', head: true })
+      .gte('created_at', todayStart.toISOString())
+    const dmState: DmState = { dmsAddedToday: todayDmCount ?? 0, dailyDmLimit }
+
+    const dedupeIndex = await fetchPipelineDedupeIndex(supabase)
+
+    for (const lead_id of lead_ids) {
+      const { data: lead } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('id', lead_id)
+        .single()
+
+      if (!lead) {
+        failed.push({ lead_id, business_name: lead_id, reason: 'Lead not found' })
+        continue
+      }
+      if (lead.status !== 'new') {
+        failed.push({ lead_id, business_name: lead.business_name, reason: `Status is ${lead.status}, not new` })
+        continue
+      }
+
+      const researchResult = await researchOneLead(supabase, lead)
+      if (!researchResult.success) {
+        failed.push({ lead_id, business_name: lead.business_name, reason: `Research failed: ${researchResult.error}` })
+        continue
+      }
+
+      // Merge enriched fields so writeOneLead sees the updated email/description/services/instagram
+      const enrichedLead = { ...lead, ...researchResult.updatedFields }
+
+      const writeResult = await writeOneLead(supabase, enrichedLead, dedupeIndex, dmState)
+      if (!writeResult.success) {
+        failed.push({ lead_id, business_name: lead.business_name, reason: `Draft generation failed: ${writeResult.error}` })
+        continue
+      }
+      if (writeResult.channel === 'dead') {
+        failed.push({ lead_id, business_name: lead.business_name, reason: 'No email or Instagram found' })
+        continue
+      }
+      if (writeResult.channel === 'duplicate') {
+        failed.push({ lead_id, business_name: lead.business_name, reason: 'Duplicate email — skipped' })
+        continue
+      }
+
+      researched++
+    }
+
+    return NextResponse.json({ researched, failed })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
