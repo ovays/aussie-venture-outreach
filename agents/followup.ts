@@ -4,6 +4,7 @@ import { textToHtml } from '@/lib/utils'
 import { getAnalyticsDayRange } from '@/lib/analytics'
 import { computeFollowUpEligibility, isFuEmailSent, type FollowUpType } from '@/lib/followup-eligibility'
 import { logger } from '@/lib/logger'
+import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
 
 interface LeadEmail {
   id: string
@@ -131,20 +132,46 @@ async function sendFollowUp(
     leadId: candidate.lead.id,
   })
 
-  const { data: emailRow } = await supabase
+  const sentAt = new Date().toISOString()
+
+  const { data: emailRow, error: insertErr } = await supabase
     .from('emails')
     .insert({
-      lead_id: candidate.lead.id,
+      lead_id:   candidate.lead.id,
       type,
       subject,
       body_html: html,
       body_text: body,
       resend_id: result?.id ?? null,
-      status: result ? 'sent' : 'failed',
-      sent_at: result ? new Date().toISOString() : null,
+      status:    result ? 'sent' : 'failed',
+      sent_at:   result ? sentAt : null,
     })
     .select()
     .single()
+
+  if (insertErr) {
+    if (result) {
+      // Email was delivered via Resend but the DB insert failed.
+      // Insert a recovery row so the delivery is not lost and re-sends are blocked.
+      await insertEmailSyncFailedRecovery(supabase, {
+        agent:    'followup',
+        leadId:   candidate.lead.id,
+        type,
+        subject,
+        bodyHtml: html,
+        bodyText: body,
+        resendId: result.id,
+        sentAt,
+      })
+    } else {
+      logger.error('followup', `Follow-up ${followUpNumber} DB insert failed — activity NOT logged`, {
+        error:       insertErr.message,
+        lead_id:     candidate.lead.id,
+        resend_sent: false,
+      })
+    }
+    return false
+  }
 
   if (emailRow) {
     await supabase.from('follow_ups').insert({

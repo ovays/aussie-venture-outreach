@@ -3,6 +3,7 @@ import { sendEmail } from '@/lib/resend'
 import { emailBodyToHtml } from '@/lib/utils'
 import { logger } from '@/lib/logger'
 import { writeReactivationEmail } from '@/lib/claude'
+import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
 
 interface LeadEmail {
   id: string
@@ -140,19 +141,43 @@ export async function runReactivationAgent(): Promise<void> {
         leadId: lead.id,
       })
 
-      await supabase.from('emails').insert({
-        lead_id: lead.id,
-        type: 'reactivation',
+      const sentAt = new Date().toISOString()
+
+      const { error: insertErr } = await supabase.from('emails').insert({
+        lead_id:   lead.id,
+        type:      'reactivation',
         subject,
         body_html: html,
         body_text: body,
         resend_id: result?.id ?? null,
-        status: result ? 'sent' : 'failed',
-        sent_at: result ? new Date().toISOString() : null,
+        status:    result ? 'sent' : 'failed',
+        sent_at:   result ? sentAt : null,
       })
 
+      if (insertErr) {
+        if (result) {
+          await insertEmailSyncFailedRecovery(supabase, {
+            agent:    'reactivation',
+            leadId:   lead.id,
+            type:     'reactivation',
+            subject,
+            bodyHtml: html,
+            bodyText: body,
+            resendId: result.id,
+            sentAt,
+          })
+        } else {
+          console.error(`[REACTIVATION_DB_ERROR] lead=${lead.business_name} error=${insertErr.message} resend_sent=false`)
+        }
+        continue
+      }
+
       if (result) {
-        await supabase.from('leads').update({ reactivation_sent_at: new Date().toISOString() }).eq('id', lead.id)
+        const { error: leadUpdateErr } = await supabase.from('leads').update({ reactivation_sent_at: sentAt }).eq('id', lead.id)
+        if (leadUpdateErr) {
+          console.error(`[REACTIVATION_LEAD_UPDATE_ERROR] lead=${lead.business_name} error=${leadUpdateErr.message}`)
+          continue
+        }
         console.log(`[REACTIVATION_SENT] lead=${lead.business_name} email=${lead.email}`)
         reactivationSent++
       }

@@ -12,7 +12,7 @@ interface EmailRecord {
   subject: string
   body_html: string
   body_text: string
-  status: 'pending_send' | 'sent' | 'failed' | 'bounced'
+  status: 'pending_send' | 'sent' | 'failed' | 'bounced' | 'email_sync_failed'
   sent_at: string | null
   replied_at: string | null
   created_at: string
@@ -27,10 +27,19 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  sent: 'bg-green-500/20 text-green-400',
-  failed: 'bg-red-500/20 text-red-400',
-  bounced: 'bg-orange-500/20 text-orange-400',
-  pending_send: 'bg-yellow-500/20 text-yellow-400',
+  sent:              'bg-green-500/20 text-green-400',
+  failed:            'bg-red-500/20 text-red-400',
+  bounced:           'bg-orange-500/20 text-orange-400',
+  pending_send:      'bg-yellow-500/20 text-yellow-400',
+  email_sync_failed: 'bg-purple-500/20 text-purple-400',
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  sent:              'Sent',
+  failed:            'Failed',
+  bounced:           'Bounced',
+  pending_send:      'Pending',
+  email_sync_failed: 'Sync Failed',
 }
 
 export function EmailLogTable() {
@@ -105,6 +114,7 @@ export function EmailLogTable() {
           <option value="failed">Failed</option>
           <option value="bounced">Bounced</option>
           <option value="pending_send">Pending</option>
+          <option value="email_sync_failed">Sync Failed</option>
         </select>
       </div>
 
@@ -144,7 +154,7 @@ export function EmailLogTable() {
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_COLORS[email.status] ?? ''}`}>
-                      {email.status.replace('_', ' ')}
+                      {STATUS_LABELS[email.status] ?? email.status}
                     </span>
                   </td>
                   <td className="hidden md:table-cell px-4 py-3 text-xs" style={{ color: '#64748b' }}>

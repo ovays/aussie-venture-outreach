@@ -40,10 +40,14 @@ export async function POST(
     )
   }
 
-  await supabase
+  const { error: emailUpdateErr } = await supabase
     .from('emails')
     .update({ status: 'sent', sent_at: now })
     .eq('id', pending.id)
+
+  if (emailUpdateErr) {
+    return NextResponse.json({ error: 'Failed to update email record' }, { status: 500 })
+  }
 
   await Promise.all([
     supabase

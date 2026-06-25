@@ -71,7 +71,10 @@
       "Bash(Select-Object FullName, Length)",
       "PowerShell(\\(Get-Content \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\\\\app\\\\api\\\\leads\\\\[id]\\\\retry-research\\\\route.ts\"\\).Count)",
       "PowerShell($path = \\(Get-ChildItem -Path \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\\\\app\\\\api\\\\leads\\\\[id]\\\\retry-research\\\\route.ts\" -LiteralPath \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\\\\app\\\\api\\\\leads\\\\[id]\\\\retry-research\\\\route.ts\" -ErrorAction SilentlyContinue\\); $path)",
-      "PowerShell($f = Get-Item -LiteralPath \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\\\\app\\\\api\\\\leads\\\\[id]\\\\retry-research\\\\route.ts\"; $f.Length; \\(Get-Content -LiteralPath $f.FullName\\).Count)"
+      "PowerShell($f = Get-Item -LiteralPath \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\\\\app\\\\api\\\\leads\\\\[id]\\\\retry-research\\\\route.ts\"; $f.Length; \\(Get-Content -LiteralPath $f.FullName\\).Count)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js|sql\\)$\")",
+      "Bash(pnpm tsc *)",
+      "PowerShell(supabase *)"
     ]
   }
 }

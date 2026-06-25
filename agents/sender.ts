@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
 import { logger } from '@/lib/logger'
 import { getAnalyticsDayRange } from '@/lib/analytics'
+import { handleEmailSyncFailure } from '@/lib/email-status'
 
 export async function runSenderAgent(): Promise<{ sent: number; failed: number }> {
   const supabase = createServiceClient()
@@ -184,17 +185,19 @@ console.log("FILTERED PENDING", pendingEmails)
       continue
     }
 
-    // Idempotency: skip if this lead already has a successfully sent email
+    // Idempotency: skip if this lead already has a delivered or sync-failed email.
+    // 'email_sync_failed' is included because it means Resend accepted the email
+    // even though the DB update failed — re-sending would cause a duplicate delivery.
     const { data: alreadySent } = await supabase
       .from('emails')
       .select('id')
       .eq('lead_id', emailRecord.lead_id)
-      .eq('status', 'sent')
+      .in('status', ['sent', 'email_sync_failed'])
       .neq('id', emailRecord.id)
       .limit(1)
 
     if (alreadySent?.length) {
-      logger.warn('sender', `Idempotency skip: already sent to lead`, { lead_id: emailRecord.lead_id })
+      logger.warn('sender', `Idempotency skip: already sent or sync-failed for lead`, { lead_id: emailRecord.lead_id })
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
       continue
     }
@@ -214,13 +217,40 @@ const result = await sendEmail({
       if (result) {
         logger.info('sender', `#${i + 1}/${total} SUCCESS`, { resend_id: result.id, to: lead.email })
 
-        await supabase.from('emails').update({
-          status: 'sent',
+        const sentAt = new Date().toISOString()
+        const { error: emailUpdateErr } = await supabase.from('emails').update({
+          status:    'sent',
           resend_id: result.id,
-          sent_at: new Date().toISOString(),
+          sent_at:   sentAt,
         }).eq('id', emailRecord.id)
 
-        await supabase.from('leads').update({ status: 'contacted' }).eq('id', emailRecord.lead_id)
+        if (emailUpdateErr) {
+          await handleEmailSyncFailure(supabase, {
+            agent:    'sender',
+            emailId:  emailRecord.id,
+            leadId:   emailRecord.lead_id,
+            resendId: result.id,
+            sentAt,
+            context: {
+              position:         `#${i + 1}/${total}`,
+              original_db_error: emailUpdateErr.message,
+              to:               lead.email,
+            },
+          })
+          failed++
+          continue
+        }
+
+        const { error: leadUpdateErr } = await supabase.from('leads').update({ status: 'contacted', updated_at: sentAt }).eq('id', emailRecord.lead_id)
+
+        if (leadUpdateErr) {
+          logger.error('sender', `#${i + 1}/${total} DB error updating lead status after send`, {
+            error: leadUpdateErr.message,
+            lead_id: emailRecord.lead_id,
+          })
+          failed++
+          continue
+        }
 
         await supabase.from('activity_log').insert({
           event_type: 'email_sent',

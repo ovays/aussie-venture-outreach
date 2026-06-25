@@ -18,6 +18,7 @@
     "test:followup-pagination": "tsx scripts/test-followup-pagination.ts",
     "test:fu3-breakdown": "tsx scripts/test-fu3-breakdown.ts",
     "test:reactivation-eligibility": "tsx scripts/test-reactivation-eligibility.ts",
+    "test:email-sync-failed": "tsx scripts/test-email-sync-failed.ts",
     "deploy:trigger": "npx trigger.dev@4.4.6 deploy"
   },
   "dependencies": {

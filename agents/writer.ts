@@ -67,14 +67,16 @@ export async function runWriterAgent(): Promise<void> {
 
     if (emailReadyLeads?.length) {
       const emailReadyIds = emailReadyLeads.map((l: { id: string }) => l.id)
-      const { data: emailsWithPending } = await supabase
-        .from('emails')
-        .select('lead_id')
-        .in('lead_id', emailReadyIds)
-        .eq('status', 'pending_send')
+      const [{ data: emailsWithPending }, { data: emailsWithSyncFailed }] = await Promise.all([
+        supabase.from('emails').select('lead_id').in('lead_id', emailReadyIds).eq('status', 'pending_send'),
+        // email_sync_failed means the email was delivered but DB sync failed — do NOT reset
+        // these leads; they need operator repair, not pipeline re-processing.
+        supabase.from('emails').select('lead_id').in('lead_id', emailReadyIds).eq('status', 'email_sync_failed'),
+      ])
 
-      const withPendingSet = new Set(emailsWithPending?.map((e: { lead_id: string }) => e.lead_id) ?? [])
-      const toReset = emailReadyIds.filter((id: string) => !withPendingSet.has(id))
+      const withPendingSet    = new Set(emailsWithPending?.map((e: { lead_id: string }) => e.lead_id) ?? [])
+      const withSyncFailedSet = new Set(emailsWithSyncFailed?.map((e: { lead_id: string }) => e.lead_id) ?? [])
+      const toReset = emailReadyIds.filter((id: string) => !withPendingSet.has(id) && !withSyncFailedSet.has(id))
 
       if (toReset.length) {
         logger.info('writer', `Resetting ${toReset.length} stale email_ready leads back to researched`)
