@@ -20,6 +20,7 @@ interface ContactedLead {
   category_name: string | null
   suburb: string | null
   city: string | null
+  content_type: string | null
   emails: LeadEmail[]
 }
 
@@ -60,7 +61,7 @@ export async function runReactivationAgent(): Promise<void> {
 
     const { data: contactedLeads } = await supabase
       .from('leads')
-      .select('id, business_name, email, reactivation_sent_at, category_name, suburb, city, emails(id, type, subject, sent_at)')
+      .select('id, business_name, email, reactivation_sent_at, category_name, suburb, city, content_type, emails(id, type, subject, sent_at)')
       .eq('status', 'contacted')
 
     if (!contactedLeads?.length) {
@@ -123,6 +124,7 @@ export async function runReactivationAgent(): Promise<void> {
         category: lead.category_name ?? 'local business',
         suburb: lead.suburb ?? '',
         city: lead.city ?? 'Sydney',
+        content_type: lead.content_type ?? 'remote',
       })
 
       console.log(`[REACTIVATION_EMAIL_GENERATED] lead=${lead.business_name} category=${lead.category_name ?? 'unknown'}`)

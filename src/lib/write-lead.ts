@@ -4,12 +4,6 @@ import { emailBodyToHtml } from '@/lib/utils'
 import { logger } from '@/lib/logger'
 import { checkLeadDedupe, type LeadDedupeIndex } from '@/lib/deduplication'
 
-export const VISIT_ELIGIBLE_CATEGORIES: string[] = [
-  'Halal Restaurants', 'Halal Cafes', 'Halal Bakeries / Dessert Shops',
-  'Nail Salons', 'Hair Salons', 'Beauty / Lash Studios',
-  'Spas / Massage Studios', 'Hotels / Resorts',
-]
-
 export type DmState = {
   dmsAddedToday: number
   dailyDmLimit: number
@@ -26,6 +20,7 @@ export type WriteableLeadRow = {
   services: string | null
   email: string | null
   instagram_handle: string | null
+  content_type: string | null
 }
 
 export type WriteOneLeadResult =
@@ -59,11 +54,7 @@ export async function writeOneLead(
   }
 
   try {
-    const isSydney = lead.city?.toLowerCase() === 'sydney'
-    const contentType =
-      isSydney && VISIT_ELIGIBLE_CATEGORIES.includes(lead.category_name ?? '')
-        ? 'visit'
-        : 'remote'
+    const contentType = lead.content_type ?? 'remote'
 
     if (hasEmail) {
       const dedupeDecision = checkLeadDedupe(lead.email, dedupeIndex, lead.id)
@@ -146,6 +137,7 @@ export async function writeOneLead(
         suburb: lead.suburb ?? '',
         city: lead.city as string,
         category: lead.category_name as string,
+        content_type: contentType,
       })
 
       let dmInserted = false

@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { writeOutreachEmail } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
+import { createServiceClient } from '@/lib/supabase/server'
+import { resolveContentType } from '@/lib/content-type'
 import { Resend } from 'resend'
-
-const VISIT_ELIGIBLE = [
-  'Halal Restaurants', 'Halal Cafes', 'Halal Bakeries / Dessert Shops',
-  'Nail Salons', 'Hair Salons', 'Beauty / Lash Studios',
-  'Spas / Massage Studios', 'Hotels / Resorts',
-]
 
 function getResend() {
   const key = process.env.RESEND_API_KEY
@@ -51,8 +47,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
       }
 
-      const isSydney = city.toLowerCase() === 'sydney'
-      const contentType = (isSydney && VISIT_ELIGIBLE.includes(category)) ? 'visit' : 'remote'
+      const supabase = createServiceClient()
+      const { data: categoryRow } = await supabase
+        .from('categories')
+        .select('name, content_type, city_content_types')
+        .eq('name', category)
+        .maybeSingle()
+      const contentType = resolveContentType(categoryRow ?? { name: category }, city)
 
       const result = await writeOutreachEmail({
         business_name,

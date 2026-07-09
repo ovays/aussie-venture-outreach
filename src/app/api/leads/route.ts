@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
 import { normalizeEmail, extractRootDomainFromEmail, PERSONAL_EMAIL_PROVIDER_DOMAINS } from '@/lib/deduplication'
+import { resolveContentType } from '@/lib/content-type'
 
 const patchLeadSchema = z.object({
   id: z.string().uuid(),
@@ -74,6 +75,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  const { data: category } = await supabase
+    .from('categories')
+    .select('name, content_type, city_content_types')
+    .eq('id', category_id)
+    .maybeSingle()
+
   const { data: lead, error: leadErr } = await supabase
     .from('leads')
     .insert({
@@ -86,6 +93,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       category_name,
       status:        'researched',
       source:        'manual',
+      content_type:  resolveContentType(category, city),
     })
     .select()
     .single()

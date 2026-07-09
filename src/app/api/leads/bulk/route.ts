@@ -6,7 +6,7 @@ import { writeOutreachEmail } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
 import { researchOneLead } from '@/lib/research-lead'
-import { writeOneLead, VISIT_ELIGIBLE_CATEGORIES, type DmState } from '@/lib/write-lead'
+import { writeOneLead, type DmState } from '@/lib/write-lead'
 import { handleEmailSyncFailure } from '@/lib/email-status'
 
 const bulkSchema = z.object({
@@ -141,7 +141,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     for (const lead_id of lead_ids) {
       const { data: lead } = await supabase
         .from('leads')
-        .select('id, business_name, category_name, suburb, city, website, description, services, email, status')
+        .select('id, business_name, category_name, suburb, city, website, description, services, email, status, content_type')
         .eq('id', lead_id)
         .single()
 
@@ -157,10 +157,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           .eq('type', 'initial_pitch')
           .eq('status', 'pending_send')
 
-        const contentType =
-          lead.city?.toLowerCase() === 'sydney' && VISIT_ELIGIBLE_CATEGORIES.includes(lead.category_name ?? '')
-            ? 'visit'
-            : 'remote'
+        const contentType = lead.content_type ?? 'remote'
 
         const emailResult = await writeOutreachEmail({
           business_name: lead.business_name,

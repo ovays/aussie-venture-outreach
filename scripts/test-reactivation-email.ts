@@ -24,30 +24,35 @@ const TEST_BUSINESSES = [
     category: 'Halal Restaurants',
     suburb: 'Lakemba',
     city: 'Sydney',
+    content_type: 'visit',
   },
   {
     business_name: 'Kova Patisserie',
     category: 'Halal Bakeries / Dessert Shops',
     suburb: 'Surry Hills',
     city: 'Sydney',
+    content_type: 'visit',
   },
   {
     business_name: 'Zeytoun',
     category: 'Halal Cafes',
     suburb: 'Newtown',
     city: 'Sydney',
+    content_type: 'visit',
   },
   {
     business_name: 'Luxe Lash Studio',
     category: 'Beauty / Lash Studios',
     suburb: 'Bondi Junction',
     city: 'Sydney',
+    content_type: 'visit',
   },
   {
     business_name: 'Adventure Out',
     category: 'Tour Operators',
     suburb: 'CBD',
     city: 'Sydney',
+    content_type: 'remote',
   },
 ]
 

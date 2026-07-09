@@ -3,12 +3,6 @@ import { createClient } from '@/lib/supabase/server'
 import { writeOutreachEmail } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
 
-const VISIT_ELIGIBLE = [
-  'Halal Restaurants', 'Halal Cafes', 'Halal Bakeries / Dessert Shops',
-  'Nail Salons', 'Hair Salons', 'Beauty / Lash Studios',
-  'Spas / Massage Studios', 'Hotels / Resorts',
-]
-
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -18,7 +12,7 @@ export async function POST(
 
   const { data: lead, error: leadErr } = await supabase
     .from('leads')
-    .select('id, business_name, category_name, suburb, city, website, description, services, email, status, source')
+    .select('id, business_name, category_name, suburb, city, website, description, services, email, status, source, content_type')
     .eq('id', id)
     .single()
 
@@ -51,8 +45,7 @@ export async function POST(
     return NextResponse.json({ success: true })
   }
 
-  const isSydney = lead.city?.toLowerCase() === 'sydney'
-  const contentType = (isSydney && VISIT_ELIGIBLE.includes(lead.category_name)) ? 'visit' : 'remote'
+  const contentType = lead.content_type ?? 'remote'
 
   const emailResult = await writeOutreachEmail({
     business_name: lead.business_name,

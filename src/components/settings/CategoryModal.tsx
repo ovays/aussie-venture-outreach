@@ -13,6 +13,7 @@ interface Category {
   cities: 'sydney_only' | 'all' | 'custom'
   custom_cities: string[] | null
   content_type: 'visit' | 'remote' | 'both'
+  city_content_types: Record<string, 'visit' | 'remote'> | null
   pitch_template: string | null
   dm_template: string | null
   search_keywords: string[] | null
@@ -46,6 +47,7 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
     cities: category?.cities ?? 'all',
     custom_cities: category?.custom_cities ?? [],
     content_type: category?.content_type ?? 'remote',
+    city_content_types: category?.city_content_types ?? {},
     pitch_template: category?.pitch_template ?? '',
     dm_template: category?.dm_template ?? '',
     search_keywords: category?.search_keywords ?? [],
@@ -77,6 +79,18 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
     } else {
       set('custom_cities', [...current, city])
     }
+  }
+
+  // 'default' means "no override for this city" — the key is simply absent
+  // from city_content_types, and the existing resolver's fallback rule applies.
+  function setCityContentType(city: string, value: 'visit' | 'remote' | 'default') {
+    const next = { ...(form.city_content_types ?? {}) }
+    if (value === 'default') {
+      delete next[city]
+    } else {
+      next[city] = value
+    }
+    set('city_content_types', next)
   }
 
   async function handleSave() {
@@ -165,22 +179,45 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-2" style={{ color: '#94a3b8' }}>Content Type</label>
-          <div className="flex gap-2">
-            {(['visit', 'remote', 'both'] as const).map((opt) => (
-              <button
-                key={opt}
-                onClick={() => set('content_type', opt)}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                style={{
-                  background: form.content_type === opt ? '#0284c7' : '#2a2d3e',
-                  color: form.content_type === opt ? 'white' : '#94a3b8',
-                }}
-              >
-                {opt.charAt(0).toUpperCase() + opt.slice(1)}
-              </button>
-            ))}
-          </div>
+          <label className="block text-sm font-medium mb-2" style={{ color: '#94a3b8' }}>City Content Types</label>
+          <p className="text-xs mb-2" style={{ color: '#64748b' }}>
+            Override Visit or Remote per city. Leave as Default to use this category&apos;s normal behaviour.
+          </p>
+          {cityOptions.length === 0 ? (
+            <p className="text-xs" style={{ color: '#64748b' }}>Loading cities…</p>
+          ) : (
+            <div className="space-y-1.5">
+              {cityOptions.map((city) => {
+                const override = form.city_content_types?.[city]
+                const current: 'visit' | 'remote' | 'default' =
+                  override === 'visit' || override === 'remote' ? override : 'default'
+                return (
+                  <div
+                    key={city}
+                    className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg"
+                    style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+                  >
+                    <span className="text-sm" style={{ color: '#e2e8f0' }}>{city}</span>
+                    <div className="flex gap-2">
+                      {(['visit', 'remote', 'default'] as const).map((opt) => (
+                        <button
+                          key={opt}
+                          onClick={() => setCityContentType(city, opt)}
+                          className="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                          style={{
+                            background: current === opt ? '#0284c7' : '#2a2d3e',
+                            color: current === opt ? 'white' : '#94a3b8',
+                          }}
+                        >
+                          {opt === 'visit' ? 'Visit' : opt === 'remote' ? 'Remote' : 'Default'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         <div>

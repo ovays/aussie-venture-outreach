@@ -5,6 +5,8 @@ import { getAnalyticsDayRange } from '@/lib/analytics'
 import { computeFollowUpEligibility, isFuEmailSent, type FollowUpType } from '@/lib/followup-eligibility'
 import { logger } from '@/lib/logger'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
+import { normalizeContentType, contentTypeLocationWord } from '@/lib/content-type'
+import { getCategoryNoun, getCategoryReferenceNoun } from '@/lib/category-copy'
 
 interface LeadEmail {
   id: string
@@ -18,6 +20,8 @@ interface ContactedLead {
   id: string
   business_name: string
   email: string | null
+  category_name: string | null
+  content_type: string | null
   emails: LeadEmail[]
 }
 
@@ -55,11 +59,19 @@ async function sentTodayCount(
   return count ?? 0
 }
 
-function buildFollowUpEmail(type: FollowUpType, leadName: string, initialSubject: string) {
+// Follow-ups are plain templates (no Claude call) — the only per-lead variables
+// are the business name, its generic category noun and the visit/remote location
+// word, both resolved from the same shared classifier every other template uses.
+function buildFollowUpEmail(type: FollowUpType, leadName: string, initialSubject: string, category: string, contentType: string) {
+  const normalized = normalizeContentType(contentType)
+  const location = contentTypeLocationWord(normalized)
+  const noun = getCategoryNoun(category)
+  const refNoun = getCategoryReferenceNoun(category)
+
   if (type === 'follow_up_1') {
     const body = `Hey ${leadName}!
 
-Still keen to feature your business on Aussie Venture — our audience genuinely loves discovering great local spots, and I think you'd be a wonderful fit.
+Still keen to feature your ${noun} on Aussie Venture — our ${location} audience genuinely loves discovering great local spots, and I think you'd be a wonderful fit.
 
 Happy to keep things simple on your end. Let me know if you're open to it!
 
@@ -80,7 +92,7 @@ hello@aussieventure.com`
 
 Timing can always be tricky — no worries if things have been busy on your end!
 
-A feature on Aussie Venture is a simple way to connect your business with a genuinely engaged local audience, and we keep it as easy as possible from your side.
+A feature on Aussie Venture is a simple way to connect your ${noun} with a genuinely engaged ${location} audience, and we keep it as easy as possible from your side.
 
 If it sounds like something worth exploring, I'd love to hear your thoughts.
 
@@ -103,7 +115,7 @@ No worries at all if the timing hasn't been right — these things don't always 
 
 If a feature on Aussie Venture ever sounds like a good fit down the track, we'd genuinely love to hear from you at hello@aussieventure.com.
 
-Wishing you and the team all the best — hope the business keeps going from strength to strength!
+Wishing you and the team all the best — hope the ${refNoun} keeps going from strength to strength!
 
 Cheers,
 Owais
@@ -122,7 +134,13 @@ async function sendFollowUp(
   type: FollowUpType
 ) {
   const followUpNumber = type === 'follow_up_1' ? 1 : type === 'follow_up_2' ? 2 : 3
-  const { subject, body, html } = buildFollowUpEmail(type, candidate.lead.business_name, candidate.initialEmail.subject)
+  const { subject, body, html } = buildFollowUpEmail(
+    type,
+    candidate.lead.business_name,
+    candidate.initialEmail.subject,
+    candidate.lead.category_name ?? '',
+    candidate.lead.content_type ?? 'remote'
+  )
 
   const result = await sendEmail({
     to: candidate.lead.email!,

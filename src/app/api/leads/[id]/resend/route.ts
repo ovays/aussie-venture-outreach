@@ -66,13 +66,7 @@ export async function POST(
     bodyText = pendingEmail.body_text ?? ''
   } else {
     // No draft yet (lead is new/researched) — generate content on the fly.
-    const isSydney = lead.city?.toLowerCase() === 'sydney'
-    const VISIT_ELIGIBLE = [
-      'Halal Restaurants', 'Halal Cafes', 'Halal Bakeries / Dessert Shops',
-      'Nail Salons', 'Hair Salons', 'Beauty / Lash Studios',
-      'Spas / Massage Studios', 'Hotels / Resorts',
-    ]
-    const contentType = (isSydney && VISIT_ELIGIBLE.includes(lead.category_name)) ? 'visit' : 'remote'
+    const contentType = lead.content_type ?? 'remote'
 
     const emailResult = await writeOutreachEmail({
       business_name: lead.business_name,

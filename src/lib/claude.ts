@@ -1,5 +1,7 @@
 import Anthropic, { APIError } from '@anthropic-ai/sdk'
 import { withRetry } from './retry'
+import { normalizeContentType, contentTypeBrandPrefix, type ContentType } from './content-type'
+import { getBrandFocus, getContentFocus, getReactivationFocus, getCategoryReferenceNoun } from './category-copy'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -35,30 +37,16 @@ async function rateLimitedCall<T>(fn: () => Promise<T>): Promise<T> {
   return withRetry(fn, { maxAttempts: 4, baseDelayMs: 1000, isRetryable: is529Overload })
 }
 
-function getBrandDescription(category: string): string {
-  const food = ['Halal Restaurants', 'Halal Cafes', 'Halal Bakeries / Dessert Shops']
-  const beauty = ['Nail Salons', 'Hair Salons', 'Beauty / Lash Studios', 'Spas / Massage Studios']
-  const travel = ['Travel Agents', 'Tour Operators', 'Hotels / Resorts']
-
-  if (food.includes(category)) return 'Sydney-based food, travel and lifestyle brand'
-  if (beauty.includes(category)) return 'Sydney-based lifestyle brand'
-  if (travel.includes(category)) return 'Sydney-based travel and lifestyle brand'
-  return 'Sydney-based food, travel and lifestyle brand'
+export function getBrandDescription(category: string, contentType: ContentType): string {
+  const prefix = contentTypeBrandPrefix(contentType)
+  const article = prefix === 'Sydney-based' ? 'a' : 'an'
+  return `${article} ${prefix} ${getBrandFocus(category)} platform`
 }
 
-function getCategoryPitch(category: string): string {
-  const halalFood = ['Halal Restaurants', 'Halal Cafes', 'Halal Bakeries / Dessert Shops']
-  const beauty = ['Nail Salons', 'Hair Salons', 'Beauty / Lash Studios']
-  const wellness = ['Spas / Massage Studios']
-  const travel = ['Travel Agents', 'Tour Operators']
-  const accommodation = ['Hotels / Resorts']
-
-  if (halalFood.includes(category)) return 'Owais creates halal food content for 650K+ Australians and wants to collab with this business.'
-  if (beauty.includes(category)) return 'Owais creates lifestyle content for 650K+ Australians and wants to collab with this business.'
-  if (wellness.includes(category)) return 'Owais creates lifestyle content for 650K+ Australians and wants to collab with this business.'
-  if (travel.includes(category)) return 'Owais creates Australian travel content for 650K+ Australians and wants to collab with this business.'
-  if (accommodation.includes(category)) return 'Owais creates Australian travel and lifestyle content for 650K+ Australians and wants to collab with this property.'
-  return 'Owais creates Australian food, travel and lifestyle content for 650K+ Australians and wants to collab with this business.'
+function getCategoryPitch(category: string, contentType: ContentType): string {
+  const focus = getContentFocus(category, contentType)
+  const noun = getCategoryReferenceNoun(category)
+  return `Owais creates ${focus} for 650K+ Australians and wants to collab with this ${noun}.`
 }
 
 export async function extractWebsiteData(websiteContent: string): Promise<{
@@ -108,27 +96,16 @@ Respond in JSON only with keys: description, services, instagram_handle, faceboo
   }
 }
 
-export async function writeOutreachEmail(params: {
-  business_name: string
-  category: string
-  suburb: string
-  city: string
-  website: string
-  description: string
-  services: string
-  content_type: string
-}): Promise<{ subject: string; body: string }> {
-  const response = await rateLimitedCall(() =>
-    anthropic.messages.create({
-      model: SONNET_MODEL,
-      max_tokens: 400,
-      messages: [
-        {
-          role: 'user',
-          content: `You are Owais. You run Aussie Venture, an Australian ${getBrandDescription(params.category)}. Write a very short first outreach email to a local business.
+// Pure prompt builder — exported so preview/test scripts can generate the exact
+// same prompt Claude receives in production without duplicating the copy.
+export function buildOutreachEmailPrompt(
+  params: { business_name: string; category: string; suburb: string; city: string },
+  brandDesc: string
+): string {
+  return `You are Owais. You run Aussie Venture, ${brandDesc}. Write a very short first outreach email to a local business.
 
 FACTS (only use these, never invent others):
-- Aussie Venture is a ${getBrandDescription(params.category)} with a national audience
+- Aussie Venture is ${brandDesc} with a national audience
 - 650K+ followers across Facebook, Instagram and TikTok
 
 Business: ${params.business_name}, ${params.suburb} ${params.city}
@@ -143,6 +120,8 @@ WHAT THE EMAIL MUST DO:
 HARD RULES — break any of these and the email is wrong:
 - Under 80 words (not counting sign-off)
 - NO mention of: visiting, coming in, remote, assets, photos, sponsored post, sponsored feature, content partnership, price, budget, free, paid — save all logistics for after they reply
+- Never invent familiarity with the business — you only know its name, category and suburb. No "keeps coming up", "I've seen your page", "your food looks amazing", or any other claim implying prior knowledge of them
+- Never claim Aussie Venture is based in, located in, or physically present in the business's suburb or city unless explicitly told so
 - Think of it like a first message — just spark interest, nothing more
 - No em dashes (no — character)
 - No bullet points
@@ -164,9 +143,26 @@ facebook.com/Sydneyventure
 
 Subject: short and casual, e.g. "Collab with Aussie Venture?" or "Working together?"
 
-Respond in JSON: { "subject": "...", "body": "..." }`,
-        },
-      ],
+Respond in JSON: { "subject": "...", "body": "..." }`
+}
+
+export async function writeOutreachEmail(params: {
+  business_name: string
+  category: string
+  suburb: string
+  city: string
+  website: string
+  description: string
+  services: string
+  content_type: string
+}): Promise<{ subject: string; body: string }> {
+  const contentType = normalizeContentType(params.content_type)
+  const brandDesc = getBrandDescription(params.category, contentType)
+  const response = await rateLimitedCall(() =>
+    anthropic.messages.create({
+      model: SONNET_MODEL,
+      max_tokens: 400,
+      messages: [{ role: 'user', content: buildOutreachEmailPrompt(params, brandDesc) }],
     })
   )
 
@@ -181,7 +177,7 @@ Respond in JSON: { "subject": "...", "body": "..." }`,
   }
   return {
     subject: `Collab with Aussie Venture - ${params.business_name}`,
-    body: `Hey ${params.business_name},\n\nI run Aussie Venture, a ${getBrandDescription(params.category)} with 650K+ followers across Facebook, Instagram and TikTok. Would love to work together.\n\nWould you be keen to collab?\n\nCheers,\nOwais\nAussie Venture\nhello@aussieventure.com\naussieventure.com\ninstagram.com/aussie.venture\ntiktok.com/@aussie.venture\nfacebook.com/AussieVenture\nfacebook.com/Sydneyventure`,
+    body: `Hey ${params.business_name},\n\nI run Aussie Venture, ${brandDesc} with 650K+ followers across Facebook, Instagram and TikTok. Would love to work together.\n\nWould you be keen to collab?\n\nCheers,\nOwais\nAussie Venture\nhello@aussieventure.com\naussieventure.com\ninstagram.com/aussie.venture\ntiktok.com/@aussie.venture\nfacebook.com/AussieVenture\nfacebook.com/Sydneyventure`,
   }
 }
 
@@ -358,40 +354,12 @@ Now decide. JSON only: {"action":"found","email":"..."} or {"action":"fetch_url"
 
 // ─── Reactivation email writer ───────────────────────────────────────────────
 
-function getReactivationContentContext(category: string): string {
-  const halalFood = ['Halal Restaurants', 'Halal Cafes']
-  const desserts = ['Halal Bakeries / Dessert Shops']
-  const beauty = ['Nail Salons', 'Hair Salons', 'Beauty / Lash Studios']
-  const wellness = ['Spas / Massage Studios']
-  const accommodation = ['Hotels / Resorts']
-  const travelOps = ['Travel Agents', 'Tour Operators']
-
-  if (halalFood.includes(category)) return 'Sydney halal dining spots'
-  if (desserts.includes(category)) return 'Sydney dessert and cafe spots'
-  if (beauty.includes(category)) return 'Sydney beauty and lifestyle venues'
-  if (wellness.includes(category)) return 'Sydney wellness and spa spots'
-  if (accommodation.includes(category)) return 'Sydney accommodation and stays'
-  if (travelOps.includes(category)) return 'Australian travel experiences'
-  return 'Sydney venues and businesses'
-}
-
-export async function writeReactivationEmail(params: {
-  business_name: string
-  category: string
-  suburb: string
-  city: string
-}): Promise<{ subject: string; body: string }> {
-  const brandDesc = getBrandDescription(params.category)
-  const contentContext = getReactivationContentContext(params.category)
-
-  const response = await rateLimitedCall(() =>
-    anthropic.messages.create({
-      model: SONNET_MODEL,
-      max_tokens: 400,
-      messages: [
-        {
-          role: 'user',
-          content: `You are Owais. You run Aussie Venture, an Australian ${brandDesc} with 650K+ followers across Facebook, Instagram and TikTok. Write a short fresh collaboration email to a local business.
+export function buildReactivationEmailPrompt(
+  params: { business_name: string; category: string; suburb: string; city: string },
+  brandDesc: string,
+  contentContext: string
+): string {
+  return `You are Owais. You run Aussie Venture, ${brandDesc} with 650K+ followers across Facebook, Instagram and TikTok. Write a short fresh collaboration email to a local business.
 
 This is a new campaign email — do NOT reference any previous emails or contact history.
 
@@ -413,6 +381,8 @@ HARD RULES — break any of these and the email is wrong:
 - No bullet points
 - No corporate language: no "leverage", "synergy", "reach out", "I wanted to", "I hope this finds you well"
 - NEVER include: "following up", "checking in again", "previous email", "earlier outreach", "last time", "again"
+- Never invent familiarity with the business — you only know its name, category and suburb. No "keeps coming up", "I've seen your page", or any other claim implying prior knowledge of them
+- Never claim Aussie Venture is based in, located in, or physically present in the business's suburb or city unless explicitly told so
 - No guilt wording, no pressure, no urgency
 - Sound like a real 25-year-old Australian
 - 2 short paragraphs max
@@ -434,9 +404,25 @@ tiktok.com/@aussie.venture
 facebook.com/AussieVenture
 facebook.com/Sydneyventure
 
-Respond in JSON: { "subject": "...", "body": "..." }`,
-        },
-      ],
+Respond in JSON: { "subject": "...", "body": "..." }`
+}
+
+export async function writeReactivationEmail(params: {
+  business_name: string
+  category: string
+  suburb: string
+  city: string
+  content_type: string
+}): Promise<{ subject: string; body: string }> {
+  const contentType = normalizeContentType(params.content_type)
+  const brandDesc = getBrandDescription(params.category, contentType)
+  const contentContext = getReactivationFocus(params.category, contentType)
+
+  const response = await rateLimitedCall(() =>
+    anthropic.messages.create({
+      model: SONNET_MODEL,
+      max_tokens: 400,
+      messages: [{ role: 'user', content: buildReactivationEmailPrompt(params, brandDesc, contentContext) }],
     })
   )
 
@@ -457,43 +443,51 @@ Respond in JSON: { "subject": "...", "body": "..." }`,
 
 // ─── DM writer ───────────────────────────────────────────────────────────────
 
-export async function writeOutreachDM(params: {
-  business_name: string
-  suburb: string
-  city: string
-  category: string
-}): Promise<string> {
-  const pitch = getCategoryPitch(params.category)
-
-  const response = await rateLimitedCall(() =>
-    anthropic.messages.create({
-      model: SONNET_MODEL,
-      max_tokens: 200,
-      messages: [
-        {
-          role: 'user',
-          content: `You're Owais. You run Aussie Venture, an Australian food, travel and lifestyle brand with 650K+ followers across Facebook, Instagram and TikTok. Write a short Instagram DM to this business.
+export function buildOutreachDMPrompt(
+  params: { business_name: string; suburb: string; city: string; category: string },
+  brandDesc: string,
+  pitch: string
+): string {
+  return `You're Owais. You run Aussie Venture, ${brandDesc} with 650K+ followers across Facebook, Instagram and TikTok. Write a short Instagram DM to this business.
 
 Business: ${params.business_name}, ${params.suburb} ${params.city}
 Category: ${params.category}
 
-Pitch angle: ${pitch.split('\n')[0]}
+Pitch angle: ${pitch}
 
 Rules:
 - Max 2-3 sentences
-- Sound like a real person, not a brand
+- Sound like a real person, not a platform
 - No em dashes, no bullet points, no corporate language
 - No "I wanted to reach out", no "I came across your page"
 - You may mention 650K+ followers once if it adds credibility
 - NEVER mention free, no cost, no charge, or anything being free
 - NEVER say "paid collab" - use "sponsored feature" or "collab" instead
 - Never state a price
+- Never say "I'm based in ${params.city}" or otherwise claim you live in, are based in, or are physically located in the business's city — Aussie Venture's audience is national, don't invent a location for yourself
+- Never invent familiarity with the business — you only know its name, category and suburb. No claims implying you already know their page, food, or space
 - Casual and direct
 - End with "Would you be keen?" or "Keen to work together?"
 
-Respond with just the DM text, nothing else.`,
-        },
-      ],
+Respond with just the DM text, nothing else.`
+}
+
+export async function writeOutreachDM(params: {
+  business_name: string
+  suburb: string
+  city: string
+  category: string
+  content_type: string
+}): Promise<string> {
+  const contentType = normalizeContentType(params.content_type)
+  const brandDesc = getBrandDescription(params.category, contentType)
+  const pitch = getCategoryPitch(params.category, contentType)
+
+  const response = await rateLimitedCall(() =>
+    anthropic.messages.create({
+      model: SONNET_MODEL,
+      max_tokens: 200,
+      messages: [{ role: 'user', content: buildOutreachDMPrompt(params, brandDesc, pitch) }],
     })
   )
 

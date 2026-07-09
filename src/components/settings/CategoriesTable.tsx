@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, Edit2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
 import { CategoryModal } from './CategoryModal'
+import { resolveContentType } from '@/lib/content-type'
 
 interface Category {
   id: string
@@ -13,6 +14,7 @@ interface Category {
   cities: 'sydney_only' | 'all' | 'custom'
   custom_cities: string[] | null
   content_type: 'visit' | 'remote' | 'both'
+  city_content_types: Record<string, 'visit' | 'remote'> | null
   pitch_template: string | null
   dm_template: string | null
   search_keywords: string[] | null
@@ -28,6 +30,14 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
   const [categories, setCategories] = useState(initialCategories)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
+  const [cityOptions, setCityOptions] = useState<string[]>([])
+
+  useEffect(() => {
+    fetch('/api/cities')
+      .then((r) => r.json() as Promise<{ data?: string[] }>)
+      .then((json) => setCityOptions(json.data ?? []))
+      .catch(() => {})
+  }, [])
 
   async function toggleStatus(id: string, current: 'active' | 'paused') {
     const newStatus = current === 'active' ? 'paused' : 'active'
@@ -61,6 +71,19 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
     custom: 'Custom',
   }
 
+  // Effective per-city behaviour, computed via the actual resolver (city_content_types
+  // override, falling back to the legacy Sydney + VISIT_ELIGIBLE_CATEGORIES rule) — not
+  // the legacy categories.content_type field, which the resolver no longer consults.
+  function effectiveContentTypeLabel(cat: Category): string {
+    if (cityOptions.length === 0) return 'Loading…'
+    const visitCities = cityOptions.filter((city) => resolveContentType(cat, city) === 'visit')
+    const remoteCities = cityOptions.filter((city) => resolveContentType(cat, city) === 'remote')
+    return [
+      visitCities.length > 0 ? `Visit: ${visitCities.join(', ')}` : null,
+      remoteCities.length > 0 ? `Remote: ${remoteCities.join(', ')}` : null,
+    ].filter(Boolean).join(' · ')
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -78,7 +101,7 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e', background: '#0f1117' }}>
-              {['Name', 'Cities', 'Content Type', 'Keywords', 'Status', 'Actions'].map((h) => (
+              {['Name', 'Cities', 'Effective Content Type', 'Keywords', 'Status', 'Actions'].map((h) => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>
                   {h}
                 </th>
@@ -100,7 +123,9 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-xs" style={{ color: '#94a3b8' }}>{CITIES_LABEL[cat.cities]}</td>
-                <td className="px-4 py-3 text-xs capitalize" style={{ color: '#94a3b8' }}>{cat.content_type}</td>
+                <td className="px-4 py-3 text-xs" style={{ color: '#94a3b8' }}>
+                  {effectiveContentTypeLabel(cat)}
+                </td>
                 <td className="px-4 py-3 text-xs" style={{ color: '#94a3b8' }}>
                   {(cat.search_keywords ?? []).length} keyword{(cat.search_keywords ?? []).length !== 1 ? 's' : ''}
                 </td>

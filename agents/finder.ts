@@ -10,6 +10,7 @@ import {
   isHalalFilterCategory,
   scoreHalalQualification,
 } from '@/lib/halalQualification'
+import { resolveContentType } from '@/lib/content-type'
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
 const MAILTO_REGEX = /href=["']mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi
@@ -26,6 +27,8 @@ export type FinderEmailCategory = {
   capped: boolean
   batchSize: number
   usePrioritySuburbs: boolean
+  contentType: string | null
+  cityContentTypes: Record<string, string> | null
 }
 
 type FinderCategoryRow = {
@@ -34,6 +37,8 @@ type FinderCategoryRow = {
   search_keywords: string[] | null
   use_priority_suburbs: boolean | null
   status: string | null
+  content_type: string | null
+  city_content_types: Record<string, string> | null
 }
 
 // Finder categories are loaded from the categories table.
@@ -95,7 +100,7 @@ export async function loadFinderCategories(
 ): Promise<FinderEmailCategory[]> {
   const { data, error } = await supabase
     .from('categories')
-    .select('id, name, search_keywords, use_priority_suburbs, status')
+    .select('id, name, search_keywords, use_priority_suburbs, status, content_type, city_content_types')
     .eq('status', 'active')
     .order('created_at', { ascending: true })
     .order('name')
@@ -110,6 +115,8 @@ export async function loadFinderCategories(
       capped: index < 4,
       batchSize: 20,
       usePrioritySuburbs: category.use_priority_suburbs ?? false,
+      contentType: category.content_type ?? null,
+      cityContentTypes: category.city_content_types ?? null,
     }))
     .filter((category) => category.queries.length > 0)
 }
@@ -1956,6 +1963,10 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                 halal_reasons:        halalReasons,
                 status:               'new',
                 outreach_channel:     'email',
+                content_type:         resolveContentType(
+                  { name: category.name, content_type: category.contentType, city_content_types: category.cityContentTypes },
+                  city
+                ),
               }).select('id, business_name, email, status').single()
 
               if (error) {
@@ -2209,7 +2220,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
       .slice(0, 30) || 'instagram'
 
     const dmMessage =
-      `Hi! We're Aussie Venture, a food & lifestyle media brand based in Sydney. ` +
+      `Hi! We're Aussie Venture, a food & lifestyle media platform based in Sydney. ` +
       `We'd love to feature ${lead.business_name} in our content. ` +
       `Would you be open to a collaboration? DM us back if you're keen!`
 

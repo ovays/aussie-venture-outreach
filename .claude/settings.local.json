@@ -74,7 +74,10 @@
       "PowerShell($f = Get-Item -LiteralPath \"C:\\\\agents\\\\aussie-venture-outreach\\\\src\\\\app\\\\api\\\\leads\\\\[id]\\\\retry-research\\\\route.ts\"; $f.Length; \\(Get-Content -LiteralPath $f.FullName\\).Count)",
       "Bash(grep -E \"\\\\.\\(ts|tsx|js|sql\\)$\")",
       "Bash(pnpm tsc *)",
-      "PowerShell(supabase *)"
+      "PowerShell(supabase *)",
+      "Bash(grep -rln \"from\\('leads'\\)\\\\s*$\\\\|from\\(\\\\\"leads\\\\\"\\)\\\\|\\\\.from\\('leads'\\)\" \"C:/agents/aussie-venture-outreach/src\")",
+      "Bash(git status *)",
+      "Bash(grep -n \"an Australian\\\\|a \\\\${brandDesc}\\\\|, a Australian\\\\|, an Australian\" src/lib/claude.ts)"
     ]
   }
 }

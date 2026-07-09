@@ -4,6 +4,8 @@ import { resolve } from 'path'
 dotenv.config({ path: resolve(__dirname, '../.env.local') })
 
 import Anthropic from '@anthropic-ai/sdk'
+import { getBrandDescription, buildOutreachEmailPrompt } from '@/lib/claude'
+import { resolveContentType } from '@/lib/content-type'
 
 const SAMPLES = [
   {
@@ -41,61 +43,28 @@ const SAMPLES = [
     suburb: 'Sydney CBD',
     city: 'Sydney',
   },
+  // Categories that don't exist in the DB yet — proves wording adapts via
+  // keyword classification, with no code changes needed when they're added.
+  {
+    label: 'Pet Grooming (unseen category) — Perth',
+    business_name: 'Paws & Claws Grooming',
+    category: 'Pet Grooming',
+    suburb: 'Fremantle',
+    city: 'Perth',
+  },
+  {
+    label: 'Serviced Apartments (unseen category) — Sydney',
+    business_name: 'Harbourside Stays',
+    category: 'Serviced Apartments',
+    suburb: 'Pyrmont',
+    city: 'Sydney',
+  },
 ]
 
-function getBrandDescription(category: string): string {
-  const food = ['Halal Restaurants', 'Halal Cafes', 'Halal Bakeries / Dessert Shops']
-  const beauty = ['Nail Salons', 'Hair Salons', 'Beauty / Lash Studios', 'Spas / Massage Studios']
-  const travel = ['Travel Agents', 'Tour Operators', 'Hotels / Resorts']
-
-  if (food.includes(category)) return 'Sydney-based food, travel and lifestyle brand'
-  if (beauty.includes(category)) return 'Sydney-based lifestyle brand'
-  if (travel.includes(category)) return 'Sydney-based travel and lifestyle brand'
-  return 'Sydney-based food, travel and lifestyle brand'
-}
-
 function buildPrompt(sample: typeof SAMPLES[0]): string {
-  const brandDesc = getBrandDescription(sample.category)
-  return `You are Owais. You run Aussie Venture, an Australian ${brandDesc}. Write a very short first outreach email to a local business.
-
-FACTS (only use these, never invent others):
-- Aussie Venture is a ${brandDesc} with a national audience
-- 650K+ followers across Facebook, Instagram and TikTok
-
-Business: ${sample.business_name}, ${sample.suburb} ${sample.city}
-Category: ${sample.category}
-
-WHAT THE EMAIL MUST DO:
-1. Open with "Hey ${sample.business_name},"
-2. Briefly introduce yourself and Aussie Venture — mention the 650K+ followers once
-3. Say you'd love to work together or collab
-4. End with exactly: "Would you be keen to collab?"
-
-HARD RULES — break any of these and the email is wrong:
-- Under 80 words (not counting sign-off)
-- NO mention of: visiting, coming in, remote, assets, photos, sponsored post, sponsored feature, content partnership, price, budget, free, paid — save all logistics for after they reply
-- Think of it like a first message — just spark interest, nothing more
-- No em dashes (no — character)
-- No bullet points
-- No corporate language: "leverage", "synergy", "reach out", "I wanted to", "I hope this finds you well", "I came across"
-- 2 short paragraphs max
-- Sound like a real 25-year-old Australian, casual
-- Last line must be exactly: "Would you be keen to collab?"
-
-Sign off (use exactly this, every line, nothing more and nothing less):
-Cheers,
-Owais
-Aussie Venture
-hello@aussieventure.com
-aussieventure.com
-instagram.com/aussie.venture
-tiktok.com/@aussie.venture
-facebook.com/AussieVenture
-facebook.com/Sydneyventure
-
-Subject: short and casual, e.g. "Collab with Aussie Venture?" or "Working together?"
-
-Respond in JSON: { "subject": "...", "body": "..." }`
+  const contentType = resolveContentType({ name: sample.category }, sample.city)
+  const brandDesc = getBrandDescription(sample.category, contentType)
+  return buildOutreachEmailPrompt(sample, brandDesc)
 }
 
 function countWords(text: string): number {
@@ -105,7 +74,7 @@ function countWords(text: string): number {
 async function main() {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
-  console.log('Generating 5 sample emails...\n')
+  console.log(`Generating ${SAMPLES.length} sample emails...\n`)
   console.log('='.repeat(70))
 
   for (const sample of SAMPLES) {
