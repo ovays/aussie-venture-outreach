@@ -45,6 +45,51 @@ const CITY_STATE: Record<string, string> = {
   Adelaide:  'SA',
 }
 
+// Prefix table for regional/area cities (e.g. "NSW Regional", "Victoria Regional").
+// Checked in order — longer prefixes should come first within each state.
+const STATE_PREFIXES: Array<[prefix: string, state: string]> = [
+  ['New South Wales',    'NSW'],
+  ['NSW',                'NSW'],
+  ['Victoria',           'VIC'],
+  ['VIC',                'VIC'],
+  ['Queensland',         'QLD'],
+  ['QLD',                'QLD'],
+  ['Western Australia',  'WA'],
+  ['WA',                 'WA'],
+  ['South Australia',    'SA'],
+  ['SA',                 'SA'],
+  ['Tasmania',           'TAS'],
+  ['TAS',                'TAS'],
+  ['Northern Territory', 'NT'],
+  ['NT',                 'NT'],
+  ['ACT',                'ACT'],
+]
+
+function getCityState(city: string): string {
+  if (CITY_STATE[city]) return CITY_STATE[city]
+  const lower = city.toLowerCase()
+  for (const [prefix, state] of STATE_PREFIXES) {
+    if (lower.startsWith(prefix.toLowerCase())) return state
+  }
+  return 'Unknown'
+}
+
+// Reverse map from state abbreviation to full name — used to strip the full state name
+// from city labels like "Victoria Regional" before they appear in search queries.
+const STATE_ABBREV_TO_FULL: Record<string, string> = {
+  NSW: 'New South Wales',
+  VIC: 'Victoria',
+  QLD: 'Queensland',
+  WA:  'Western Australia',
+  SA:  'South Australia',
+  TAS: 'Tasmania',
+  NT:  'Northern Territory',
+  ACT: 'Australian Capital Territory',
+}
+
+// Words that are geographic qualifiers but add noise when included in a search query.
+const GEO_QUALIFIER_RE = /\b(regional|region|area|greater|metro|metropolitan|outer|inner|rural|country)\b/gi
+
 export async function loadFinderCategories(
   supabase: ReturnType<typeof createServiceClient>
 ): Promise<FinderEmailCategory[]> {
@@ -985,20 +1030,33 @@ function isIrrelevant(name: string): boolean {
 
 function buildNormalizedSearchQuery(keyword: string, suburb: string, city: string, state: string): string {
   const cleanSuburb = normalizeLocationPart(suburb, city, state)
-  const cleanCity = normalizeLocationPart(city, '', state)
-  const cleanState = normalizeLocationPart(state, '', '')
+  const cleanCity   = cleanCityForSearch(city, state)
+  const cleanState  = normalizeLocationPart(state, '', '')
   let categoryPart = keyword
     .replace(/\{suburb\}/gi, ' ')
-    .replace(/\{city\}/gi, ' ')
+    .replace(/\{city\}/gi,   ' ')
     .replace(/\bnear me\b/gi, ' ')
     .replace(/\bservices?\b/gi, ' ')
     .replace(/\bbest\s+in\b/gi, ' ')
     .replace(/\bbest\b/gi, ' ')
     .replace(/\blocal business\b/gi, ' ')
+    .replace(/\baustralia\b/gi, ' ')
+    // Legacy strips — retain for existing templates that hardcode 'sydney' / 'nsw'
     .replace(/\bin\s+sydney\b/gi, ' ')
     .replace(/\bsydney\b/gi, ' ')
     .replace(/\bnsw\b/gi, ' ')
-    .replace(/\baustralia\b/gi, ' ')
+
+  // Dynamic strips — remove each word of the current city name and the state abbreviation
+  // so templates like "melbourne tours {suburb}" clean correctly for any active city.
+  for (const word of city.split(/\s+/)) {
+    if (word.length > 1) {
+      categoryPart = categoryPart.replace(new RegExp(`\\b${escapeRegExp(word)}\\b`, 'gi'), ' ')
+    }
+  }
+  if (state) {
+    categoryPart = categoryPart.replace(new RegExp(`\\b${escapeRegExp(state)}\\b`, 'gi'), ' ')
+  }
+  categoryPart = categoryPart.replace(GEO_QUALIFIER_RE, ' ')
 
   if (cleanSuburb) {
     categoryPart = categoryPart.replace(new RegExp(`\\b${escapeRegExp(cleanSuburb)}\\b`, 'gi'), ' ')
@@ -1024,13 +1082,34 @@ function normalizeLocationPart(value: string, city: string, state: string): stri
   return normalized.replace(/\baustralia\b/gi, ' ').replace(/\s+/g, ' ').trim()
 }
 
+// Strips state abbreviation, full state name, 'Australia', and geographic qualifiers
+// from a city label so "NSW Regional" → "" and "Victoria Regional" → "".
+function cleanCityForSearch(city: string, stateAbbrev: string): string {
+  let result = city
+  if (stateAbbrev) {
+    result = result.replace(new RegExp(`\\b${escapeRegExp(stateAbbrev)}\\b`, 'gi'), ' ')
+  }
+  const fullStateName = STATE_ABBREV_TO_FULL[stateAbbrev.toUpperCase()]
+  if (fullStateName) {
+    result = result.replace(new RegExp(`\\b${escapeRegExp(fullStateName)}\\b`, 'gi'), ' ')
+  }
+  return result.replace(/\baustralia\b/gi, ' ').replace(GEO_QUALIFIER_RE, ' ').replace(/\s+/g, ' ').trim()
+}
+
 function dedupeQueryTokens(query: string): string {
   const tokens = query.split(/\s+/).filter(Boolean)
   const deduped: string[] = []
   const seenGeo = new Set<string>()
   const seenAll = new Set<string>()
 
-  const geoTokens = new Set(['sydney', 'nsw', 'australia'])
+  const geoTokens = new Set([
+    // Major city names
+    'sydney', 'melbourne', 'brisbane', 'perth', 'adelaide',
+    // State/territory abbreviations
+    'nsw', 'vic', 'qld', 'wa', 'sa', 'tas', 'act', 'nt',
+    // Generic geographic qualifiers and country
+    'australia', 'regional',
+  ])
 
   for (const token of tokens) {
     const normalized = token.toLowerCase()
@@ -1316,7 +1395,7 @@ export async function runFinderAgent(): Promise<{ leadsFound: number; runtimeLim
   // Suburb weighted rotation — flat list with priority for weighted score sorting
   const allLocations: Array<{ suburb: string; city: string; state: string; priority: number }> =
     Object.entries(cityAreaMaps).flatMap(([city, suburbMap]) =>
-      [...suburbMap.entries()].map(([suburb, priority]) => ({ suburb, city, state: CITY_STATE[city] ?? 'Unknown', priority }))
+      [...suburbMap.entries()].map(([suburb, priority]) => ({ suburb, city, state: getCityState(city), priority }))
     )
   const totalCombinations = finderCategories.reduce(
     (sum, cat) => sum + cat.queries.length * allLocations.length, 0

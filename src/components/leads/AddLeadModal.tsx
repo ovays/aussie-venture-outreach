@@ -18,15 +18,13 @@ interface Props {
   onCreated: () => void
 }
 
-const CITIES = ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide']
-const cityOptions = CITIES.map((c) => ({ value: c, label: c }))
-
 export function AddLeadModal({ open, onClose, onCreated }: Props) {
   const [businessName, setBusinessName] = useState('')
   const [email, setEmail] = useState('')
   const [website, setWebsite] = useState('')
   const [suburb, setSuburb] = useState('')
-  const [city, setCity] = useState('Sydney')
+  const [city, setCity] = useState('')
+  const [cities, setCities] = useState<string[]>([])
   const [categoryId, setCategoryId] = useState('')
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(false)
@@ -37,14 +35,17 @@ export function AddLeadModal({ open, onClose, onCreated }: Props) {
 
   useEffect(() => {
     if (!open) return
-    fetch('/api/categories')
-      .then((r) => r.json())
-      .then((json: { data?: Category[] }) => {
-        const all = json.data ?? []
-        setCategories(all)
-        if (all.length > 0) setCategoryId(all[0].id)
-      })
-      .catch(() => {})
+    Promise.all([
+      fetch('/api/categories').then((r) => r.json() as Promise<{ data?: Category[] }>),
+      fetch('/api/cities').then((r) => r.json() as Promise<{ data?: string[] }>),
+    ]).then(([catJson, cityJson]) => {
+      const all = catJson.data ?? []
+      setCategories(all)
+      if (all.length > 0) setCategoryId(all[0].id)
+      const cityList = cityJson.data ?? []
+      setCities(cityList)
+      if (cityList.length > 0) setCity((prev) => prev || cityList[0])
+    }).catch(() => {})
   }, [open])
 
   function reset() {
@@ -52,7 +53,7 @@ export function AddLeadModal({ open, onClose, onCreated }: Props) {
     setEmail('')
     setWebsite('')
     setSuburb('')
-    setCity('Sydney')
+    setCity(cities[0] ?? '')
     setCategoryId('')
     setError(null)
     setDraftError(null)
@@ -179,7 +180,7 @@ export function AddLeadModal({ open, onClose, onCreated }: Props) {
           label="City *"
           value={city}
           onChange={(e) => setCity(e.target.value)}
-          options={cityOptions}
+          options={cities.map((c) => ({ value: c, label: c }))}
           required
         />
         <Select

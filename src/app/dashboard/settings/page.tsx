@@ -148,7 +148,7 @@ export default async function SettingsPage() {
           </Card>
         )}
         <Card>
-          <SystemSettings initialSettings={settingsWithDefaults} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} />
+          <SystemSettings initialSettings={settingsWithDefaults} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} cities={Object.keys(suburbsByCity).sort()} />
         </Card>
 
         <Card>

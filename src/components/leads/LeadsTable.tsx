@@ -45,7 +45,6 @@ interface BulkResult {
 }
 
 const STATUS_OPTIONS = ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual', 'dead']
-const CITIES = ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide']
 
 interface LeadsTableProps {
   initialStatus?: string
@@ -227,6 +226,14 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState(initialStatus ?? '')
   const [city, setCity] = useState('')
+  const [cities, setCities] = useState<string[]>([])
+
+  useEffect(() => {
+    fetch('/api/cities')
+      .then((r) => r.json() as Promise<{ data?: string[] }>)
+      .then((json) => setCities(json.data ?? []))
+      .catch(() => {})
+  }, [])
 
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -380,7 +387,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
             style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
           >
             <option value="">All Cities</option>
-            {CITIES.map((c) => (
+            {cities.map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
           </select>

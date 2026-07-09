@@ -17,11 +17,10 @@ interface SystemSettingsProps {
   usageData: OutscraperUsageData
   hasGoogleMapsKey: boolean
   searchCacheCount: number
+  cities: string[]
 }
 
-const CITIES = ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide']
-
-export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, searchCacheCount }: SystemSettingsProps) {
+export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, searchCacheCount, cities }: SystemSettingsProps) {
   const [settings, setSettings] = useState<Record<string, string>>(
     Object.fromEntries(initialSettings.map((s) => [s.key, s.value]))
   )
@@ -705,7 +704,7 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
               className="w-full px-3 py-1.5 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-sky-500"
               style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
             >
-              {['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide'].map((c) => (
+              {cities.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>

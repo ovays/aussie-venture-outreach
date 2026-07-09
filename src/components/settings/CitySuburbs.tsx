@@ -14,11 +14,10 @@ interface CitySuburbsProps {
   initialData: Record<string, SuburbRow[]>
 }
 
-const ALL_CITIES = ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide']
-
 export function CitySuburbs({ initialData }: CitySuburbsProps) {
   const [data, setData] = useState<Record<string, SuburbRow[]>>(initialData)
-  const [activeCity, setActiveCity] = useState(ALL_CITIES[0])
+  const cities = Object.keys(data).sort()
+  const [activeCity, setActiveCity] = useState(cities[0] ?? '')
   const [newSuburb, setNewSuburb] = useState('')
   const [adding, setAdding] = useState(false)
 
@@ -91,7 +90,7 @@ export function CitySuburbs({ initialData }: CitySuburbsProps) {
 
       {/* City tabs */}
       <div className="flex flex-wrap gap-2 mb-4">
-        {ALL_CITIES.map((city) => {
+        {cities.map((city) => {
           const citySuburbs = data[city] ?? []
           const count = citySuburbs.filter((s) => s.active).length
           const total = citySuburbs.length

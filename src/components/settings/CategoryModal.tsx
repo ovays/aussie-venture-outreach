@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -29,10 +29,16 @@ interface CategoryModalProps {
   onSaved: () => void
 }
 
-const CITY_OPTIONS = ['Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide']
-
 export function CategoryModal({ open, onClose, category, onSaved }: CategoryModalProps) {
   const isNew = !category
+
+  const [cityOptions, setCityOptions] = useState<string[]>([])
+  useEffect(() => {
+    fetch('/api/cities')
+      .then((r) => r.json() as Promise<{ data?: string[] }>)
+      .then((json) => setCityOptions(json.data ?? []))
+      .catch(() => {})
+  }, [])
 
   const [form, setForm] = useState<CategoryDraft>({
     name: category?.name ?? '',
@@ -141,7 +147,7 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
           </div>
           {form.cities === 'custom' && (
             <div className="flex flex-wrap gap-2 mt-3">
-              {CITY_OPTIONS.map((city) => (
+              {cityOptions.map((city) => (
                 <button
                   key={city}
                   onClick={() => toggleCity(city)}
