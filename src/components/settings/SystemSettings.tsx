@@ -403,7 +403,7 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
               <SaveIndicator k="active_cities" />
             </div>
             <div className="flex flex-wrap gap-2">
-              {CITIES.map((city) => (
+              {cities.map((city) => (
                 <button
                   key={city}
                   onClick={() => toggleCity(city)}
