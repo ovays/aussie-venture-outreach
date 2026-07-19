@@ -7,7 +7,7 @@ import { normalizeEmail, extractRootDomainFromEmail, PERSONAL_EMAIL_PROVIDER_DOM
 import { resolveContentType } from '@/lib/content-type'
 import { writeOutreachEmail } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
-import { buildFollowUpEmail } from '@/lib/followup-email-templates'
+import { generateFollowUpEmail, type FollowUpThreadEmail } from '@/lib/followup-generation'
 import {
   STAGE_VALUES,
   STAGE_LABELS,
@@ -213,9 +213,25 @@ async function backfillLeadStageHistory(
     content_type:  contentType,
   })
 
-  const emailRows = stageEmails.map((stageEmail) => {
+  // Built sequentially (not .map()) because each follow-up's AI prompt needs
+  // the full thread up to that point, including any earlier follow-ups
+  // backfilled in this same import — the exact same generateFollowUpEmail()
+  // path the live daily sender uses, so imported and organic leads never
+  // diverge in how their follow-up content is produced.
+  const emailRows: Array<{
+    lead_id: string
+    type: string
+    subject: string
+    body_html: string
+    body_text: string
+    status: string
+    sent_at: string
+  }> = []
+  const history: FollowUpThreadEmail[] = [{ type: 'initial_pitch', subject: emailResult.subject, body: emailResult.body }]
+
+  for (const stageEmail of stageEmails) {
     if (stageEmail.type === 'initial_pitch') {
-      return {
+      emailRows.push({
         lead_id:   leadId,
         type:      'initial_pitch',
         subject:   emailResult.subject,
@@ -223,19 +239,38 @@ async function backfillLeadStageHistory(
         body_text: emailResult.body,
         status:    'sent',
         sent_at:   stageEmail.sentAt.toISOString(),
-      }
+      })
+      continue
     }
-    const fu = buildFollowUpEmail(stageEmail.type, businessName, emailResult.subject, categoryName, contentType)
-    return {
+
+    const generated = await generateFollowUpEmail(
+      stageEmail.type,
+      {
+        businessName: businessName,
+        category:     categoryName,
+        suburb,
+        city,
+        website:      website ?? '',
+        description:  '',
+        services:     '',
+        notes:        '',
+        contentType,
+      },
+      emailResult.subject,
+      history
+    )
+
+    emailRows.push({
       lead_id:   leadId,
       type:      stageEmail.type,
-      subject:   fu.subject,
-      body_html: fu.html,
-      body_text: fu.body,
+      subject:   generated.subject,
+      body_html: generated.html,
+      body_text: generated.body,
       status:    'sent',
       sent_at:   stageEmail.sentAt.toISOString(),
-    }
-  })
+    })
+    history.push({ type: stageEmail.type, subject: generated.subject, body: generated.body })
+  }
 
   const { data: insertedEmails, error: emailInsertErr } = await supabase
     .from('emails')

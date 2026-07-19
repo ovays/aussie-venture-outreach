@@ -181,6 +181,126 @@ export async function writeOutreachEmail(params: {
   }
 }
 
+// ─── Follow-up email writer ──────────────────────────────────────────────────
+
+export interface FollowUpThreadEmail {
+  type: string
+  subject: string
+  body: string
+}
+
+// Pure prompt builder — exported so tests can verify what Claude actually
+// receives (e.g. that prior thread emails are present) without a live API call.
+export function buildFollowUpEmailPrompt(
+  params: {
+    business_name: string
+    category: string
+    suburb: string
+    city: string
+    website: string
+    description: string
+    services: string
+    notes: string
+  },
+  followUpNumber: 1 | 2 | 3,
+  history: FollowUpThreadEmail[],
+  brandDesc: string
+): string {
+  const stageGuidance: Record<1 | 2 | 3, string> = {
+    1: 'This is the FIRST follow-up. Assume they may have simply missed or not gotten to the first email yet. Keep it light and low-pressure.',
+    2: 'This is the SECOND follow-up. Acknowledge that timing can be tricky and things get busy — stay warm, no pressure, no guilt-tripping.',
+    3: 'This is the THIRD and FINAL follow-up. Give it a warm, low-key close — leave the door open for later, do not imply any further follow-up is coming after this one.',
+  }
+
+  const facts = [
+    `- Name: ${params.business_name}`,
+    `- Category: ${params.category}`,
+    `- Location: ${params.suburb}, ${params.city}`,
+    params.website ? `- Website: ${params.website}` : null,
+    params.description ? `- Description: ${params.description}` : null,
+    params.services ? `- Services: ${params.services}` : null,
+    params.notes ? `- Internal notes: ${params.notes}` : null,
+  ].filter(Boolean).join('\n')
+
+  const thread = history
+    .map((h, i) => `[Email ${i + 1} — ${h.type}]\nSubject: ${h.subject}\n${h.body}`)
+    .join('\n\n')
+
+  return `You are Owais. You run Aussie Venture, ${brandDesc} with 650K+ followers across Facebook, Instagram and TikTok.
+
+You are writing follow-up email #${followUpNumber} in an existing email thread with a local business you're trying to collab with. They have not replied to any previous email in the thread yet.
+
+FACTS ABOUT THE BUSINESS (only use these, never invent others):
+${facts}
+
+FULL EMAIL THREAD SO FAR (oldest to newest — do not repeat this content verbatim, write something new that continues the thread naturally):
+${thread}
+
+${stageGuidance[followUpNumber]}
+
+WHAT THIS EMAIL MUST DO:
+- Read as clearly written for THIS specific business — reference the kind of business it is (based on the category/description above) so it doesn't sound like a generic mass email
+- Move the conversation forward without restating the whole original pitch
+- Stay consistent with everything already said earlier in the thread above
+
+HARD RULES — break any of these and the email is wrong:
+- Under 70 words (not counting sign-off)
+- Only use the FACTS given above — never invent reviews, popularity, prior conversations, or any detail not explicitly stated
+- No em dashes (no — character)
+- No bullet points
+- No corporate language: "leverage", "synergy", "reach out", "I wanted to", "I hope this finds you well", "I came across", "following up to see"
+- Sound like a real 25-year-old Australian, casual and warm
+- 2 short paragraphs max
+
+Sign off (use exactly this, every line, nothing more and nothing less):
+Cheers,
+Owais
+Aussie Venture
+hello@aussieventure.com
+
+Respond in JSON: { "body": "..." }`
+}
+
+export async function writeFollowUpEmail(params: {
+  business_name: string
+  category: string
+  suburb: string
+  city: string
+  website: string
+  description: string
+  services: string
+  notes: string
+  content_type: string
+  follow_up_number: 1 | 2 | 3
+  initial_subject: string
+  history: FollowUpThreadEmail[]
+}): Promise<{ subject: string; body: string }> {
+  const contentType = normalizeContentType(params.content_type)
+  const brandDesc = getBrandDescription(params.category, contentType)
+  const subject = `Re: ${params.initial_subject}`
+
+  const response = await rateLimitedCall(() =>
+    anthropic.messages.create({
+      model: SONNET_MODEL,
+      max_tokens: 400,
+      messages: [{
+        role: 'user',
+        content: buildFollowUpEmailPrompt(params, params.follow_up_number, params.history, brandDesc),
+      }],
+    })
+  )
+
+  const text = response.content[0].type === 'text' ? response.content[0].text : ''
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (jsonMatch) {
+    const parsed = JSON.parse(jsonMatch[0]) as { body?: string }
+    if (parsed.body && parsed.body.trim().length > 0) {
+      return { subject, body: parsed.body.trim() }
+    }
+  }
+  throw new Error('writeFollowUpEmail: Claude response did not contain a usable body')
+}
+
 // ─── Haiku email extractor ───────────────────────────────────────────────────
 
 export async function extractEmailWithHaiku(content: string, businessName: string): Promise<string | null> {

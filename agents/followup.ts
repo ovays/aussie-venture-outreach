@@ -4,12 +4,13 @@ import { getAnalyticsDayRange } from '@/lib/analytics'
 import { computeFollowUpEligibility, isFuEmailSent, type FollowUpType } from '@/lib/followup-eligibility'
 import { logger } from '@/lib/logger'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
-import { buildFollowUpEmail } from '@/lib/followup-email-templates'
+import { generateFollowUpEmail, type FollowUpThreadEmail } from '@/lib/followup-generation'
 
 interface LeadEmail {
   id: string
   type: string
   subject: string
+  body_text: string | null
   sent_at: string | null
   status: string
 }
@@ -20,7 +21,24 @@ interface ContactedLead {
   email: string | null
   category_name: string | null
   content_type: string | null
+  suburb: string | null
+  city: string | null
+  website: string | null
+  description: string | null
+  services: string | null
+  notes: string | null
   emails: LeadEmail[]
+}
+
+// Builds the AI prompt's thread history from every email already sent for
+// this lead (initial pitch + any earlier follow-ups), oldest first — a
+// completed stage is judged by isFuEmailSent (sent_at set), same rule the
+// eligibility engine uses, so history and eligibility never disagree.
+function buildEmailHistory(emails: LeadEmail[]): FollowUpThreadEmail[] {
+  return emails
+    .filter((e) => ['initial_pitch', 'follow_up_1', 'follow_up_2', 'follow_up_3'].includes(e.type) && isFuEmailSent(e))
+    .sort((a, b) => new Date(a.sent_at!).getTime() - new Date(b.sent_at!).getTime())
+    .map((e) => ({ type: e.type, subject: e.subject, body: e.body_text ?? '' }))
 }
 
 interface FollowUpCandidate {
@@ -63,13 +81,28 @@ async function sendFollowUp(
   type: FollowUpType
 ) {
   const followUpNumber = type === 'follow_up_1' ? 1 : type === 'follow_up_2' ? 2 : 3
-  const { subject, body, html } = buildFollowUpEmail(
+  const history = buildEmailHistory(candidate.lead.emails)
+  const { subject, body, html, source } = await generateFollowUpEmail(
     type,
-    candidate.lead.business_name,
+    {
+      businessName: candidate.lead.business_name,
+      category:     candidate.lead.category_name ?? '',
+      suburb:       candidate.lead.suburb ?? '',
+      city:         candidate.lead.city ?? '',
+      website:      candidate.lead.website ?? '',
+      description:  candidate.lead.description ?? '',
+      services:     candidate.lead.services ?? '',
+      notes:        candidate.lead.notes ?? '',
+      contentType:  candidate.lead.content_type ?? 'remote',
+    },
     candidate.initialEmail.subject,
-    candidate.lead.category_name ?? '',
-    candidate.lead.content_type ?? 'remote'
+    history
   )
+
+  logger.info('followup', `Follow-up ${followUpNumber} content generated`, {
+    lead_id: candidate.lead.id,
+    source,
+  })
 
   const result = await sendEmail({
     to: candidate.lead.email!,
@@ -269,7 +302,7 @@ export async function runFollowUpAgent(): Promise<void> {
     while (true) {
       const { data: batch, error: batchErr } = await supabase
         .from('leads')
-        .select('*, emails(id, type, subject, sent_at, status)')
+        .select('*, emails(id, type, subject, body_text, sent_at, status)')
         .eq('status', 'contacted')
         .range(fuOffset, fuOffset + FU_BATCH_SIZE - 1)
 
