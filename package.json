@@ -14,6 +14,7 @@
     "test:followup-quotas": "tsx scripts/test-followup-quotas.ts",
     "test:followups": "tsx scripts/test-followups.ts",
     "test:followup-eligibility": "tsx scripts/test-followup-eligibility.ts",
+    "test:stage-import": "tsx scripts/test-stage-import.ts",
     "test:followup-proof": "tsx scripts/test-followup-proof.ts",
     "test:followup-pagination": "tsx scripts/test-followup-pagination.ts",
     "test:fu3-breakdown": "tsx scripts/test-fu3-breakdown.ts",

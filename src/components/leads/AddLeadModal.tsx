@@ -5,6 +5,11 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
+import { STAGE_OPTIONS, type LeadImportStage } from '@/lib/stage-import'
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10)
+}
 
 interface Category {
   id: string
@@ -27,6 +32,8 @@ export function AddLeadModal({ open, onClose, onCreated }: Props) {
   const [cities, setCities] = useState<string[]>([])
   const [categoryId, setCategoryId] = useState('')
   const [categories, setCategories] = useState<Category[]>([])
+  const [currentStage, setCurrentStage] = useState<LeadImportStage>('new')
+  const [stageCompletedDate, setStageCompletedDate] = useState('')
   const [loading, setLoading] = useState(false)
   const [drafting, setDrafting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -55,6 +62,8 @@ export function AddLeadModal({ open, onClose, onCreated }: Props) {
     setSuburb('')
     setCity(cities[0] ?? '')
     setCategoryId('')
+    setCurrentStage('new')
+    setStageCompletedDate('')
     setError(null)
     setDraftError(null)
     setDomainWarning(null)
@@ -90,6 +99,8 @@ export function AddLeadModal({ open, onClose, onCreated }: Props) {
           city,
           category_id: selectedCategory.id,
           category_name: selectedCategory.name,
+          current_stage: currentStage,
+          ...(currentStage !== 'new' && { stage_completed_date: stageCompletedDate }),
           ...(force && { force: true }),
         }),
       })
@@ -116,6 +127,15 @@ export function AddLeadModal({ open, onClose, onCreated }: Props) {
 
     if (!leadId) return
 
+    // Staged leads (current_stage !== 'new') already have their full email
+    // history backfilled server-side and are past the draft stage — skip
+    // Phase 2 entirely and finish here.
+    if (currentStage !== 'new') {
+      reset()
+      onClose()
+      return
+    }
+
     // Phase 2: generate draft immediately
     setDrafting(true)
     try {
@@ -141,7 +161,13 @@ export function AddLeadModal({ open, onClose, onCreated }: Props) {
   }
 
   const categoryOptions = categories.map((c) => ({ value: c.id, label: c.name }))
-  const isValid = businessName.trim() && email.trim() && suburb.trim() && categoryId
+  const isValid = Boolean(
+    businessName.trim() &&
+    email.trim() &&
+    suburb.trim() &&
+    categoryId &&
+    (currentStage === 'new' || stageCompletedDate.trim())
+  )
 
   return (
     <Modal open={open} onClose={handleClose} title="Add Lead">
@@ -191,6 +217,27 @@ export function AddLeadModal({ open, onClose, onCreated }: Props) {
           placeholder={categories.length === 0 ? 'Loading categories…' : undefined}
           required
         />
+        <Select
+          label="Current Stage *"
+          value={currentStage}
+          onChange={(e) => {
+            const next = e.target.value as LeadImportStage
+            setCurrentStage(next)
+            if (next === 'new') setStageCompletedDate('')
+          }}
+          options={STAGE_OPTIONS}
+          required
+        />
+        {currentStage !== 'new' && (
+          <Input
+            label="Stage Completed Date *"
+            type="date"
+            value={stageCompletedDate}
+            onChange={(e) => setStageCompletedDate(e.target.value)}
+            max={todayIsoDate()}
+            required
+          />
+        )}
 
         {error && (
           <p className="text-sm text-red-400">{error}</p>
