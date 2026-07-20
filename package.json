@@ -21,6 +21,10 @@
     "test:fu3-breakdown": "tsx scripts/test-fu3-breakdown.ts",
     "test:reactivation-eligibility": "tsx scripts/test-reactivation-eligibility.ts",
     "test:email-sync-failed": "tsx scripts/test-email-sync-failed.ts",
+    "test:webhook-signature": "tsx scripts/test-webhook-signature.ts",
+    "test:webhook-handling": "tsx scripts/test-webhook-handling.ts",
+    "test:email-threading": "tsx scripts/test-email-threading.ts",
+    "test:duplicate-followup-prevention": "tsx scripts/test-duplicate-followup-prevention.ts",
     "deploy:trigger": "npx trigger.dev@4.4.6 deploy"
   },
   "dependencies": {
@@ -35,6 +39,7 @@
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
     "resend": "^6.12.2",
+    "svix": "^1.90.0",
     "ws": "^8.21.0",
     "zod": "^3.25.76"
   },

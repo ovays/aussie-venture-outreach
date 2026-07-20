@@ -146,14 +146,15 @@ export async function runReactivationAgent(): Promise<void> {
       const sentAt = new Date().toISOString()
 
       const { error: insertErr } = await supabase.from('emails').insert({
-        lead_id:   lead.id,
-        type:      'reactivation',
+        lead_id:    lead.id,
+        type:       'reactivation',
         subject,
-        body_html: html,
-        body_text: body,
-        resend_id: result?.id ?? null,
-        status:    result ? 'sent' : 'failed',
-        sent_at:   result ? sentAt : null,
+        body_html:  html,
+        body_text:  body,
+        resend_id:  result?.id ?? null,
+        message_id: result?.messageId ?? null,
+        status:     result ? 'sent' : 'failed',
+        sent_at:    result ? sentAt : null,
       })
 
       if (insertErr) {
@@ -166,6 +167,7 @@ export async function runReactivationAgent(): Promise<void> {
             bodyHtml: html,
             bodyText: body,
             resendId: result.id,
+            messageId: result.messageId,
             sentAt,
           })
         } else {

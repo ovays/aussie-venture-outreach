@@ -12,6 +12,15 @@ export const dailyPipelineJob = schedules.task({
     pattern: "0 8 * * *",
     timezone: "Australia/Sydney",
   },
+  // Prevents two overlapping runs of this task (a manual "Test Run" from the
+  // dashboard racing the scheduled cron, or a duplicate schedule dispatch)
+  // from both reaching Follow-up/Sender in parallel and double-sending to the
+  // same lead. Application-level idempotency checks (agents/followup.ts,
+  // agents/sender.ts) and the DB unique index (migration 027) are the other
+  // two layers of the same defense.
+  queue: {
+    concurrencyLimit: 1,
+  },
   maxDuration: 3600,
   run: async () => {
     console.log("Starting scheduled daily pipeline...")

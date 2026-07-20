@@ -101,9 +101,10 @@ export async function POST(
   if (emailRowId) {
     // Update the existing pending_send row in place — same record, now sent.
     const { error: emailUpdateErr } = await supabase.from('emails').update({
-      status:    'sent',
-      resend_id: result.id,
-      sent_at:   sentAt,
+      status:     'sent',
+      resend_id:  result.id,
+      message_id: result.messageId,
+      sent_at:    sentAt,
     }).eq('id', emailRowId)
 
     if (emailUpdateErr) {
@@ -123,28 +124,30 @@ export async function POST(
   } else {
     // No pre-existing draft — insert the single sent record.
     const { data: inserted, error: insertErr } = await supabase.from('emails').insert({
-      lead_id:   id,
-      type:      'initial_pitch',
+      lead_id:    id,
+      type:       'initial_pitch',
       subject,
-      body_html: bodyHtml,
-      body_text: bodyText,
-      status:    'sent',
-      resend_id: result.id,
-      sent_at:   sentAt,
+      body_html:  bodyHtml,
+      body_text:  bodyText,
+      status:     'sent',
+      resend_id:  result.id,
+      message_id: result.messageId,
+      sent_at:    sentAt,
     }).select('id').single()
 
     if (insertErr) {
       // Email delivered but no row to update — insert a recovery row directly.
       console.error('[resend] DB error inserting email row:', insertErr.message, { lead_id: id, resend_id: result.id })
       await supabase.from('emails').insert({
-        lead_id:   id,
-        type:      'initial_pitch',
+        lead_id:    id,
+        type:       'initial_pitch',
         subject,
-        body_html: bodyHtml,
-        body_text: bodyText,
-        status:    'email_sync_failed',
-        resend_id: result.id,
-        sent_at:   sentAt,
+        body_html:  bodyHtml,
+        body_text:  bodyText,
+        status:     'email_sync_failed',
+        resend_id:  result.id,
+        message_id: result.messageId,
+        sent_at:    sentAt,
       })
       await supabase.from('leads').update({ status: 'contacted', updated_at: sentAt }).eq('id', id)
       return NextResponse.json(

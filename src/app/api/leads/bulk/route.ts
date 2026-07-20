@@ -81,7 +81,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
         if (pendingEmail?.id) {
           const { error: emailUpdateErr } = await supabase.from('emails').update({
-            status: 'sent', resend_id: result.id, sent_at: sentAt,
+            status: 'sent', resend_id: result.id, message_id: result.messageId, sent_at: sentAt,
           }).eq('id', pendingEmail.id)
           if (emailUpdateErr) {
             await handleEmailSyncFailure(supabase, {
@@ -98,13 +98,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         } else {
           const { error: insertErr } = await supabase.from('emails').insert({
             lead_id, type: 'initial_pitch', subject, body_html: bodyHtml, body_text: bodyText,
-            status: 'sent', resend_id: result.id, sent_at: sentAt,
+            status: 'sent', resend_id: result.id, message_id: result.messageId, sent_at: sentAt,
           })
           if (insertErr) {
             // No pre-existing row — insert a recovery row directly.
             await supabase.from('emails').insert({
               lead_id, type: 'initial_pitch', subject, body_html: bodyHtml, body_text: bodyText,
-              status: 'email_sync_failed', resend_id: result.id, sent_at: sentAt,
+              status: 'email_sync_failed', resend_id: result.id, message_id: result.messageId, sent_at: sentAt,
             })
             await supabase.from('leads').update({ status: 'contacted', updated_at: sentAt }).eq('id', lead_id)
             failed.push({ lead_id, business_name: lead.business_name, reason: `Email delivered but DB insert failed — marked Sync Failed` })

@@ -1,10 +1,15 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { sendEmail } from '@/lib/resend'
+import { sendEmail, getReceivedEmailHeaders } from '@/lib/resend'
 import { getDashboardMetrics, getLeadName, logAnalyticsMetrics } from '@/lib/analytics'
 import { logger } from '@/lib/logger'
 
-export async function handleEmailReply(leadId: string): Promise<void> {
-  const supabase = createServiceClient()
+// supabaseOverride exists purely for tests to inject a fake client — every
+// production call site omits it and gets the real service-role client.
+export async function handleEmailReply(
+  leadId: string,
+  supabaseOverride?: ReturnType<typeof createServiceClient>
+): Promise<void> {
+  const supabase = supabaseOverride ?? createServiceClient()
 
   const { data: lead } = await supabase
     .from('leads')
@@ -14,7 +19,13 @@ export async function handleEmailReply(leadId: string): Promise<void> {
 
   if (!lead) return
 
-  await supabase.from('leads').update({ status: 'replied' }).eq('id', leadId)
+  // Only advance status on the lead's first reply. A lead that has already
+  // moved past 'contacted' (negotiating, closed, etc.) must not be regressed
+  // back to 'replied' by a second reply on the same thread, or by duplicate
+  // webhook delivery of the same reply event.
+  if (lead.status === 'contacted') {
+    await supabase.from('leads').update({ status: 'replied' }).eq('id', leadId)
+  }
 
   await supabase
     .from('emails')
@@ -32,19 +43,92 @@ export async function handleEmailReply(leadId: string): Promise<void> {
   logger.info('tracker', `Reply received from ${lead.business_name}`, { lead_id: leadId })
 }
 
-export async function handleEmailBounce(leadId: string, emailId: string): Promise<void> {
-  const supabase = createServiceClient()
+// Matches an inbound email.received webhook event to a lead and, if found,
+// routes it through handleEmailReply. The webhook payload itself only carries
+// email_id/from/to/subject/message_id — not In-Reply-To — so this fetches the
+// full raw headers via Resend's Inbound Email API to find which of our sent
+// Message-IDs the reply is answering. Falls back to matching the sender's
+// address against leads.email if no header match is found (e.g. the
+// recipient composed a new email instead of hitting reply).
+//
+// Requires Resend's Inbound Email feature to be provisioned on a receiving
+// domain — see src/app/api/webhooks/resend/route.ts for details. Until that
+// is done, email.received is never sent by Resend and this function is never
+// invoked; it does not itself require any further setup once that is in place.
+export async function handleInboundEmail(
+  params: { emailId: string; from: string },
+  supabaseOverride?: ReturnType<typeof createServiceClient>,
+  fetchHeaders: typeof getReceivedEmailHeaders = getReceivedEmailHeaders
+): Promise<void> {
+  const supabase = supabaseOverride ?? createServiceClient()
 
-  await supabase.from('emails').update({ status: 'bounced' }).eq('id', emailId)
+  const headers = await fetchHeaders(params.emailId)
+  const inReplyTo = headers
+    ? Object.entries(headers).find(([key]) => key.toLowerCase() === 'in-reply-to')?.[1]?.trim()
+    : null
+
+  let leadId: string | null = null
+
+  if (inReplyTo) {
+    const { data: matchedEmail } = await supabase
+      .from('emails')
+      .select('lead_id')
+      .eq('message_id', inReplyTo)
+      .limit(1)
+      .maybeSingle()
+    leadId = matchedEmail?.lead_id ?? null
+  }
+
+  if (!leadId && params.from) {
+    const { data: matchedLead } = await supabase
+      .from('leads')
+      .select('id')
+      .ilike('email', params.from)
+      .limit(1)
+      .maybeSingle()
+    leadId = matchedLead?.id ?? null
+  }
+
+  if (!leadId) {
+    logger.info('tracker', 'Inbound email received but no matching lead found', {
+      email_id: params.emailId,
+      from:     params.from,
+      had_in_reply_to: !!inReplyTo,
+    })
+    return
+  }
+
+  await handleEmailReply(leadId, supabaseOverride)
+}
+
+export async function handleEmailBounce(
+  leadId: string,
+  resendId: string,
+  supabaseOverride?: ReturnType<typeof createServiceClient>
+): Promise<void> {
+  const supabase = supabaseOverride ?? createServiceClient()
+
+  const { error: updateErr } = await supabase
+    .from('emails')
+    .update({ status: 'bounced' })
+    .eq('resend_id', resendId)
+
+  if (updateErr) {
+    logger.error('tracker', 'Failed to mark email bounced', {
+      lead_id:   leadId,
+      resend_id: resendId,
+      error:     updateErr.message,
+    })
+  }
 
   await supabase.from('activity_log').insert({
     event_type: 'email_bounced',
     lead_id: leadId,
     description: `Email bounced for lead ${leadId}`,
-    metadata: { email_id: emailId },
+    metadata: { resend_id: resendId },
   })
 
-  logger.info('tracker', 'Email bounced', { lead_id: leadId, email_id: emailId })
+  logger.info('tracker', 'Email bounced', { lead_id: leadId, resend_id: resendId })
 }
 
 export async function sendDailyDigest(): Promise<void> {

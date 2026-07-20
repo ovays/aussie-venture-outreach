@@ -13,6 +13,7 @@ interface LeadEmail {
   body_text: string | null
   sent_at: string | null
   status: string
+  message_id: string | null
 }
 
 interface ContactedLead {
@@ -39,6 +40,20 @@ function buildEmailHistory(emails: LeadEmail[]): FollowUpThreadEmail[] {
     .filter((e) => ['initial_pitch', 'follow_up_1', 'follow_up_2', 'follow_up_3'].includes(e.type) && isFuEmailSent(e))
     .sort((a, b) => new Date(a.sent_at!).getTime() - new Date(b.sent_at!).getTime())
     .map((e) => ({ type: e.type, subject: e.subject, body: e.body_text ?? '' }))
+}
+
+// Builds the RFC threading References chain (oldest first) from every prior
+// sent email in this lead's thread — used for the new send's In-Reply-To
+// (last entry) and References (full chain) headers. Same "already sent" rule
+// as buildEmailHistory, filtered to rows that actually captured a Message-ID
+// (older rows sent before this column existed won't have one — they're
+// simply omitted from the chain, so threading degrades gracefully rather
+// than breaking).
+export function buildReferenceChain(emails: LeadEmail[]): string[] {
+  return emails
+    .filter((e) => ['initial_pitch', 'follow_up_1', 'follow_up_2', 'follow_up_3'].includes(e.type) && isFuEmailSent(e) && e.message_id)
+    .sort((a, b) => new Date(a.sent_at!).getTime() - new Date(b.sent_at!).getTime())
+    .map((e) => e.message_id!)
 }
 
 interface FollowUpCandidate {
@@ -75,13 +90,42 @@ async function sentTodayCount(
   return count ?? 0
 }
 
-async function sendFollowUp(
+// aiGenerator/sendEmailFn exist purely for tests to stub the Claude and
+// Resend network calls — every production call site omits them and gets the
+// real writeFollowUpEmail / sendEmail.
+export async function sendFollowUp(
   supabase: ReturnType<typeof createServiceClient>,
   candidate: FollowUpCandidate,
-  type: FollowUpType
+  type: FollowUpType,
+  aiGenerator?: Parameters<typeof generateFollowUpEmail>[4],
+  sendEmailFn: typeof sendEmail = sendEmail
 ) {
   const followUpNumber = type === 'follow_up_1' ? 1 : type === 'follow_up_2' ? 2 : 3
+
+  // Idempotency re-check: the eligibility queue was built once at the start of
+  // this run. If a second overlapping run (or a Trigger.dev retry) already
+  // delivered this exact follow-up for this lead in the meantime, skip —
+  // without this, two concurrent runs would both send. The unique index on
+  // emails(lead_id, type) WHERE status IN ('sent','email_sync_failed')
+  // (migration 027) is the DB-level backstop if this check still loses the
+  // race (see the insert error handling below).
+  const { data: alreadySent } = await supabase
+    .from('emails')
+    .select('id')
+    .eq('lead_id', candidate.lead.id)
+    .eq('type', type)
+    .in('status', ['sent', 'email_sync_failed'])
+    .limit(1)
+
+  if (alreadySent?.length) {
+    logger.warn('followup', `Idempotency skip: ${type} already sent for lead (concurrent run?)`, {
+      lead_id: candidate.lead.id,
+    })
+    return false
+  }
+
   const history = buildEmailHistory(candidate.lead.emails)
+  const references = buildReferenceChain(candidate.lead.emails)
   const { subject, body, html, source } = await generateFollowUpEmail(
     type,
     {
@@ -96,7 +140,8 @@ async function sendFollowUp(
       contentType:  candidate.lead.content_type ?? 'remote',
     },
     candidate.initialEmail.subject,
-    history
+    history,
+    aiGenerator
   )
 
   logger.info('followup', `Follow-up ${followUpNumber} content generated`, {
@@ -104,12 +149,13 @@ async function sendFollowUp(
     source,
   })
 
-  const result = await sendEmail({
+  const result = await sendEmailFn({
     to: candidate.lead.email!,
     subject,
     html,
     text: body,
     leadId: candidate.lead.id,
+    references: references.length ? references : undefined,
   })
 
   const sentAt = new Date().toISOString()
@@ -117,19 +163,33 @@ async function sendFollowUp(
   const { data: emailRow, error: insertErr } = await supabase
     .from('emails')
     .insert({
-      lead_id:   candidate.lead.id,
+      lead_id:    candidate.lead.id,
       type,
       subject,
-      body_html: html,
-      body_text: body,
-      resend_id: result?.id ?? null,
-      status:    result ? 'sent' : 'failed',
-      sent_at:   result ? sentAt : null,
+      body_html:  html,
+      body_text:  body,
+      resend_id:  result?.id ?? null,
+      message_id: result?.messageId ?? null,
+      status:     result ? 'sent' : 'failed',
+      sent_at:    result ? sentAt : null,
     })
     .select()
     .single()
 
   if (insertErr) {
+    // Postgres unique_violation on emails_lead_type_delivered_key (migration 027):
+    // another run already recorded a delivered row for this lead+type between
+    // our idempotency check above and this insert. If we already sent via
+    // Resend, that delivery is now a genuine duplicate we cannot undo — log it
+    // loudly so it surfaces the same way an email_sync_failed row would.
+    if (insertErr.code === '23505') {
+      logger.error('followup', `Follow-up ${followUpNumber} duplicate blocked by DB constraint — lost the idempotency race`, {
+        lead_id:      candidate.lead.id,
+        resend_sent:  !!result,
+        resend_id:    result?.id ?? null,
+      })
+      return false
+    }
     if (result) {
       // Email was delivered via Resend but the DB insert failed.
       // Insert a recovery row so the delivery is not lost and re-sends are blocked.
@@ -141,6 +201,7 @@ async function sendFollowUp(
         bodyHtml: html,
         bodyText: body,
         resendId: result.id,
+        messageId: result.messageId,
         sentAt,
       })
     } else {
@@ -302,7 +363,7 @@ export async function runFollowUpAgent(): Promise<void> {
     while (true) {
       const { data: batch, error: batchErr } = await supabase
         .from('leads')
-        .select('*, emails(id, type, subject, body_text, sent_at, status)')
+        .select('*, emails(id, type, subject, body_text, sent_at, status, message_id)')
         .eq('status', 'contacted')
         .range(fuOffset, fuOffset + FU_BATCH_SIZE - 1)
 

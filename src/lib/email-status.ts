@@ -109,6 +109,7 @@ export async function insertEmailSyncFailedRecovery(
     bodyHtml,
     bodyText,
     resendId,
+    messageId,
     sentAt,
   }: {
     agent: string
@@ -118,6 +119,7 @@ export async function insertEmailSyncFailedRecovery(
     bodyHtml: string
     bodyText: string
     resendId: string
+    messageId?: string | null
     sentAt: string
   }
 ): Promise<void> {
@@ -141,11 +143,12 @@ export async function insertEmailSyncFailedRecovery(
       lead_id:   leadId,
       type,
       subject,
-      body_html: bodyHtml,
-      body_text: bodyText,
-      resend_id: resendId,
-      status:    EMAIL_STATUS.EMAIL_SYNC_FAILED,
-      sent_at:   sentAt,
+      body_html:  bodyHtml,
+      body_text:  bodyText,
+      resend_id:  resendId,
+      message_id: messageId ?? null,
+      status:     EMAIL_STATUS.EMAIL_SYNC_FAILED,
+      sent_at:    sentAt,
     },
     { onConflict: 'resend_id', ignoreDuplicates: true }
   )

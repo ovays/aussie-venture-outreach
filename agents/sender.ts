@@ -219,9 +219,10 @@ const result = await sendEmail({
 
         const sentAt = new Date().toISOString()
         const { error: emailUpdateErr } = await supabase.from('emails').update({
-          status:    'sent',
-          resend_id: result.id,
-          sent_at:   sentAt,
+          status:     'sent',
+          resend_id:  result.id,
+          message_id: result.messageId,
+          sent_at:    sentAt,
         }).eq('id', emailRecord.id)
 
         if (emailUpdateErr) {
