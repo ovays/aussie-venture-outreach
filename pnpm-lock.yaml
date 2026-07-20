@@ -21,8 +21,8 @@ importers:
         specifier: ^2.105.1
         version: 2.108.2
       '@trigger.dev/sdk':
-        specifier: 4.5.1
-        version: 4.5.1(react@19.2.4)(zod@3.25.76)
+        specifier: 4.5.4
+        version: 4.5.4(react@19.2.4)(zod@3.25.76)
       lucide-react:
         specifier: ^1.14.0
         version: 1.20.0(react@19.2.4)
@@ -510,10 +510,6 @@ packages:
     resolution: {integrity: sha512-fmEWp5kXlGEc3i/lR698Hz41DfGyN4Tbe4g7L1AxSc7fF8Xeh/FQ9Quqpa9dVA413Q1Ad43QOLzU4JoXgbFPWw==}
     engines: {node: '>=8.0.0'}
 
-  '@opentelemetry/api@1.9.0':
-    resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
-    engines: {node: '>=8.0.0'}
-
   '@opentelemetry/api@1.9.1':
     resolution: {integrity: sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==}
     engines: {node: '>=8.0.0'}
@@ -601,10 +597,6 @@ packages:
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
-
-  '@opentelemetry/semantic-conventions@1.36.0':
-    resolution: {integrity: sha512-TtxJSRD8Ohxp6bKkhrm27JRHAxPczQA7idtcTOMYI+wQRRrfgqxHv1cFbCApcSnNjtXkmzFozn6jQtFrOmbjPQ==}
-    engines: {node: '>=14'}
 
   '@opentelemetry/semantic-conventions@1.41.1':
     resolution: {integrity: sha512-/UhIkaZgPutTFmQ7RnIJGgDXZmtEJ7Dvi86xNTFWcnRxVRNk/aotsqDJYeEvDP+FSMB2SdW+pQzNMcWP0rwuNA==}
@@ -771,12 +763,12 @@ packages:
   '@tailwindcss/postcss@4.3.1':
     resolution: {integrity: sha512-dNJuNbdEJT/SWRuXTYP1WSamelsz3ztkUsdtWQPjrexysrTpaEPM40P/71knXiXLYEojqPOEGitVLLpPMS5T6A==}
 
-  '@trigger.dev/core@4.5.1':
-    resolution: {integrity: sha512-HAn5m63JwfWbvTS82/jmmjq4fCx5LyqhJ1hUUN75T1Ei8juB2yKGpT0JwRUfFZWpOQCfRZQ05CrEIseO7BIInA==}
+  '@trigger.dev/core@4.5.4':
+    resolution: {integrity: sha512-+PqaL5ltwu523EYummK4spG76VeAD+GtoGCbjzGGD1A54EOFmamgfTKg25sgoWVpd2hyp1xno5gQrsjcpvH0IQ==}
     engines: {node: '>=18.20.0'}
 
-  '@trigger.dev/sdk@4.5.1':
-    resolution: {integrity: sha512-nz+xaF3v8I6P4YMjamOA7vg5EHjxkE1z5VWiDHrQUn6p2kxVajYSHyNnuVyVlJBHL4Of9x1w4jNdf9t1KDo5Ow==}
+  '@trigger.dev/sdk@4.5.4':
+    resolution: {integrity: sha512-Sig0/OdS6bAdpagJve2GNnvDX0139EjbMPePX0FaVwa2RjU0ff3f/y/LBunS/+rTVanK0xQ2E2RmdbYJasz66g==}
     engines: {node: '>=18.20.0'}
     peerDependencies:
       '@ai-sdk/otel': '>=1.0.0-0 <2'
@@ -1780,9 +1772,7 @@ snapshots:
 
   '@opentelemetry/api-logs@0.218.0':
     dependencies:
-      '@opentelemetry/api': 1.9.0
-
-  '@opentelemetry/api@1.9.0': {}
+      '@opentelemetry/api': 1.9.1
 
   '@opentelemetry/api@1.9.1': {}
 
@@ -1793,7 +1783,7 @@ snapshots:
   '@opentelemetry/core@2.7.1(@opentelemetry/api@1.9.1)':
     dependencies:
       '@opentelemetry/api': 1.9.1
-      '@opentelemetry/semantic-conventions': 1.36.0
+      '@opentelemetry/semantic-conventions': 1.41.1
 
   '@opentelemetry/exporter-logs-otlp-http@0.218.0(@opentelemetry/api@1.9.1)':
     dependencies:
@@ -1856,7 +1846,7 @@ snapshots:
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/core': 2.7.1(@opentelemetry/api@1.9.1)
-      '@opentelemetry/semantic-conventions': 1.36.0
+      '@opentelemetry/semantic-conventions': 1.41.1
 
   '@opentelemetry/sdk-logs@0.218.0(@opentelemetry/api@1.9.1)':
     dependencies:
@@ -1864,7 +1854,7 @@ snapshots:
       '@opentelemetry/api-logs': 0.218.0
       '@opentelemetry/core': 2.7.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/resources': 2.7.1(@opentelemetry/api@1.9.1)
-      '@opentelemetry/semantic-conventions': 1.36.0
+      '@opentelemetry/semantic-conventions': 1.41.1
 
   '@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.1)':
     dependencies:
@@ -1877,7 +1867,7 @@ snapshots:
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/core': 2.7.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/resources': 2.7.1(@opentelemetry/api@1.9.1)
-      '@opentelemetry/semantic-conventions': 1.36.0
+      '@opentelemetry/semantic-conventions': 1.41.1
 
   '@opentelemetry/sdk-trace-node@2.7.1(@opentelemetry/api@1.9.1)':
     dependencies:
@@ -1885,8 +1875,6 @@ snapshots:
       '@opentelemetry/context-async-hooks': 2.7.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/core': 2.7.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-trace-base': 2.7.1(@opentelemetry/api@1.9.1)
-
-  '@opentelemetry/semantic-conventions@1.36.0': {}
 
   '@opentelemetry/semantic-conventions@1.41.1': {}
 
@@ -2032,7 +2020,7 @@ snapshots:
       postcss: 8.5.15
       tailwindcss: 4.3.1
 
-  '@trigger.dev/core@4.5.1':
+  '@trigger.dev/core@4.5.4':
     dependencies:
       '@bugsnag/cuid': 3.2.2
       '@electric-sql/client': 1.0.14
@@ -2074,11 +2062,11 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@trigger.dev/sdk@4.5.1(react@19.2.4)(zod@3.25.76)':
+  '@trigger.dev/sdk@4.5.4(react@19.2.4)(zod@3.25.76)':
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/semantic-conventions': 1.41.1
-      '@trigger.dev/core': 4.5.1
+      '@trigger.dev/core': 4.5.4
       chalk: 5.6.2
       cronstrue: 2.59.0
       debug: 4.4.3
@@ -2527,7 +2515,7 @@ snapshots:
 
   prom-client@15.1.3:
     dependencies:
-      '@opentelemetry/api': 1.9.0
+      '@opentelemetry/api': 1.9.1
       tdigest: 0.1.2
 
   raf-schd@4.0.3: {}
