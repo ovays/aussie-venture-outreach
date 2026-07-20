@@ -4,7 +4,12 @@ import { getAnalyticsDayRange } from '@/lib/analytics'
 import { computeFollowUpEligibility, isFuEmailSent, type FollowUpType } from '@/lib/followup-eligibility'
 import { logger } from '@/lib/logger'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
-import { generateFollowUpEmail, type FollowUpThreadEmail } from '@/lib/followup-generation'
+import { generateFollowUpEmail } from '@/lib/followup-generation'
+import { buildEmailHistory, buildReferenceChain } from '@/lib/email-sequence'
+
+// Re-exported for scripts/test-email-threading.ts, which verifies this
+// function against the live sender's exact behavior.
+export { buildReferenceChain }
 
 interface LeadEmail {
   id: string
@@ -29,31 +34,6 @@ interface ContactedLead {
   services: string | null
   notes: string | null
   emails: LeadEmail[]
-}
-
-// Builds the AI prompt's thread history from every email already sent for
-// this lead (initial pitch + any earlier follow-ups), oldest first — a
-// completed stage is judged by isFuEmailSent (sent_at set), same rule the
-// eligibility engine uses, so history and eligibility never disagree.
-function buildEmailHistory(emails: LeadEmail[]): FollowUpThreadEmail[] {
-  return emails
-    .filter((e) => ['initial_pitch', 'follow_up_1', 'follow_up_2', 'follow_up_3'].includes(e.type) && isFuEmailSent(e))
-    .sort((a, b) => new Date(a.sent_at!).getTime() - new Date(b.sent_at!).getTime())
-    .map((e) => ({ type: e.type, subject: e.subject, body: e.body_text ?? '' }))
-}
-
-// Builds the RFC threading References chain (oldest first) from every prior
-// sent email in this lead's thread — used for the new send's In-Reply-To
-// (last entry) and References (full chain) headers. Same "already sent" rule
-// as buildEmailHistory, filtered to rows that actually captured a Message-ID
-// (older rows sent before this column existed won't have one — they're
-// simply omitted from the chain, so threading degrades gracefully rather
-// than breaking).
-export function buildReferenceChain(emails: LeadEmail[]): string[] {
-  return emails
-    .filter((e) => ['initial_pitch', 'follow_up_1', 'follow_up_2', 'follow_up_3'].includes(e.type) && isFuEmailSent(e) && e.message_id)
-    .sort((a, b) => new Date(a.sent_at!).getTime() - new Date(b.sent_at!).getTime())
-    .map((e) => e.message_id!)
 }
 
 interface FollowUpCandidate {

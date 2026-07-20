@@ -36,6 +36,7 @@
     "test:resend-send-idempotency": "tsx scripts/test-resend-send-idempotency.ts",
     "test:bulk-send-duplicate-protection": "tsx scripts/test-bulk-send-duplicate-protection.ts",
     "test:migration-030-lead-source-backfill": "tsx scripts/test-migration-030-lead-source-backfill.ts",
+    "test:resend-followup-selection": "tsx scripts/test-resend-followup-selection.ts",
     "deploy:trigger": "npx trigger.dev@4.4.6 deploy"
   },
   "dependencies": {
@@ -43,7 +44,7 @@
     "@hello-pangea/dnd": "^18.0.1",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.1",
-    "@trigger.dev/sdk": "4.5.1",
+    "@trigger.dev/sdk": "4.5.4",
     "lucide-react": "^1.14.0",
     "next": "16.2.4",
     "react": "19.2.4",
