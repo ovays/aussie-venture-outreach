@@ -25,6 +25,11 @@
     "test:webhook-handling": "tsx scripts/test-webhook-handling.ts",
     "test:email-threading": "tsx scripts/test-email-threading.ts",
     "test:duplicate-followup-prevention": "tsx scripts/test-duplicate-followup-prevention.ts",
+    "test:distributed-lock": "tsx scripts/test-distributed-lock.ts",
+    "test:atomic-quota-enforcement": "tsx scripts/test-atomic-quota-enforcement.ts",
+    "test:resend-duplicate-protection": "tsx scripts/test-resend-duplicate-protection.ts",
+    "test:stage-import-rollback": "tsx scripts/test-stage-import-rollback.ts",
+    "test:migration-duplicate-resolution": "tsx scripts/test-migration-duplicate-resolution.ts",
     "deploy:trigger": "npx trigger.dev@4.4.6 deploy"
   },
   "dependencies": {

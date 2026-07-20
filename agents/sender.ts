@@ -3,6 +3,16 @@ import { sendEmail } from '@/lib/resend'
 import { logger } from '@/lib/logger'
 import { getAnalyticsDayRange } from '@/lib/analytics'
 import { handleEmailSyncFailure } from '@/lib/email-status'
+import { acquireLock, releaseLock } from '@/lib/distributed-lock'
+
+// Held for the entire quota-check-then-send sequence below so two overlapping
+// invocations (a stuck old run, a manual script racing the scheduled
+// pipeline, a platform-level retry) can never both count the same "sent
+// today" snapshot and then both send against it — see migration 028.
+// Trigger.dev's own queue concurrencyLimit:1 (trigger/daily-pipeline.ts)
+// already prevents overlapping *scheduled* runs; this lock is the DB-level
+// backstop that holds regardless of how runSenderAgent() is invoked.
+const SENDER_LOCK_KEY = 'sender_agent'
 
 export async function runSenderAgent(): Promise<{ sent: number; failed: number }> {
   const supabase = createServiceClient()
@@ -20,6 +30,14 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     logger.info('sender', '[PIPELINE_STAGE] Sender exiting', { reason: 'system_paused', system_active: systemSetting?.value ?? null })
     return { sent: 0, failed: 0 }
   }
+
+  const gotLock = await acquireLock(supabase, SENDER_LOCK_KEY)
+  if (!gotLock) {
+    logger.warn('sender', '[PIPELINE_STAGE] Sender exiting', { reason: 'concurrent_run_in_progress' })
+    return { sent: 0, failed: 0 }
+  }
+
+  try {
 
   const [globalLimitRow, limitRow] = await Promise.all([
     supabase.from('settings').select('value').eq('key', 'daily_lead_limit').single(),
@@ -315,6 +333,10 @@ const result = await sendEmail({
   logger.info('sender', '[PIPELINE_STAGE] Sender complete', { sent, failed })
   logger.info('sender', `Total pipeline cost estimate: $${estimatedCost} (Haiku writing + Resend; see finder log for Outscraper cost)`)
   return { sent, failed }
+
+  } finally {
+    await releaseLock(supabase, SENDER_LOCK_KEY)
+  }
 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

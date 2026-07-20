@@ -8,6 +8,7 @@ import { resolveContentType } from '@/lib/content-type'
 import { writeOutreachEmail } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
 import { generateFollowUpEmail, type FollowUpThreadEmail } from '@/lib/followup-generation'
+import { logger } from '@/lib/logger'
 import {
   STAGE_VALUES,
   STAGE_LABELS,
@@ -146,28 +147,61 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // already-sent emails, backdated so the existing follow-up engine picks up
   // the sequence from the next stage using its normal intervals.
   if (current_stage !== 'new' && stage_completed_date) {
-    const backfillResult = await backfillLeadStageHistory(supabase, {
-      leadId:       lead.id,
-      businessName: business_name,
-      website,
-      suburb,
-      city,
-      categoryName: category_name,
-      contentType:  (lead.content_type as string | null) ?? 'remote',
-      stage:        current_stage,
-      completedDate: new Date(`${stage_completed_date}T00:00:00.000Z`),
-    })
+    // AI generation (writeOutreachEmail / generateFollowUpEmail) can throw —
+    // network error, API error, malformed response — not just return a
+    // Supabase-style { error }. Catch here too, not only the explicit
+    // ok:false path below, so no exception can leave the lead we just
+    // inserted above stranded without its backfilled stage history.
+    try {
+      const backfillResult = await backfillLeadStageHistory(supabase, {
+        leadId:       lead.id,
+        businessName: business_name,
+        website,
+        suburb,
+        city,
+        categoryName: category_name,
+        contentType:  (lead.content_type as string | null) ?? 'remote',
+        stage:        current_stage,
+        completedDate: new Date(`${stage_completed_date}T00:00:00.000Z`),
+      })
 
-    if (!backfillResult.ok) {
-      // Roll back the lead so we never leave a lead stuck without its stage history.
-      await supabase.from('leads').delete().eq('id', lead.id)
-      return NextResponse.json({ error: backfillResult.error }, { status: 500 })
+      if (!backfillResult.ok) {
+        await rollbackStagedLead(supabase, lead.id, backfillResult.error)
+        return NextResponse.json({ error: backfillResult.error }, { status: 500 })
+      }
+
+      return NextResponse.json({ data: backfillResult.lead }, { status: 201 })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error during staged import'
+      await rollbackStagedLead(supabase, lead.id, message)
+      return NextResponse.json({ error: `Failed to backfill stage history: ${message}` }, { status: 500 })
     }
-
-    return NextResponse.json({ data: backfillResult.lead }, { status: 201 })
   }
 
   return NextResponse.json({ data: lead }, { status: 201 })
+}
+
+// Deletes the lead created just before the staged-import backfill so a
+// failure partway through (AI generation, email insert, follow_ups insert,
+// status update) never leaves an orphaned lead with no stage history. Emails,
+// follow_ups, and deals for this lead all cascade-delete via ON DELETE
+// CASCADE (migration 001) — deleting the lead row is sufficient to remove
+// everything the failed attempt may have partially created.
+async function rollbackStagedLead(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  leadId: string,
+  reason: string
+): Promise<void> {
+  const { error } = await supabase.from('leads').delete().eq('id', leadId)
+  if (error) {
+    // Nothing more we can do from the request path — log enough to find and
+    // clean up the orphaned lead manually.
+    logger.error('leads-api', 'Failed to roll back staged-import lead after failure', {
+      lead_id: leadId,
+      reason,
+      rollback_error: error.message,
+    })
+  }
 }
 
 async function backfillLeadStageHistory(
