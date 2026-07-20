@@ -8,6 +8,17 @@ import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
 import { researchOneLead } from '@/lib/research-lead'
 import { writeOneLead, type DmState } from '@/lib/write-lead'
 import { handleEmailSyncFailure } from '@/lib/email-status'
+import { acquireLock, releaseLock } from '@/lib/distributed-lock'
+import { logger } from '@/lib/logger'
+
+// Same protection agents/sender.ts (idempotency re-check) and
+// resend/route.ts (per-lead lock) already apply to their send paths — this
+// bulk action was missing both, so a bulk send racing a concurrent manual
+// resend (or a second overlapping bulk request) for the same lead could
+// call the Resend API twice for one lead with no DB-level backstop, since
+// the common path here UPDATEs an existing pending_send row rather than
+// INSERTing (migration 027's unique index only guards INSERTs).
+const BULK_SEND_LOCK_TTL_MS = 3 * 60 * 1000
 
 const bulkSchema = z.object({
   action: z.enum(['send_initial_emails', 'regenerate_drafts', 'delete', 'research_leads']),
@@ -56,20 +67,43 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         continue
       }
 
-      const { data: pendingEmail } = await supabase
-        .from('emails')
-        .select('id, subject, body_html, body_text')
-        .eq('lead_id', lead_id)
-        .eq('type', 'initial_pitch')
-        .eq('status', 'pending_send')
-        .limit(1)
-        .maybeSingle()
-
-      const subject   = pendingEmail?.subject   ?? `Partnership opportunity — ${lead.business_name}`
-      const bodyHtml  = pendingEmail?.body_html  ?? `<p>Hi,</p><p>We would love to work with ${lead.business_name}.</p>`
-      const bodyText  = pendingEmail?.body_text  ?? `Hi,\n\nWe would love to work with ${lead.business_name}.\n\nBest,\nOwais`
+      const lockKey = `resend:${lead_id}`
+      const lockToken = await acquireLock(supabase, lockKey, BULK_SEND_LOCK_TTL_MS)
+      if (!lockToken) {
+        failed.push({ lead_id, business_name: lead.business_name, reason: 'A send is already in progress for this lead — try again shortly' })
+        continue
+      }
 
       try {
+        // Idempotency re-check under the lock: catches a send that already
+        // completed (via the automated sender agent or another request)
+        // between our status read above and now.
+        const { data: alreadySent } = await supabase
+          .from('emails')
+          .select('id')
+          .eq('lead_id', lead_id)
+          .eq('type', 'initial_pitch')
+          .in('status', ['sent', 'email_sync_failed'])
+          .limit(1)
+
+        if (alreadySent?.length) {
+          failed.push({ lead_id, business_name: lead.business_name, reason: 'Already sent — skipped to avoid duplicate' })
+          continue
+        }
+
+        const { data: pendingEmail } = await supabase
+          .from('emails')
+          .select('id, subject, body_html, body_text')
+          .eq('lead_id', lead_id)
+          .eq('type', 'initial_pitch')
+          .eq('status', 'pending_send')
+          .limit(1)
+          .maybeSingle()
+
+        const subject   = pendingEmail?.subject   ?? `Partnership opportunity — ${lead.business_name}`
+        const bodyHtml  = pendingEmail?.body_html  ?? `<p>Hi,</p><p>We would love to work with ${lead.business_name}.</p>`
+        const bodyText  = pendingEmail?.body_text  ?? `Hi,\n\nWe would love to work with ${lead.business_name}.\n\nBest,\nOwais`
+
         const result = await sendEmail({ to: lead.email, subject, html: bodyHtml, text: bodyText, leadId: lead_id })
 
         if (!result) {
@@ -102,10 +136,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           })
           if (insertErr) {
             // No pre-existing row — insert a recovery row directly.
-            await supabase.from('emails').insert({
+            const { error: recoveryErr } = await supabase.from('emails').insert({
               lead_id, type: 'initial_pitch', subject, body_html: bodyHtml, body_text: bodyText,
               status: 'email_sync_failed', resend_id: result.id, message_id: result.messageId, sent_at: sentAt,
             })
+            if (recoveryErr) {
+              logger.error('bulk-send', 'Recovery row insert also failed — delivered email has no DB record', {
+                lead_id, error: recoveryErr.message, resend_id: result.id,
+              })
+            }
             await supabase.from('leads').update({ status: 'contacted', updated_at: sentAt }).eq('id', lead_id)
             failed.push({ lead_id, business_name: lead.business_name, reason: `Email delivered but DB insert failed — marked Sync Failed` })
             continue
@@ -127,6 +166,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           business_name: lead.business_name,
           reason: err instanceof Error ? err.message : 'Unknown error',
         })
+      } finally {
+        await releaseLock(supabase, lockKey, lockToken)
       }
     }
 

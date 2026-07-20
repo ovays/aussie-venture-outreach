@@ -31,8 +31,8 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     return { sent: 0, failed: 0 }
   }
 
-  const gotLock = await acquireLock(supabase, SENDER_LOCK_KEY)
-  if (!gotLock) {
+  const lockToken = await acquireLock(supabase, SENDER_LOCK_KEY)
+  if (!lockToken) {
     logger.warn('sender', '[PIPELINE_STAGE] Sender exiting', { reason: 'concurrent_run_in_progress' })
     return { sent: 0, failed: 0 }
   }
@@ -335,7 +335,7 @@ const result = await sendEmail({
   return { sent, failed }
 
   } finally {
-    await releaseLock(supabase, SENDER_LOCK_KEY)
+    await releaseLock(supabase, SENDER_LOCK_KEY, lockToken)
   }
 
   } catch (error) {

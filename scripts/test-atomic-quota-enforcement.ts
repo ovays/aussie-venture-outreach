@@ -44,7 +44,7 @@ function assert(condition: boolean, label: string, detail?: string): void {
   }
 }
 
-type LockRow = { lock_key: string; locked_at: string }
+type LockRow = { lock_key: string; locked_at: string; owner_token: string }
 
 function makeFakeLockClient() {
   const rows: LockRow[] = []
@@ -102,12 +102,12 @@ async function main() {
     const db = makeFakeLockClient()
     const runA = await acquireLock(db, 'sender_agent')
     const runB = await acquireLock(db, 'sender_agent') // e.g. a retry racing the still-in-flight run
-    assert(runA === true, 'First run acquires the sender lock')
-    assert(runB === false, 'A second, overlapping run is blocked from proceeding to the quota check')
+    assert(typeof runA === 'string' && runA.length > 0, 'First run acquires the sender lock')
+    assert(runB === null, 'A second, overlapping run is blocked from proceeding to the quota check')
 
-    await releaseLock(db, 'sender_agent')
+    await releaseLock(db, 'sender_agent', runA!)
     const runC = await acquireLock(db, 'sender_agent')
-    assert(runC === true, 'Once the first run finishes and releases, the next run can proceed normally')
+    assert(typeof runC === 'string' && runC.length > 0, 'Once the first run finishes and releases, the next run can proceed normally')
   }
 
   const senderSrc = fs.readFileSync(path.resolve(process.cwd(), 'agents/sender.ts'), 'utf8')
@@ -125,8 +125,8 @@ async function main() {
   // ── 3. Lock released in a finally covering every exit path ─────────────────
   console.log('\n  3. Lock is released in a finally block')
   {
-    const releaseInFinally = /}\s*finally\s*{\s*await releaseLock\(supabase, SENDER_LOCK_KEY\)\s*}/.test(senderSrc)
-    assert(releaseInFinally, 'agents/sender.ts releases SENDER_LOCK_KEY inside a finally block', releaseInFinally ? undefined : 'pattern not found')
+    const releaseInFinally = /}\s*finally\s*{\s*await releaseLock\(supabase, SENDER_LOCK_KEY, lockToken\)\s*}/.test(senderSrc)
+    assert(releaseInFinally, 'agents/sender.ts releases SENDER_LOCK_KEY inside a finally block using its own acquired token', releaseInFinally ? undefined : 'pattern not found')
 
     // Every early return between the lock acquisition and the finally must be
     // inside the try that the finally is attached to (i.e. before it in the file).

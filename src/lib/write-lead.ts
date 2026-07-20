@@ -2,7 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { writeOutreachEmail, writeOutreachDM } from '@/lib/claude'
 import { emailBodyToHtml } from '@/lib/utils'
 import { logger } from '@/lib/logger'
-import { checkLeadDedupe, type LeadDedupeIndex } from '@/lib/deduplication'
+import { addLeadToDedupeIndex, checkLeadDedupe, type LeadDedupeIndex } from '@/lib/deduplication'
 
 export type DmState = {
   dmsAddedToday: number
@@ -117,6 +117,17 @@ export async function writeOneLead(
       }
 
       logger.info('writer', `Email queued for "${lead.business_name}" (${lead.email})`)
+      // Register this lead in the shared dedupe index immediately so any later
+      // lead in the same batch that resolves to the same email/root domain
+      // (e.g. two Google Maps listings for one franchise) is caught — the
+      // index is otherwise fetched once per pipeline run and would go stale
+      // mid-batch without this.
+      addLeadToDedupeIndex(dedupeIndex, {
+        id: lead.id,
+        business_name: lead.business_name,
+        email: lead.email,
+        status: 'email_ready',
+      })
       await supabase.from('leads').update({ status: 'email_ready' }).eq('id', lead.id)
       await supabase.from('activity_log').insert({
         event_type: 'outreach_written',

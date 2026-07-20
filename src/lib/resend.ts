@@ -41,10 +41,22 @@ export async function sendEmail(params: {
    *  thread (initial pitch, reactivation). */
   references?: string[]
 }): Promise<{ id: string; messageId: string } | null> {
+  // Generated once, outside the retry closure: withRetry only retries when
+  // the Resend call *throws* (network timeout/reset) — the case where the
+  // request may have already reached Resend and been accepted before the
+  // response was lost. Regenerating messageId per attempt would mean a
+  // successful-but-unconfirmed first attempt and a successful retry produce
+  // two really-delivered emails with two different Message-IDs, with no way
+  // to tell from the single row we'd persist that a duplicate happened.
+  // Passing the same idempotencyKey on every attempt instead lets Resend
+  // itself dedupe: a retried request with a key it already processed returns
+  // the original result rather than sending again.
+  const { messageId, headers } = buildThreadingHeaders(params.references)
+  const idempotencyKey = messageId
+
   try {
     return await withRetry(async () => {
       const resend = getResend()
-      const { messageId, headers } = buildThreadingHeaders(params.references)
 
       const { data, error } = await resend.emails.send({
         from: 'Owais | Aussie Venture <hello@aussieventure.com>',
@@ -54,7 +66,7 @@ export async function sendEmail(params: {
         text: params.text,
         tags: params.leadId !== 'digest' ? [{ name: 'lead_id', value: params.leadId }] : [],
         headers,
-      })
+      }, { idempotencyKey })
 
       if (error) {
         console.error('[resend] API returned error:', JSON.stringify(error, null, 2))

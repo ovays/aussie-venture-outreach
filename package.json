@@ -30,6 +30,12 @@
     "test:resend-duplicate-protection": "tsx scripts/test-resend-duplicate-protection.ts",
     "test:stage-import-rollback": "tsx scripts/test-stage-import-rollback.ts",
     "test:migration-duplicate-resolution": "tsx scripts/test-migration-duplicate-resolution.ts",
+    "test:writer-dedupe-index-refresh": "tsx scripts/test-writer-dedupe-index-refresh.ts",
+    "test:destructive-routes-require-admin": "tsx scripts/test-destructive-routes-require-admin.ts",
+    "test:batch-agent-error-isolation": "tsx scripts/test-batch-agent-error-isolation.ts",
+    "test:resend-send-idempotency": "tsx scripts/test-resend-send-idempotency.ts",
+    "test:bulk-send-duplicate-protection": "tsx scripts/test-bulk-send-duplicate-protection.ts",
+    "test:migration-030-lead-source-backfill": "tsx scripts/test-migration-030-lead-source-backfill.ts",
     "deploy:trigger": "npx trigger.dev@4.4.6 deploy"
   },
   "dependencies": {

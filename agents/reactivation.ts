@@ -76,6 +76,7 @@ export async function runReactivationAgent(): Promise<void> {
     for (const lead of contactedLeads as ContactedLead[]) {
       if (!lead.email) continue
 
+      try {
       const emailsList = lead.emails ?? []
 
       // Dead-after-reactivation path: reactivation was already sent, check if lead should now be marked dead.
@@ -196,6 +197,13 @@ export async function runReactivationAgent(): Promise<void> {
           status: result ? 'sent' : 'failed',
         },
       })
+      } catch (error) {
+        // One lead's transient DB/network exception must not abort the rest
+        // of this batch (see agents/sender.ts's per-item try/catch for the
+        // same reasoning) — this is the last pipeline stage each run.
+        const msg = error instanceof Error ? error.message : String(error)
+        logger.error('reactivation', `Exception processing lead: ${lead.business_name}: ${msg}`, { lead_id: lead.id })
+      }
     }
 
     logger.info('reactivation', 'Reactivation agent complete', { eligible, reactivationSent, markedDead })

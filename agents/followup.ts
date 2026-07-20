@@ -432,15 +432,23 @@ export async function runFollowUpAgent(): Promise<void> {
         if (eligibility.nextFuType === null) {
           const fu3Email = emailsList.find((email) => email.type === 'follow_up_3' && isFuEmailSent(email))
           if (!reactivationEnabled && fu3Email?.sent_at && fu3Email.sent_at < today.start && eligibility.daysSince >= followUp3Days) {
-            await supabase.from('leads').update({ status: 'dead' }).eq('id', lead.id)
-            await supabase.from('activity_log').insert({
-              event_type: 'lead_marked_dead',
-              lead_id: lead.id,
-              description: `Lead marked as dead: ${lead.business_name} (${eligibility.daysSince} days no reply)`,
-              metadata: { days_since: eligibility.daysSince },
-            })
-            logger.info('followup', `Marked dead: ${lead.business_name}`, { daysSince: eligibility.daysSince })
-            markedDead++
+            try {
+              await supabase.from('leads').update({ status: 'dead' }).eq('id', lead.id)
+              await supabase.from('activity_log').insert({
+                event_type: 'lead_marked_dead',
+                lead_id: lead.id,
+                description: `Lead marked as dead: ${lead.business_name} (${eligibility.daysSince} days no reply)`,
+                metadata: { days_since: eligibility.daysSince },
+              })
+              logger.info('followup', `Marked dead: ${lead.business_name}`, { daysSince: eligibility.daysSince })
+              markedDead++
+            } catch (error) {
+              // A transient DB/network exception here must not abort eligibility
+              // computation for the rest of the batch (see agents/sender.ts's
+              // per-item try/catch for the same reasoning).
+              const msg = error instanceof Error ? error.message : String(error)
+              logger.error('followup', `Exception marking dead: ${lead.business_name}: ${msg}`, { lead_id: lead.id })
+            }
             continue
           }
           skipAllSent++
@@ -564,10 +572,20 @@ export async function runFollowUpAgent(): Promise<void> {
       })
 
       for (const candidate of toSend) {
-        const wasSent = await sendFollowUp(supabase, candidate, type)
-        if (wasSent) {
-          sent[type]++
-          globalSentThisRun++
+        try {
+          const wasSent = await sendFollowUp(supabase, candidate, type)
+          if (wasSent) {
+            sent[type]++
+            globalSentThisRun++
+          }
+        } catch (error) {
+          // One lead's transient DB/network exception must not abort the rest
+          // of this batch or skip the Reactivation stage that runs after this
+          // agent (see agents/sender.ts's per-item try/catch for the same reasoning).
+          const msg = error instanceof Error ? error.message : String(error)
+          logger.error('followup', `Exception sending ${type} to ${candidate.lead.business_name}: ${msg}`, {
+            lead_id: candidate.lead.id,
+          })
         }
       }
 

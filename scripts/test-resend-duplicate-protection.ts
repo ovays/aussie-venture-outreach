@@ -41,7 +41,7 @@ function assert(condition: boolean, label: string, detail?: string): void {
   }
 }
 
-type LockRow = { lock_key: string; locked_at: string }
+type LockRow = { lock_key: string; locked_at: string; owner_token: string }
 
 function makeFakeLockClient() {
   const rows: LockRow[] = []
@@ -103,8 +103,8 @@ async function main() {
     let resendCalls = 0
 
     async function simulateRequest(): Promise<{ status: number }> {
-      const got = await acquireLock(db, `resend:${leadId}`, 3 * 60 * 1000)
-      if (!got) return { status: 409 }
+      const token = await acquireLock(db, `resend:${leadId}`, 3 * 60 * 1000)
+      if (!token) return { status: 409 }
       aiCalls++
       resendCalls++
       return { status: 200 }
@@ -124,7 +124,7 @@ async function main() {
     const db = makeFakeLockClient()
     const gotA = await acquireLock(db, 'resend:lead-a')
     const gotB = await acquireLock(db, 'resend:lead-b')
-    assert(gotA === true && gotB === true, 'Locks are scoped per-lead, not global')
+    assert(!!gotA && !!gotB, 'Locks are scoped per-lead, not global')
   }
 
   const routeSrc = fs.readFileSync(
@@ -146,15 +146,15 @@ async function main() {
   // ── 4. Failed acquire returns 409 with a clear message ──────────────────────
   console.log('\n  4. A failed lock acquisition returns HTTP 409')
   {
-    const has409 = /if \(!gotLock\) \{\s*return NextResponse\.json\(\s*\{ error: '[^']+' \},\s*\{ status: 409 \}/.test(routeSrc)
+    const has409 = /if \(!lockToken\) \{\s*return NextResponse\.json\(\s*\{ error: '[^']+' \},\s*\{ status: 409 \}/.test(routeSrc)
     assert(has409, 'route.ts returns { status: 409 } with an explanatory error when the lock is already held', has409 ? undefined : 'pattern not found')
   }
 
-  // ── 5. Lock released in a finally ───────────────────────────────────────────
-  console.log('\n  5. Lock is released in a finally block regardless of outcome')
+  // ── 5. Lock released in a finally, fenced to this request's own token ──────
+  console.log('\n  5. Lock is released in a finally block, fenced to this request\'s own token')
   {
-    const releaseInFinally = /}\s*finally\s*{\s*await releaseLock\(supabase, lockKey\)\s*}/.test(routeSrc)
-    assert(releaseInFinally, 'route.ts releases the per-lead lock inside a finally block', releaseInFinally ? undefined : 'pattern not found')
+    const releaseInFinally = /}\s*finally\s*{\s*await releaseLock\(supabase, lockKey, lockToken\)\s*}/.test(routeSrc)
+    assert(releaseInFinally, 'route.ts releases the per-lead lock inside a finally block using its own acquired token', releaseInFinally ? undefined : 'pattern not found')
   }
 
   console.log('\n' + SEP)

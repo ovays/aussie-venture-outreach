@@ -35,8 +35,8 @@ export async function POST(
   // concurrent/duplicate resend requests (double-click, client retry) can
   // never both pass the checks and both call the Resend API for this lead.
   const lockKey = `resend:${id}`
-  const gotLock = await acquireLock(supabase, lockKey, RESEND_LOCK_TTL_MS)
-  if (!gotLock) {
+  const lockToken = await acquireLock(supabase, lockKey, RESEND_LOCK_TTL_MS)
+  if (!lockToken) {
     return NextResponse.json(
       { error: 'A resend is already in progress for this lead. Please wait a moment and try again.' },
       { status: 409 }
@@ -193,6 +193,6 @@ export async function POST(
   return NextResponse.json({ success: true })
 
   } finally {
-    await releaseLock(supabase, lockKey)
+    await releaseLock(supabase, lockKey, lockToken)
   }
 }

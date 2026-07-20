@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
+import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 
 // GET /api/leads/delete-by-date?date=YYYY-MM-DD — returns count for that date
 export async function GET(request: NextRequest) {
@@ -25,6 +26,9 @@ export async function GET(request: NextRequest) {
 
 // DELETE /api/leads/delete-by-date  body: { date: "YYYY-MM-DD" }
 export async function DELETE(request: NextRequest) {
+  const auth = await requireApiAdmin()
+  if (isAuthErrorResponse(auth)) return auth
+
   const body = await request.json() as { date?: string }
   const { date } = body
 
