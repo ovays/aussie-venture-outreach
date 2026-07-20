@@ -41,6 +41,9 @@ importers:
       resend:
         specifier: ^6.12.2
         version: 6.13.0
+      svix:
+        specifier: ^1.90.0
+        version: 1.98.0
       ws:
         specifier: ^8.21.0
         version: 8.21.0
@@ -1401,6 +1404,9 @@ packages:
       babel-plugin-macros:
         optional: true
 
+  svix@1.98.0:
+    resolution: {integrity: sha512-Pe7zeGemPEFrpSmfzaX8/u2PballejtzoYQejklzK3qB1tQHDePbFcIStArAsaIx292/pDH5cU+YeIBro5Awww==}
+
   systeminformation@5.31.15:
     resolution: {integrity: sha512-7mqCtD28TK5dVdLAQONVa/Do/NBgMH2dxqf49nh6DIKoEWuDg6tkgGBP+dN22VEJVPZa/QqiHomhWNRn4WUNTQ==}
     engines: {node: '>=8.0.0'}
@@ -2691,6 +2697,10 @@ snapshots:
     dependencies:
       client-only: 0.0.1
       react: 19.2.4
+
+  svix@1.98.0:
+    dependencies:
+      standardwebhooks: 1.0.0
 
   systeminformation@5.31.15: {}
 
