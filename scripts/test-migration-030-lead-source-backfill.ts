@@ -9,7 +9,8 @@
  * Supabase SQL editor) — but any environment rebuilt by replaying the
  * migration files from scratch (a fresh staging DB, disaster recovery,
  * `supabase db reset`) would be missing `leads.source`, which
- * src/app/api/leads/route.ts (manual lead creation) and agents/sender.ts
+ * src/lib/create-lead.ts (manual lead creation, shared by the Add Lead form
+ * and the CSV bulk-import endpoint) and agents/sender.ts
  * (`.neq('leads.source', 'manual')` filter on the initial-outreach send
  * stage) both depend on.
  *
@@ -66,10 +67,10 @@ async function main() {
   console.log('\n  3. Every dependent code path referencing leads.source still exists (fix targets a real, live dependency)')
   {
     const senderSrc = fs.readFileSync(path.resolve(process.cwd(), 'agents/sender.ts'), 'utf8')
-    const leadsRouteSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/app/api/leads/route.ts'), 'utf8')
+    const createLeadSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/lib/create-lead.ts'), 'utf8')
 
     assert(/leads\.source/.test(senderSrc), "agents/sender.ts still filters on leads.source (would break if the column were ever actually missing)")
-    assert(/source:\s*'manual'/.test(leadsRouteSrc), "src/app/api/leads/route.ts still inserts source: 'manual' on manual lead creation")
+    assert(/source:\s*source \?\? 'manual'/.test(createLeadSrc), "src/lib/create-lead.ts still defaults source to 'manual' on manual lead creation")
   }
 
   console.log('\n' + SEP)

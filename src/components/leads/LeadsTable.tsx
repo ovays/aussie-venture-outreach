@@ -1,12 +1,13 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Search, Star, AtSign, Mail, Plus, Send, RefreshCw, Trash2, X, Microscope } from 'lucide-react'
+import { Search, Star, AtSign, Mail, Plus, Send, RefreshCw, Trash2, X, Microscope, Upload } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { useLeadDrawer } from '@/lib/lead-drawer-context'
 import { formatDate } from '@/lib/utils'
 import { AddLeadModal } from '@/components/leads/AddLeadModal'
+import { ImportLeadsModal } from '@/components/leads/ImportLeadsModal'
 
 interface Lead {
   id: string
@@ -222,6 +223,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [addModalOpen, setAddModalOpen] = useState(false)
+  const [importModalOpen, setImportModalOpen] = useState(false)
 
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState(initialStatus ?? '')
@@ -400,6 +402,11 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
 
           <span className="text-sm ml-auto sm:ml-0" style={{ color: '#64748b' }}>{total} leads</span>
 
+          <Button size="sm" variant="ghost" onClick={() => setImportModalOpen(true)}>
+            <Upload size={13} />
+            Import Leads
+          </Button>
+
           <Button size="sm" onClick={() => setAddModalOpen(true)}>
             <Plus size={13} />
             Add Lead
@@ -411,6 +418,12 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}
         onCreated={fetchLeads}
+      />
+
+      <ImportLeadsModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onImported={fetchLeads}
       />
 
       {/* Bulk selection bar */}

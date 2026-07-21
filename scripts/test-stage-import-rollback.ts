@@ -24,10 +24,12 @@
  *   5. Static check: the success path (backfillResult.ok === true) is
  *      unchanged — no rollback runs when the import succeeds.
  *
- * This wiring is unavoidably tied to a Next.js route module, which may only
- * export HTTP method handlers (see comment in src/lib/webhook-verify.ts) —
- * so backfillLeadStageHistory/rollbackStagedLead can't be unit-imported
- * directly. Static source verification (the same approach already used by
+ * backfillLeadStageHistory/rollbackStagedLead/createLead live in
+ * src/lib/create-lead.ts (extracted from src/app/api/leads/route.ts so the
+ * CSV bulk-import endpoint can reuse the exact same insert/backfill/rollback
+ * path) — they aren't exported HTTP handlers, so they can't be unit-imported
+ * directly either way (see comment in src/lib/webhook-verify.ts). Static
+ * source verification (the same approach already used by
  * scripts/test-duplicate-followup-prevention.ts for its scheduler-level
  * check) is the appropriate level for this fix.
  *
@@ -55,7 +57,7 @@ console.log(SEP)
 console.log('  TEST:STAGE-IMPORT-ROLLBACK')
 console.log(SEP)
 
-const routeSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/app/api/leads/route.ts'), 'utf8')
+const routeSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/lib/create-lead.ts'), 'utf8')
 const schemaSrc = fs.readFileSync(path.resolve(process.cwd(), 'supabase/migrations/001_initial_schema.sql'), 'utf8')
 
 // ── 1. Backfill call wrapped in try/catch ─────────────────────────────────────
@@ -101,8 +103,8 @@ console.log('\n  4. emails/follow_ups/deals cascade-delete when their lead is de
 // ── 5. Success path is unchanged ──────────────────────────────────────────────
 console.log('\n  5. Success path returns 201 with no rollback call nearby')
 {
-  const successReturn = routeSrc.includes("return NextResponse.json({ data: backfillResult.lead }, { status: 201 })")
-  assert(successReturn, 'A successful backfill still returns 201 with the updated lead, unchanged from before this fix')
+  const successReturn = routeSrc.includes("return { ok: true, status: 201, lead: backfillResult.lead as Record<string, unknown> }")
+  assert(successReturn, 'A successful backfill still returns a 201 result with the updated lead, unchanged from before this fix')
 }
 
 console.log('\n' + SEP)

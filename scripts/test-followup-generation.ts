@@ -56,15 +56,15 @@ async function test1_sameGeneratorForImportedAndNormalLeads(): Promise<void> {
   console.log('\n[1] Imported leads and normal leads call the same generator')
 
   const followupAgentSrc = fs.readFileSync(path.resolve(process.cwd(), 'agents/followup.ts'), 'utf8')
-  const leadsRouteSrc    = fs.readFileSync(path.resolve(process.cwd(), 'src/app/api/leads/route.ts'), 'utf8')
+  const createLeadSrc    = fs.readFileSync(path.resolve(process.cwd(), 'src/lib/create-lead.ts'), 'utf8')
 
   assert(
     /from ['"]@\/lib\/followup-generation['"]/.test(followupAgentSrc) && /generateFollowUpEmail\(/.test(followupAgentSrc),
     'agents/followup.ts (live daily sender) imports and calls generateFollowUpEmail'
   )
   assert(
-    /from ['"]@\/lib\/followup-generation['"]/.test(leadsRouteSrc) && /generateFollowUpEmail\(/.test(leadsRouteSrc),
-    'src/app/api/leads/route.ts (staged-lead import backfill) imports and calls generateFollowUpEmail'
+    /from ['"]@\/lib\/followup-generation['"]/.test(createLeadSrc) && /generateFollowUpEmail\(/.test(createLeadSrc),
+    'src/lib/create-lead.ts (staged-lead import backfill, shared by the Add Lead form and CSV bulk import) imports and calls generateFollowUpEmail'
   )
   assert(
     !/buildFollowUpEmail\(/.test(followupAgentSrc.replace(/\/\/.*$/gm, '')),
