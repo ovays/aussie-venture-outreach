@@ -328,6 +328,27 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
             </div>
           ))}
 
+          {/* Reactivation limit */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
+            <div>
+              <p className="text-sm text-white">Daily Reactivation Limit</p>
+              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Maximum reactivation emails to send per day</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={getNum('daily_reactivation_limit')}
+                onChange={(e) => setSettings((p) => ({ ...p, daily_reactivation_limit: e.target.value }))}
+                onBlur={(e) => updateSetting('daily_reactivation_limit', e.target.value)}
+                min={0}
+                max={500}
+                className="w-full sm:w-24 px-3 py-2 rounded-lg text-sm text-white text-right outline-none focus:ring-2 focus:ring-sky-500"
+                style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+              />
+              <SaveIndicator k="daily_reactivation_limit" />
+            </div>
+          </div>
+
           {/* DM limit */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b gap-2" style={{ borderColor: '#2a2d3e' }}>
             <div>

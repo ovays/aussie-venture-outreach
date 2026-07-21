@@ -35,6 +35,10 @@ export const SETTINGS_DEFAULTS = {
     value: '50',
     description: 'Maximum new leads to find per day',
   },
+  daily_reactivation_limit: {
+    value: '10',
+    description: 'Maximum reactivation emails to send per day',
+  },
   daily_outscraper_limit: {
     value: '2.00',
     description: 'Maximum Outscraper spend per day in USD. Pipeline stops when reached. Normal daily cost is ~$0.50. Set to $2.00 for safety margin.',

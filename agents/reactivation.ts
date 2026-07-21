@@ -4,6 +4,7 @@ import { emailBodyToHtml } from '@/lib/utils'
 import { logger } from '@/lib/logger'
 import { writeReactivationEmail } from '@/lib/claude'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
+import { getAnalyticsDayRange } from '@/lib/analytics'
 
 interface LeadEmail {
   id: string
@@ -42,7 +43,7 @@ export async function runReactivationAgent(): Promise<void> {
     const { data: settingsRows } = await supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['reactivation_enabled', 'reactivation_delay_days', 'dead_after_reactivation_days'])
+      .in('key', ['reactivation_enabled', 'reactivation_delay_days', 'dead_after_reactivation_days', 'daily_reactivation_limit'])
 
     const settingsMap: Record<string, string> = {}
     for (const row of settingsRows ?? []) {
@@ -59,6 +60,37 @@ export async function runReactivationAgent(): Promise<void> {
     const reactivationDelayDays = parseInt(settingsMap['reactivation_delay_days'] ?? '60', 10)
     const deadAfterReactivationDays = parseInt(settingsMap['dead_after_reactivation_days'] ?? '14', 10)
 
+    // Daily send cap — independent of daily_initial_outreach_limit (which only
+    // governs the finder/sender's cold-outreach queue). Counts reactivation emails
+    // already sent today (Sydney calendar day) so repeated pipeline runs on the
+    // same day never exceed the configured limit in aggregate.
+    //
+    // This read-then-send sequence is check-then-act, not atomic — it only stays
+    // race-free because runReactivationAgent() currently has a single entry point,
+    // trigger/daily-pipeline.ts, whose queue sets concurrencyLimit: 1 (no two runs
+    // of the pipeline ever execute this concurrently). If another entry point is
+    // ever added that can invoke this function concurrently with the pipeline (or
+    // with itself), this budget calculation must be protected with an atomic
+    // mechanism (e.g. a DB advisory lock or an atomic counter update) or the daily
+    // limit can be exceeded.
+    const dailyReactivationLimit = parseInt(settingsMap['daily_reactivation_limit'] ?? '10', 10)
+    const today = getAnalyticsDayRange()
+    const { count: reactivationSentToday } = await supabase
+      .from('emails')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'sent')
+      .eq('type', 'reactivation')
+      .gte('sent_at', today.start)
+      .lt('sent_at', today.end)
+
+    const remainingReactivationBudget = Math.max(0, dailyReactivationLimit - (reactivationSentToday ?? 0))
+
+    logger.info('reactivation', `DAILY_REACTIVATION_LIMIT = ${dailyReactivationLimit}`, {
+      daily_reactivation_limit: dailyReactivationLimit,
+      reactivation_sent_today: reactivationSentToday ?? 0,
+      remaining_reactivation_budget: remainingReactivationBudget,
+    })
+
     const { data: contactedLeads } = await supabase
       .from('leads')
       .select('id, business_name, email, reactivation_sent_at, category_name, suburb, city, content_type, emails(id, type, subject, sent_at)')
@@ -72,6 +104,12 @@ export async function runReactivationAgent(): Promise<void> {
     let eligible = 0
     let reactivationSent = 0
     let markedDead = 0
+
+    // Phase 1: walk every contacted lead — handle the dead-after-reactivation path
+    // inline (unaffected by the daily send cap, since it never sends anything), and
+    // collect leads eligible for a NEW reactivation send into a queue instead of
+    // sending immediately. Eligibility logic itself is unchanged from before.
+    const eligibleForSend: Array<{ lead: ContactedLead; daysSinceInitial: number }> = []
 
     for (const lead of contactedLeads as ContactedLead[]) {
       if (!lead.email) continue
@@ -119,7 +157,34 @@ export async function runReactivationAgent(): Promise<void> {
 
       eligible++
       console.log(`[REACTIVATION_ELIGIBLE] lead=${lead.business_name} days_since_initial=${daysSinceInitial}`)
+      eligibleForSend.push({ lead, daysSinceInitial })
+      } catch (error) {
+        // One lead's transient DB/network exception must not abort the rest
+        // of this batch (see agents/sender.ts's per-item try/catch for the
+        // same reasoning) — this is the last pipeline stage each run.
+        const msg = error instanceof Error ? error.message : String(error)
+        logger.error('reactivation', `Exception processing lead: ${lead.business_name}: ${msg}`, { lead_id: lead.id })
+      }
+    }
 
+    // Phase 2: apply the daily cap — send only the first N eligible leads this run.
+    // Anything past the cap is left untouched (still status='contacted',
+    // reactivation_sent_at NULL) and re-evaluated as eligible on the next run.
+    const toSend = eligibleForSend.slice(0, remainingReactivationBudget)
+    const deferredForLimit = eligibleForSend.length - toSend.length
+
+    if (deferredForLimit > 0) {
+      logger.info('reactivation', `DAILY_REACTIVATION_LIMIT_REACHED — deferring ${deferredForLimit} eligible lead(s) to next run`, {
+        eligible_this_run: eligibleForSend.length,
+        remaining_reactivation_budget: remainingReactivationBudget,
+        deferred: deferredForLimit,
+      })
+    }
+
+    for (const { lead, daysSinceInitial } of toSend) {
+      if (!lead.email) continue // already guaranteed by the phase-1 filter; narrows the type for sendEmail() below
+
+      try {
       const emailResult = await writeReactivationEmail({
         business_name: lead.business_name,
         category: lead.category_name ?? 'local business',
@@ -206,12 +271,18 @@ export async function runReactivationAgent(): Promise<void> {
       }
     }
 
-    logger.info('reactivation', 'Reactivation agent complete', { eligible, reactivationSent, markedDead })
+    logger.info('reactivation', 'Reactivation agent complete', { eligible, reactivationSent, markedDead, deferredForLimit })
 
     await supabase.from('activity_log').insert({
       event_type: 'reactivation_complete',
-      description: `Reactivation agent done. Eligible: ${eligible}, Sent: ${reactivationSent}, Dead: ${markedDead}`,
-      metadata: { eligible, reactivation_sent: reactivationSent, marked_dead: markedDead },
+      description: `Reactivation agent done. Eligible: ${eligible}, Sent: ${reactivationSent}, Dead: ${markedDead}, Deferred (daily limit): ${deferredForLimit}`,
+      metadata: {
+        eligible,
+        reactivation_sent: reactivationSent,
+        marked_dead: markedDead,
+        deferred_for_daily_limit: deferredForLimit,
+        daily_reactivation_limit: dailyReactivationLimit,
+      },
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

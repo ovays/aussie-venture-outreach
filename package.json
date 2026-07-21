@@ -37,6 +37,7 @@
     "test:bulk-send-duplicate-protection": "tsx scripts/test-bulk-send-duplicate-protection.ts",
     "test:migration-030-lead-source-backfill": "tsx scripts/test-migration-030-lead-source-backfill.ts",
     "test:resend-followup-selection": "tsx scripts/test-resend-followup-selection.ts",
+    "test:reactivation-daily-limit": "tsx scripts/test-reactivation-daily-limit.ts",
     "deploy:trigger": "npx trigger.dev@4.4.6 deploy"
   },
   "dependencies": {
