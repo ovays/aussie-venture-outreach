@@ -21,6 +21,13 @@ export function resolveContentType(
   const override = city ? category?.city_content_types?.[city] : undefined
   if (override === 'visit' || override === 'remote') return override
 
+  // No per-city override for this city — fall back to the category's own default.
+  if (category?.content_type === 'visit' || category?.content_type === 'remote') {
+    return category.content_type
+  }
+
+  // category.content_type is unset or 'both' (no fixed default) — apply the legacy
+  // Sydney + VISIT_ELIGIBLE_CATEGORIES rule kept for pre-migration-026 categories.
   const isSydney = city?.toLowerCase() === 'sydney'
   return isSydney && VISIT_ELIGIBLE_CATEGORIES.includes(category?.name ?? '') ? 'visit' : 'remote'
 }

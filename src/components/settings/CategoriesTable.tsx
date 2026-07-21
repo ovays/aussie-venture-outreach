@@ -71,9 +71,9 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
     custom: 'Custom',
   }
 
-  // Effective per-city behaviour, computed via the actual resolver (city_content_types
-  // override, falling back to the legacy Sydney + VISIT_ELIGIBLE_CATEGORIES rule) — not
-  // the legacy categories.content_type field, which the resolver no longer consults.
+  // Effective per-city behaviour, computed via the actual resolver: city_content_types
+  // override, then the category's own content_type default, then (only for categories
+  // with no fixed default) the legacy Sydney + VISIT_ELIGIBLE_CATEGORIES rule.
   function effectiveContentTypeLabel(cat: Category): string {
     if (cityOptions.length === 0) return 'Loading…'
     const visitCities = cityOptions.filter((city) => resolveContentType(cat, city) === 'visit')
