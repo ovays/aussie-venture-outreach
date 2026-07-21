@@ -1,7 +1,7 @@
 import Anthropic, { APIError } from '@anthropic-ai/sdk'
 import { withRetry } from './retry'
 import { normalizeContentType, contentTypeBrandPrefix, type ContentType } from './content-type'
-import { getBrandFocus, getContentFocus, getReactivationFocus, getCategoryReferenceNoun } from './category-copy'
+import { getContentFocus, getReactivationFocus, getCategoryReferenceNoun } from './category-copy'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -37,11 +37,20 @@ async function rateLimitedCall<T>(fn: () => Promise<T>): Promise<T> {
   return withRetry(fn, { maxAttempts: 4, baseDelayMs: 1000, isRetryable: is529Overload })
 }
 
-export function getBrandDescription(category: string, contentType: ContentType): string {
+// Aussie Venture is always described as one consistent lifestyle brand — never
+// redefined per category (no "activities and entertainment platform" for one
+// business and "food, travel and lifestyle platform" for another).
+export function getBrandDescription(_category: string, contentType: ContentType): string {
   const prefix = contentTypeBrandPrefix(contentType)
   const article = prefix === 'Sydney-based' ? 'a' : 'an'
-  return `${article} ${prefix} ${getBrandFocus(category)} platform`
+  return `${article} ${prefix} lifestyle platform`
 }
+
+// Fixed, brand-wide sentence describing what Aussie Venture covers — genuinely
+// what it creates, never category-narrowed and never a subjective claim
+// ("the best", "Australia's favourite").
+const BRAND_OVERVIEW_SENTENCE =
+  'We showcase food, family activities, attractions and travel experiences from around Australia.'
 
 function getCategoryPitch(category: string, contentType: ContentType): string {
   const focus = getContentFocus(category, contentType)
@@ -130,22 +139,34 @@ export function buildOutreachEmailPrompt(
 
 FACTS (only use these, never invent others):
 - Aussie Venture is ${brandDesc} with a national audience
-- 650K+ followers across Facebook, Instagram and TikTok
+- ${BRAND_OVERVIEW_SENTENCE}
+- 650K+ followers across Instagram, TikTok and Facebook
 
 BUSINESS FACTS (only use these, never invent others):
 ${businessFacts}
 
-WHAT THE EMAIL MUST DO:
+WHAT THE EMAIL MUST DO — three distinct opening sentences, in this order:
 1. Open with "Hey ${params.business_name},"
-2. Briefly introduce yourself and Aussie Venture — mention the 650K+ followers once
-3. Say you'd love to work together or collab — if a Description or Services fact is given above, you may briefly reference what the business actually does so the email feels specific to them, not generic
-4. End with exactly: "Would you be keen to collab?"
+2. Sentence 1 — intro yourself and Aussie Venture, mentioning the 650K+ followers once, e.g.: "I'm Owais, I run Aussie Venture, ${brandDesc} with 650K+ followers across Instagram, TikTok and Facebook."
+3. Sentence 2 — describe the brand broadly using this exact sentence (or an extremely close paraphrase that keeps every category it lists): "${BRAND_OVERVIEW_SENTENCE}" This sentence describes the whole brand only — it must NOT be narrowed, reordered to foreground, or rewritten around this business's specific category.
+4. Sentence 3 — a short, genuine personalised line connecting THIS business to Aussie Venture's audience, based only on the Category/Description/Services facts above. Match the tone of these examples (write your own, using this business's real facts — do not reuse these verbatim):
+   - Activity venue: "I think [Business Name] would be a great fit for our audience."
+   - Escape room: "[Business Name] looks like exactly the kind of experience our audience would enjoy."
+   - Restaurant/cafe: "Your restaurant looks like it would be a great fit for our audience."
+   - Travel/tours: "Your tours look like a fantastic experience for our audience."
+   - Attraction: "I think this would really resonate with people looking for unique experiences around Australia."
+5. Then say you'd love to work together or collab
+6. End with exactly: "Would you be keen to collab?"
 
 HARD RULES — break any of these and the email is wrong:
 - Under 80 words (not counting sign-off)
 - NO mention of: visiting, coming in, remote, assets, photos, sponsored post, sponsored feature, content partnership, price, budget, free, paid — save all logistics for after they reply
 - Never invent familiarity with the business beyond the BUSINESS FACTS above. No "keeps coming up", "I've seen your page", "your food looks amazing", or any other claim implying prior knowledge not listed there
 - Never claim Aussie Venture is based in, located in, or physically present in the business's suburb or city unless explicitly told so
+- Do NOT mention food, dining or cuisine unless the business is genuinely food-related (check the Category/Description/Services facts first) — e.g. never mention food when the business is an activity, travel, attraction or beauty business
+- Never make subjective or unverifiable claims: no "the best", "Australia's favourite", "the most popular", "our audience is always looking for...", "our audience loves...", "everyone is talking about...", "our followers can't get enough of..."
+- Personalisation must use soft, natural wording instead, e.g. "would be a great fit for our audience", "looks like something our audience would enjoy", "I think this would resonate with our audience", "seems like the kind of experience our audience would appreciate"
+- Never invent services, facilities, popularity, reviews, or any claim about the business beyond the BUSINESS FACTS above
 - Think of it like a first message — just spark interest, nothing more
 - No em dashes (no — character)
 - No bullet points
@@ -201,7 +222,7 @@ export async function writeOutreachEmail(params: {
   }
   return {
     subject: `Collab with Aussie Venture - ${params.business_name}`,
-    body: `Hey ${params.business_name},\n\nI run Aussie Venture, ${brandDesc} with 650K+ followers across Facebook, Instagram and TikTok. Would love to work together.\n\nWould you be keen to collab?\n\nCheers,\nOwais\nAussie Venture\nhello@aussieventure.com\naussieventure.com\ninstagram.com/aussie.venture\ntiktok.com/@aussie.venture\nfacebook.com/AussieVenture\nfacebook.com/Sydneyventure`,
+    body: `Hey ${params.business_name},\n\nI'm Owais, I run Aussie Venture, ${brandDesc} with 650K+ followers across Instagram, TikTok and Facebook. ${BRAND_OVERVIEW_SENTENCE} Would love to work together.\n\nWould you be keen to collab?\n\nCheers,\nOwais\nAussie Venture\nhello@aussieventure.com\naussieventure.com\ninstagram.com/aussie.venture\ntiktok.com/@aussie.venture\nfacebook.com/AussieVenture\nfacebook.com/Sydneyventure`,
   }
 }
 

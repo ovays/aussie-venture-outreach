@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
-import { writeOutreachEmail } from '@/lib/claude'
-import { emailBodyToHtml } from '@/lib/utils'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
 import { researchOneLead } from '@/lib/research-lead'
 import { writeOneLead, type DmState } from '@/lib/write-lead'
@@ -21,7 +19,7 @@ import { logger } from '@/lib/logger'
 const BULK_SEND_LOCK_TTL_MS = 3 * 60 * 1000
 
 const bulkSchema = z.object({
-  action: z.enum(['send_initial_emails', 'regenerate_drafts', 'delete', 'research_leads']),
+  action: z.enum(['send_initial_emails', 'delete', 'research_leads']),
   lead_ids: z.array(z.string().uuid()).min(1).max(200),
 })
 
@@ -172,66 +170,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     return NextResponse.json({ sent, failed })
-  }
-
-  // ── Regenerate Drafts ────────────────────────────────────────────────────────
-  if (action === 'regenerate_drafts') {
-    let regenerated = 0
-    const failed: FailedItem[] = []
-
-    for (const lead_id of lead_ids) {
-      const { data: lead } = await supabase
-        .from('leads')
-        .select('id, business_name, category_name, suburb, city, website, description, services, email, status, content_type')
-        .eq('id', lead_id)
-        .single()
-
-      if (!lead || !['email_ready', 'researched'].includes(lead.status)) {
-        failed.push({ lead_id, business_name: lead?.business_name ?? lead_id, reason: 'Invalid status for regeneration' })
-        continue
-      }
-
-      try {
-        // Delete existing pending draft so we can regenerate it
-        await supabase.from('emails').delete()
-          .eq('lead_id', lead_id)
-          .eq('type', 'initial_pitch')
-          .eq('status', 'pending_send')
-
-        const contentType = lead.content_type ?? 'remote'
-
-        const emailResult = await writeOutreachEmail({
-          business_name: lead.business_name,
-          category:      lead.category_name as string,
-          suburb:        lead.suburb ?? '',
-          city:          lead.city as string,
-          website:       lead.website ?? '',
-          description:   lead.description ?? '',
-          services:      lead.services ?? '',
-          content_type:  contentType,
-        })
-
-        await supabase.from('emails').insert({
-          lead_id,
-          type:      'initial_pitch',
-          subject:   emailResult.subject,
-          body_html: emailBodyToHtml(emailResult.body),
-          body_text: emailResult.body,
-          status:    'pending_send',
-        })
-
-        await supabase.from('leads').update({ status: 'email_ready' }).eq('id', lead_id)
-        regenerated++
-      } catch (err) {
-        failed.push({
-          lead_id,
-          business_name: lead.business_name,
-          reason: err instanceof Error ? err.message : 'Unknown error',
-        })
-      }
-    }
-
-    return NextResponse.json({ regenerated, failed })
   }
 
   // ── Delete ───────────────────────────────────────────────────────────────────

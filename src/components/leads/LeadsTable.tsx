@@ -35,14 +35,24 @@ interface Lead {
   source: string | null
 }
 
-type BulkAction = 'send' | 'regenerate' | 'delete' | 'research'
+type BulkAction = 'send' | 'delete' | 'research'
 
 interface BulkResult {
   sent?: number
-  regenerated?: number
   deleted?: number
   researched?: number
   failed: Array<{ lead_id: string; business_name?: string; reason: string }>
+}
+
+interface RegenerateFailure {
+  lead_id: string
+  business_name: string
+  reason: string
+}
+
+interface RegenerateResult {
+  succeeded: number
+  failed: RegenerateFailure[]
 }
 
 const STATUS_OPTIONS = ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual', 'dead']
@@ -97,36 +107,31 @@ interface BulkModalProps {
 }
 
 function BulkModal({ action, count, running, result, onConfirm, onClose }: BulkModalProps) {
-  const successCount = result?.sent ?? result?.regenerated ?? result?.deleted ?? result?.researched ?? 0
+  const successCount = result?.sent ?? result?.deleted ?? result?.researched ?? 0
   const failedCount  = result?.failed.length ?? 0
 
   const confirmLabel: Record<BulkAction, string> = {
     send:       'Send Initial Emails',
-    regenerate: 'Regenerate Drafts',
     delete:     'Delete Leads',
     research:   'Research Selected',
   }
   const confirmMessage: Record<BulkAction, string> = {
     send:       `Send initial outreach emails to ${count} selected lead${count === 1 ? '' : 's'}?`,
-    regenerate: `Regenerate email drafts for ${count} selected lead${count === 1 ? '' : 's'}? Existing drafts will be replaced.`,
     delete:     `Permanently delete ${count} lead${count === 1 ? '' : 's'} and all associated data? This cannot be undone.`,
     research:   `Run research on ${count} selected new lead${count === 1 ? '' : 's'}? This will find contact info and generate draft emails.`,
   }
   const runningLabel: Record<BulkAction, string> = {
     send:       'Sending…',
-    regenerate: 'Regenerating…',
     delete:     'Deleting…',
     research:   'Researching…',
   }
   const successVerb: Record<BulkAction, string> = {
     send:       'sent',
-    regenerate: 'regenerated',
     delete:     'deleted',
     research:   'researched',
   }
   const successUnit: Record<BulkAction, string> = {
     send:       'email',
-    regenerate: 'email',
     delete:     'lead',
     research:   'lead',
   }
@@ -213,6 +218,145 @@ function BulkModal({ action, count, running, result, onConfirm, onClose }: BulkM
   )
 }
 
+// ── Regenerate Initial Emails modal ───────────────────────────────────────────
+// Bespoke flow (not the generic BulkModal): calls the existing single-lead
+// regenerate-email endpoint once per lead so we get real per-lead progress,
+// and reuses that endpoint's UPDATE-only behavior — subject/body only, every
+// other field (status, follow-ups, notes, tags, enrichment) stays untouched.
+
+interface RegenerateEmailsModalProps {
+  open: boolean
+  selectedCount: number
+  filteredCount: number | null
+  filteredLoading: boolean
+  scope: 'selected' | 'filtered'
+  onScopeChange: (scope: 'selected' | 'filtered') => void
+  running: boolean
+  progress: { done: number; total: number }
+  result: RegenerateResult | null
+  onConfirm: () => void
+  onClose: () => void
+}
+
+function RegenerateEmailsModal({
+  open, selectedCount, filteredCount, filteredLoading, scope, onScopeChange,
+  running, progress, result, onConfirm, onClose,
+}: RegenerateEmailsModalProps) {
+  if (!open) return null
+
+  const targetCount = scope === 'filtered' ? (filteredCount ?? 0) : selectedCount
+  const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(2px)' }}
+    >
+      <div
+        className="w-full max-w-md mx-4 rounded-2xl p-6"
+        style={{ background: '#0d0f18', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}
+      >
+        {result ? (
+          // ── Result view ──
+          <>
+            <div className="flex items-start justify-between mb-4">
+              <h3 className="text-base font-semibold" style={{ color: '#f1f5f9' }}>Regenerate Initial Emails — Complete</h3>
+              <button onClick={onClose} style={{ color: '#475569' }}><X size={16} /></button>
+            </div>
+
+            {result.succeeded > 0 && (
+              <p className="text-sm mb-2" style={{ color: '#4ade80' }}>
+                Successfully regenerated {result.succeeded} email{result.succeeded === 1 ? '' : 's'}. Status, follow-ups, notes, tags and enrichment were left unchanged.
+              </p>
+            )}
+
+            {result.failed.length > 0 && (
+              <div className="mt-2">
+                <p className="text-sm mb-2" style={{ color: '#f87171' }}>{result.failed.length} failed:</p>
+                <ul className="space-y-1 max-h-48 overflow-y-auto">
+                  {result.failed.map((f, i) => (
+                    <li key={i} className="text-xs px-2 py-1 rounded" style={{ background: 'rgba(248,113,113,0.08)', color: '#fca5a5' }}>
+                      <span className="font-medium">{f.business_name}</span>
+                      {' — '}{f.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {result.succeeded === 0 && result.failed.length === 0 && (
+              <p className="text-sm" style={{ color: '#64748b' }}>No leads were processed.</p>
+            )}
+
+            <div className="flex justify-end mt-5">
+              <Button onClick={onClose}>Done</Button>
+            </div>
+          </>
+        ) : running ? (
+          // ── Progress view ──
+          <>
+            <div className="mb-4">
+              <h3 className="text-base font-semibold" style={{ color: '#f1f5f9' }}>Regenerating Initial Emails…</h3>
+            </div>
+            <p className="text-sm mb-3" style={{ color: '#94a3b8' }}>
+              {progress.done} / {progress.total} regenerated
+            </p>
+            <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+              <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: '#38bdf8' }} />
+            </div>
+          </>
+        ) : (
+          // ── Confirmation view ──
+          <>
+            <div className="flex items-start justify-between mb-3">
+              <h3 className="text-base font-semibold" style={{ color: '#f1f5f9' }}>Regenerate Initial Emails</h3>
+              <button onClick={onClose} style={{ color: '#475569' }}><X size={16} /></button>
+            </div>
+
+            <div className="space-y-2 mb-4">
+              <label className="flex items-start gap-2 text-sm cursor-pointer" style={{ color: '#e2e8f0' }}>
+                <input
+                  type="radio"
+                  checked={scope === 'selected'}
+                  onChange={() => onScopeChange('selected')}
+                  className="mt-0.5"
+                  style={{ accentColor: '#38bdf8' }}
+                />
+                <span>{selectedCount} selected lead{selectedCount === 1 ? '' : 's'}</span>
+              </label>
+              {filteredCount !== null && (
+                <label className="flex items-start gap-2 text-sm cursor-pointer" style={{ color: '#e2e8f0' }}>
+                  <input
+                    type="radio"
+                    checked={scope === 'filtered'}
+                    onChange={() => onScopeChange('filtered')}
+                    className="mt-0.5"
+                    style={{ accentColor: '#38bdf8' }}
+                  />
+                  <span>All {filteredCount} lead{filteredCount === 1 ? '' : 's'} matching the current filters</span>
+                </label>
+              )}
+              {filteredLoading && (
+                <p className="text-xs" style={{ color: '#64748b' }}>Checking how many leads match the current filters…</p>
+              )}
+            </div>
+
+            <p className="text-sm mb-6" style={{ color: '#94a3b8' }}>
+              Regenerates the subject and body of the initial outreach email for {targetCount} lead{targetCount === 1 ? '' : 's'} using the latest email prompt. Status, follow-ups, notes, tags and enrichment data are left untouched.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button onClick={onConfirm} disabled={targetCount === 0}>
+                Regenerate Initial Emails
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Main table ────────────────────────────────────────────────────────────────
 
 export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
@@ -243,6 +387,15 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   const [bulkRunning, setBulkRunning] = useState(false)
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null)
   const selectAllRef = useRef<HTMLInputElement>(null)
+
+  // Regenerate Initial Emails state
+  const [regenerateOpen, setRegenerateOpen] = useState(false)
+  const [regenerateScope, setRegenerateScope] = useState<'selected' | 'filtered'>('selected')
+  const [filteredEligible, setFilteredEligible] = useState<{ id: string; business_name: string }[] | null>(null)
+  const [filteredEligibleLoading, setFilteredEligibleLoading] = useState(false)
+  const [regenerateRunning, setRegenerateRunning] = useState(false)
+  const [regenerateProgress, setRegenerateProgress] = useState({ done: 0, total: 0 })
+  const [regenerateResult, setRegenerateResult] = useState<RegenerateResult | null>(null)
 
   const fetchLeads = useCallback(async () => {
     setLoading(true)
@@ -317,7 +470,6 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
     setBulkRunning(true)
     const actionMap: Record<BulkAction, string> = {
       send:       'send_initial_emails',
-      regenerate: 'regenerate_drafts',
       delete:     'delete',
       research:   'research_leads',
     }
@@ -347,6 +499,73 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
     if (bulkResult !== null) {
       setSelectedIds(new Set())
     }
+  }
+
+  function openRegenerateDialog() {
+    setRegenerateScope('selected')
+    setFilteredEligible(null)
+    setRegenerateResult(null)
+    setRegenerateOpen(true)
+
+    // "All filtered" is only unambiguous when the page is scoped to email_ready —
+    // fetch the true eligible count/ids across every page (not just this one).
+    if (status === 'email_ready') {
+      setFilteredEligibleLoading(true)
+      const params = new URLSearchParams({ status: 'email_ready', ids_only: 'true' })
+      if (search) params.set('search', search)
+      if (city) params.set('city', city)
+
+      fetch(`/api/leads?${params}`)
+        .then((r) => r.json())
+        .then((json: { data?: Array<{ id: string; business_name: string; source: string | null }> }) => {
+          const eligible = (json.data ?? []).filter((l) => l.source !== 'manual')
+          setFilteredEligible(eligible.map((l) => ({ id: l.id, business_name: l.business_name })))
+        })
+        .catch(() => setFilteredEligible([]))
+        .finally(() => setFilteredEligibleLoading(false))
+    }
+  }
+
+  function closeRegenerateDialog() {
+    if (regenerateRunning) return
+    setRegenerateOpen(false)
+    if (regenerateResult !== null) {
+      setSelectedIds(new Set())
+    }
+  }
+
+  async function runRegenerate() {
+    if (regenerateRunning) return
+
+    const targets = regenerateScope === 'filtered' && filteredEligible
+      ? filteredEligible
+      : selectedEmailReadyLeads.map((l) => ({ id: l.id, business_name: l.business_name }))
+
+    if (targets.length === 0) return
+
+    setRegenerateRunning(true)
+    setRegenerateProgress({ done: 0, total: targets.length })
+    const failed: RegenerateFailure[] = []
+    let succeeded = 0
+
+    for (const lead of targets) {
+      try {
+        const res = await fetch(`/api/leads/${lead.id}/regenerate-email`, { method: 'POST' })
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({} as { error?: string }))
+          failed.push({ lead_id: lead.id, business_name: lead.business_name, reason: json.error ?? `Request failed (${res.status})` })
+        } else {
+          succeeded++
+        }
+      } catch {
+        failed.push({ lead_id: lead.id, business_name: lead.business_name, reason: 'Network error — please try again' })
+      }
+      setRegenerateProgress((p) => ({ ...p, done: p.done + 1 }))
+    }
+
+    setRegenerateResult({ succeeded, failed })
+    setRegenerateRunning(false)
+    fetchLeads()
   }
 
   const totalPages = Math.ceil(total / 50)
@@ -478,10 +697,10 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => { setBulkResult(null); setBulkAction('regenerate') }}
+                  onClick={openRegenerateDialog}
                 >
                   <RefreshCw size={12} />
-                  Regenerate Drafts
+                  Regenerate Initial Emails
                 </Button>
                 <Button
                   size="sm"
@@ -645,6 +864,21 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
           onClose={closeBulkModal}
         />
       )}
+
+      {/* Regenerate Initial Emails modal */}
+      <RegenerateEmailsModal
+        open={regenerateOpen}
+        selectedCount={selectedEmailReadyLeads.length}
+        filteredCount={filteredEligible?.length ?? null}
+        filteredLoading={filteredEligibleLoading}
+        scope={regenerateScope}
+        onScopeChange={setRegenerateScope}
+        running={regenerateRunning}
+        progress={regenerateProgress}
+        result={regenerateResult}
+        onConfirm={runRegenerate}
+        onClose={closeRegenerateDialog}
+      />
     </div>
   )
 }

@@ -58,19 +58,6 @@ export function getCategoryReferenceNoun(categoryName: string): string {
   }
 }
 
-// "food, travel and lifestyle" / "lifestyle" / "travel and lifestyle" — the
-// descriptor slotted into "an Australian ${prefix} X platform".
-export function getBrandFocus(categoryName: string): string {
-  switch (classifyCategory(categoryName)) {
-    case 'food': return 'food, travel and lifestyle'
-    case 'beauty': return 'lifestyle'
-    case 'travel': return 'travel and lifestyle'
-    case 'accommodation': return 'travel and lifestyle'
-    case 'activity': return 'activities and entertainment'
-    default: return 'lifestyle'
-  }
-}
-
 // "halal food content" / "lifestyle content" / etc, with the visit/remote
 // location prefix threaded through every group consistently.
 export function getContentFocus(categoryName: string, contentType: ContentType): string {

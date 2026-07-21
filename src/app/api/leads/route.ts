@@ -98,10 +98,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const city = searchParams.get('city')
   const search = searchParams.get('search')
   const page = parseInt(searchParams.get('page') ?? '1', 10)
+  const idsOnly = searchParams.get('ids_only') === 'true'
   const limit = 50
   const offset = (page - 1) * limit
 
-  let query = supabase.from('leads').select('*', { count: 'exact' })
+  let query = supabase
+    .from('leads')
+    .select(idsOnly ? 'id, business_name, status, source' : '*', { count: 'exact' })
 
   // `stage` expands to all canonical statuses for that stage (e.g. negotiating → negotiating+interested)
   // `status` is an exact single-status match (backward compat)
@@ -114,7 +117,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (city) query = query.eq('city', city)
   if (search) query = query.ilike('business_name', `%${search}%`)
 
-  query = query.order('created_at', { ascending: false }).range(offset, offset + limit - 1)
+  // `ids_only` is used by bulk-action UI to target every lead matching the
+  // current filters (not just the current page) — capped well above realistic
+  // filtered-result sizes rather than paginated.
+  query = idsOnly
+    ? query.order('created_at', { ascending: false }).limit(1000)
+    : query.order('created_at', { ascending: false }).range(offset, offset + limit - 1)
 
   const { data, error, count } = await query
 
