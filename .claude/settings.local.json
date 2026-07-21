@@ -77,7 +77,14 @@
       "PowerShell(supabase *)",
       "Bash(grep -rln \"from\\('leads'\\)\\\\s*$\\\\|from\\(\\\\\"leads\\\\\"\\)\\\\|\\\\.from\\('leads'\\)\" \"C:/agents/aussie-venture-outreach/src\")",
       "Bash(git status *)",
-      "Bash(grep -n \"an Australian\\\\|a \\\\${brandDesc}\\\\|, a Australian\\\\|, an Australian\" src/lib/claude.ts)"
+      "Bash(grep -n \"an Australian\\\\|a \\\\${brandDesc}\\\\|, a Australian\\\\|, an Australian\" src/lib/claude.ts)",
+      "WebFetch(domain:resend.com)",
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(echo \"EXIT_CODE=$?\")",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(grep -n \"\\\\\"@/\\\\\\\\*\\\\\"\\\\|paths\" tsconfig.json)",
+      "Bash(git diff *)"
     ]
   }
 }

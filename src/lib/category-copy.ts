@@ -5,13 +5,20 @@ import { type ContentType, contentTypeBrandPrefix, contentTypeLocationWord } fro
 // New categories get correct wording automatically because classification is
 // keyword-based, not a hardcoded list of known category names.
 
-export type CategoryGroup = 'food' | 'beauty' | 'travel' | 'accommodation' | 'general'
+export type CategoryGroup = 'food' | 'beauty' | 'travel' | 'accommodation' | 'activity' | 'general'
 
+// activity is checked ahead of travel below (Object.keys order) so venues like
+// "Indoor Adventure" resolve to activity rather than travel's broader 'adventure' keyword.
 const GROUP_KEYWORDS: Record<Exclude<CategoryGroup, 'general'>, string[]> = {
   food: ['restaurant', 'cafe', 'café', 'baker', 'dessert', 'food', 'dining', 'eatery', 'kitchen', 'grill'],
   beauty: ['salon', 'beauty', 'lash', 'nail', 'hair', 'spa', 'massage', 'wellness', 'barber', 'brow', 'skin'],
   accommodation: ['hotel', 'resort', 'accommodation', 'stay', 'motel', 'apartment', 'lodge', 'bnb', 'b&b', 'hostel'],
-  travel: ['travel', 'tour', 'cruise', 'holiday', 'excursion', 'adventure'],
+  activity: [
+    'escape room', 'vr experience', 'quiz room', 'kart', 'bowling', 'mini golf', 'arcade',
+    'laser tag', 'indoor adventure', 'trampoline', 'climbing', 'axe throwing', 'theme park',
+    'wildlife park', 'aquarium', 'cruise', 'kayak',
+  ],
+  travel: ['travel', 'tour', 'holiday', 'excursion', 'adventure'],
 }
 
 export function classifyCategory(categoryName: string): CategoryGroup {
@@ -36,6 +43,7 @@ export function getCategoryNoun(categoryName: string): string {
     case 'beauty': return 'studio or salon'
     case 'travel': return 'travel experience'
     case 'accommodation': return 'place to stay'
+    case 'activity': return 'activity or entertainment venue'
     default: return 'business'
   }
 }
@@ -43,7 +51,11 @@ export function getCategoryNoun(categoryName: string): string {
 // Plain reference noun for "this ___" / "the ___" style copy, where a business
 // still needs to read naturally as an entity (a "travel experience" doesn't).
 export function getCategoryReferenceNoun(categoryName: string): string {
-  return classifyCategory(categoryName) === 'accommodation' ? 'property' : 'business'
+  switch (classifyCategory(categoryName)) {
+    case 'accommodation': return 'property'
+    case 'activity': return 'venue'
+    default: return 'business'
+  }
 }
 
 // "food, travel and lifestyle" / "lifestyle" / "travel and lifestyle" — the
@@ -54,6 +66,7 @@ export function getBrandFocus(categoryName: string): string {
     case 'beauty': return 'lifestyle'
     case 'travel': return 'travel and lifestyle'
     case 'accommodation': return 'travel and lifestyle'
+    case 'activity': return 'activities and entertainment'
     default: return 'lifestyle'
   }
 }
@@ -67,6 +80,7 @@ export function getContentFocus(categoryName: string, contentType: ContentType):
     case 'beauty': return `${prefix} lifestyle content`
     case 'travel': return `${prefix} travel content`
     case 'accommodation': return `${prefix} travel experiences and places-to-stay content`
+    case 'activity': return `${prefix} activities and entertainment content`
     default: return `${prefix} lifestyle content`
   }
 }
@@ -86,6 +100,9 @@ export function getReactivationFocus(categoryName: string, contentType: ContentT
       return `${location} beauty and lifestyle venues`
     case 'accommodation':
       return `${location} travel experiences and places to stay`
+    case 'activity':
+      if (/theme park|wildlife park|aquarium/.test(name)) return `${location} family attractions`
+      return `${location} activities and attractions`
     case 'travel':
       return `${location} travel experiences`
     default:
