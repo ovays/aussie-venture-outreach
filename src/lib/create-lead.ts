@@ -6,7 +6,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeEmail, extractRootDomainFromEmail, PERSONAL_EMAIL_PROVIDER_DOMAINS } from '@/lib/deduplication'
 import { resolveContentType } from '@/lib/content-type'
-import { writeOutreachEmail } from '@/lib/claude'
+import { writeOutreachEmail, extractWebsiteData } from '@/lib/claude'
+import { fetchRawHtml } from '@/lib/email-extraction'
 import { emailBodyToHtml } from '@/lib/utils'
 import { generateFollowUpEmail, type FollowUpThreadEmail } from '@/lib/followup-generation'
 import { logger } from '@/lib/logger'
@@ -43,6 +44,45 @@ export type CreateLeadResult =
       existing: { id: string; business_name: string }
     }
   | { ok: false; status: 400 | 500; error: string }
+
+// Same fetch + strip + extractWebsiteData() pipeline research-lead.ts uses for
+// the pipeline's researcher agent, run inline at creation time so manually
+// added and bulk-imported leads get the same real website-derived
+// description/services instead of the writer prompts seeing blank fields.
+// Never throws — a fetch/extraction failure just falls back to blanks so one
+// bad website can't fail the lead creation (or, in bulk import, the row).
+export async function enrichFromWebsite(
+  website: string | undefined,
+  businessName: string
+): Promise<{
+  description: string
+  services: string
+  instagram_handle: string | null
+  facebook_url: string | null
+}> {
+  const empty = { description: '', services: '', instagram_handle: null, facebook_url: null }
+  if (!website) return empty
+
+  try {
+    const rawHtml = await fetchRawHtml(website)
+    const websiteText = rawHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 5000)
+    if (!websiteText) return empty
+
+    const enriched = await extractWebsiteData(websiteText)
+    return {
+      description: enriched.description || '',
+      services: enriched.services || '',
+      instagram_handle: enriched.instagram_handle || null,
+      facebook_url: enriched.facebook_url || null,
+    }
+  } catch (enrichErr) {
+    logger.info('create-lead', `Website enrichment failed for "${businessName}" — continuing without it`, {
+      website,
+      error: enrichErr instanceof Error ? enrichErr.message : String(enrichErr),
+    })
+    return empty
+  }
+}
 
 export async function createLead(supabase: SupabaseClient, input: CreateLeadInput): Promise<CreateLeadResult> {
   const {
@@ -103,6 +143,8 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
     .eq('id', category_id)
     .maybeSingle()
 
+  const enrichment = await enrichFromWebsite(website, business_name)
+
   const { data: lead, error: leadErr } = await supabase
     .from('leads')
     .insert({
@@ -116,6 +158,10 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
       status:        'researched',
       source:        source ?? 'manual',
       content_type:  resolveContentType(category, city),
+      description:   enrichment.description || null,
+      services:      enrichment.services || null,
+      instagram_handle: enrichment.instagram_handle,
+      facebook_url:  enrichment.facebook_url,
     })
     .select()
     .single()
@@ -143,6 +189,8 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
         city,
         categoryName: category_name,
         contentType:  (lead.content_type as string | null) ?? 'remote',
+        description:  enrichment.description,
+        services:     enrichment.services,
         stage:        current_stage,
         completedDate: new Date(`${stage_completed_date}T00:00:00.000Z`),
       })
@@ -196,11 +244,13 @@ async function backfillLeadStageHistory(
     city: string
     categoryName: string
     contentType: string
+    description: string
+    services: string
     stage: LeadImportStage
     completedDate: Date
   }
 ): Promise<{ ok: true; lead: unknown } | { ok: false; error: string }> {
-  const { leadId, businessName, website, suburb, city, categoryName, contentType, stage, completedDate } = params
+  const { leadId, businessName, website, suburb, city, categoryName, contentType, description, services, stage, completedDate } = params
 
   const { data: settingsRows } = await supabase
     .from('settings')
@@ -224,8 +274,8 @@ async function backfillLeadStageHistory(
     suburb:        suburb ?? '',
     city,
     website:       website ?? '',
-    description:   '',
-    services:      '',
+    description,
+    services,
     content_type:  contentType,
   })
 
@@ -267,8 +317,8 @@ async function backfillLeadStageHistory(
         suburb:       suburb ?? '',
         city,
         website:      website ?? '',
-        description:  '',
-        services:     '',
+        description,
+        services,
         notes:        '',
         contentType,
       },

@@ -82,7 +82,17 @@ Respond in JSON only with keys: description, services, instagram_handle, faceboo
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0])
+      const parsed = JSON.parse(jsonMatch[0])
+      return {
+        // Claude sometimes returns "services" as a list even though the prompt
+        // asks for prose — coerce here since this is stored in a TEXT column
+        // and interpolated directly into prompt strings by every caller.
+        description: coerceToText(parsed.description),
+        services: coerceToText(parsed.services),
+        instagram_handle: parsed.instagram_handle || null,
+        facebook_url: parsed.facebook_url || null,
+        other_social: parsed.other_social || null,
+      }
     }
   } catch {
     // fallback
@@ -96,31 +106,45 @@ Respond in JSON only with keys: description, services, instagram_handle, faceboo
   }
 }
 
+function coerceToText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.join(', ')
+  return ''
+}
+
 // Pure prompt builder — exported so preview/test scripts can generate the exact
 // same prompt Claude receives in production without duplicating the copy.
 export function buildOutreachEmailPrompt(
-  params: { business_name: string; category: string; suburb: string; city: string },
+  params: { business_name: string; category: string; suburb: string; city: string; description?: string; services?: string },
   brandDesc: string
 ): string {
+  const businessFacts = [
+    `- Name: ${params.business_name}`,
+    `- Category: ${params.category}`,
+    `- Location: ${params.suburb} ${params.city}`,
+    params.description ? `- Description: ${params.description}` : null,
+    params.services ? `- Services: ${params.services}` : null,
+  ].filter(Boolean).join('\n')
+
   return `You are Owais. You run Aussie Venture, ${brandDesc}. Write a very short first outreach email to a local business.
 
 FACTS (only use these, never invent others):
 - Aussie Venture is ${brandDesc} with a national audience
 - 650K+ followers across Facebook, Instagram and TikTok
 
-Business: ${params.business_name}, ${params.suburb} ${params.city}
-Category: ${params.category}
+BUSINESS FACTS (only use these, never invent others):
+${businessFacts}
 
 WHAT THE EMAIL MUST DO:
 1. Open with "Hey ${params.business_name},"
 2. Briefly introduce yourself and Aussie Venture — mention the 650K+ followers once
-3. Say you'd love to work together or collab
+3. Say you'd love to work together or collab — if a Description or Services fact is given above, you may briefly reference what the business actually does so the email feels specific to them, not generic
 4. End with exactly: "Would you be keen to collab?"
 
 HARD RULES — break any of these and the email is wrong:
 - Under 80 words (not counting sign-off)
 - NO mention of: visiting, coming in, remote, assets, photos, sponsored post, sponsored feature, content partnership, price, budget, free, paid — save all logistics for after they reply
-- Never invent familiarity with the business — you only know its name, category and suburb. No "keeps coming up", "I've seen your page", "your food looks amazing", or any other claim implying prior knowledge of them
+- Never invent familiarity with the business beyond the BUSINESS FACTS above. No "keeps coming up", "I've seen your page", "your food looks amazing", or any other claim implying prior knowledge not listed there
 - Never claim Aussie Venture is based in, located in, or physically present in the business's suburb or city unless explicitly told so
 - Think of it like a first message — just spark interest, nothing more
 - No em dashes (no — character)
@@ -204,12 +228,27 @@ export function buildFollowUpEmailPrompt(
   },
   followUpNumber: 1 | 2 | 3,
   history: FollowUpThreadEmail[],
-  brandDesc: string
+  brandDesc: string,
+  contentFocus: string
 ): string {
+  const hasWebsiteFacts = Boolean(params.description || params.services)
+
   const stageGuidance: Record<1 | 2 | 3, string> = {
-    1: 'This is the FIRST follow-up. Assume they may have simply missed or not gotten to the first email yet. Keep it light and low-pressure.',
-    2: 'This is the SECOND follow-up. Acknowledge that timing can be tricky and things get busy — stay warm, no pressure, no guilt-tripping.',
-    3: 'This is the THIRD and FINAL follow-up. Give it a warm, low-key close — leave the door open for later, do not imply any further follow-up is coming after this one.',
+    1: `This is the FIRST follow-up — purpose: a friendly, low-pressure reminder. Assume they may have simply missed or not gotten to the first email yet.
+- ${hasWebsiteFacts
+      ? 'Briefly reference ONE genuine, specific detail from the Description or Services facts above — something that shows you actually looked at their business, not a generic compliment.'
+      : 'No Description or Services facts are available — do not invent one, just keep it light and personal to the fact that they run this business.'}
+- Do not re-explain who Aussie Venture is or restate the audience size — that was already covered in the first email.
+- Keep it conversational, like a quick nudge between two people, not a pitch.`,
+    2: `This is the SECOND follow-up — purpose: add real value, not just remind them again.
+- Briefly explain why THIS business specifically would suit Aussie Venture's audience — make the connection specific to their category/description, not generic flattery.
+- Mention the kind of content Aussie Venture creates, e.g. "${contentFocus}", so they can picture what a feature actually looks like.
+- Do NOT mention price, budget, free, paid, logistics, scheduling, what's required of them, or how the collab would work — that's all for after they reply.
+- The initial pitch and/or follow-up 1 above may already have referenced a website fact — if so, use a DIFFERENT one this time (or none) — never reuse the same detail.`,
+    3: `This is the THIRD and FINAL follow-up — purpose: one last polite check-in, genuinely no pressure.
+- Make this noticeably shorter than the previous two emails — a few sentences at most.
+- Leave the door open for later ("down the track", "whenever suits", etc) — do not imply any further follow-up is coming after this one.
+- Do not re-explain the offer, the audience, the content type, or any website fact already used earlier in the thread — this one should feel like a light close, not a recap.`,
   }
 
   const facts = [
@@ -228,15 +267,21 @@ export function buildFollowUpEmailPrompt(
 
   return `You are Owais. You run Aussie Venture, ${brandDesc} with 650K+ followers across Facebook, Instagram and TikTok.
 
-You are writing follow-up email #${followUpNumber} in an existing email thread with a local business you're trying to collab with. They have not replied to any previous email in the thread yet.
+You are writing follow-up email #${followUpNumber} in an existing email thread with a local business you're trying to collab with. They have not replied to any previous email in the thread yet. Each follow-up in this sequence has a DIFFERENT job to do — this is not "the same email reworded", it's the next distinct beat in the conversation.
 
 FACTS ABOUT THE BUSINESS (only use these, never invent others):
 ${facts}
 
-FULL EMAIL THREAD SO FAR (oldest to newest — do not repeat this content verbatim, write something new that continues the thread naturally):
+FULL EMAIL THREAD SO FAR (oldest to newest — read it carefully before writing):
 ${thread}
 
 ${stageGuidance[followUpNumber]}
+
+CRITICAL — DO NOT REPEAT ANYTHING FROM THE THREAD ABOVE:
+- Do not reuse the same opening sentence, closing sentence, or turn of phrase as any earlier email in the thread
+- Do not reuse the same website fact (from Description/Services) that a previous email already mentioned
+- Do not reuse the same wording used to describe the audience or Aussie Venture in a previous email
+- Write something genuinely new that continues the thread naturally, not a rewording of what's already been said
 
 WHAT THIS EMAIL MUST DO:
 - Read as clearly written for THIS specific business — reference the kind of business it is (based on the category/description above) so it doesn't sound like a generic mass email
@@ -277,6 +322,7 @@ export async function writeFollowUpEmail(params: {
 }): Promise<{ subject: string; body: string }> {
   const contentType = normalizeContentType(params.content_type)
   const brandDesc = getBrandDescription(params.category, contentType)
+  const contentFocus = getContentFocus(params.category, contentType)
   const subject = `Re: ${params.initial_subject}`
 
   const response = await rateLimitedCall(() =>
@@ -285,7 +331,7 @@ export async function writeFollowUpEmail(params: {
       max_tokens: 400,
       messages: [{
         role: 'user',
-        content: buildFollowUpEmailPrompt(params, params.follow_up_number, params.history, brandDesc),
+        content: buildFollowUpEmailPrompt(params, params.follow_up_number, params.history, brandDesc, contentFocus),
       }],
     })
   )
