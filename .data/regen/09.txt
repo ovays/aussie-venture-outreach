@@ -1,0 +1,108 @@
+◇ injected env (18) from .env.local // tip: ◈ encrypted .env [www.dotenvx.com]
+
+==============================================================================
+Tour Operators — Blue Mountains Guided Tours, Katoomba Sydney
+==============================================================================
+content_type resolved:  remote  (row default: remote, city override: remote)
+reminder family:        Travel
+reminder focus noun:    travel content
+initial content focus:  Australian travel content
+reactivation focus:     travel and tours around Australia
+
+==============================================================================
+1. INITIAL EMAIL
+==============================================================================
+SUBJECT: Collab?
+
+Hey Blue Mountains Guided Tours,
+
+I'm Owais. I run Aussie Venture, we post food, activities and travel from around the country, around 650k followers across Instagram, TikTok and Facebook.
+
+We've been covering day tours and outdoor activities lately. You run small-group bushwalks out of Katoomba, so I'm asking a few places directly.
+
+Would you be interested in working together on something?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 61]
+
+==============================================================================
+2. FOLLOW-UP 1 (day 7)
+==============================================================================
+SUBJECT: Re: Collab?
+
+Hey Blue Mountains Guided Tours,
+
+My email from last week might have landed in the wrong inbox.
+
+I'm Owais from Aussie Venture. We make travel content for Instagram, TikTok and Facebook.
+
+I was asking whether you'd be open to a collab.
+
+Are you interested? Just let me know either way.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 50]
+
+==============================================================================
+3. FOLLOW-UP 2 (day 14)
+==============================================================================
+SUBJECT: Re: Collab?
+
+Hey Blue Mountains Guided Tours,
+
+Just wanted to check once more in case my earlier emails got buried.
+
+I'm Owais from Aussie Venture. We create travel content across Instagram, TikTok and Facebook.
+
+Would you be interested in a collab? A yes or no is all I need.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 47]
+
+==============================================================================
+4. FOLLOW-UP 3 (day 21)
+==============================================================================
+SUBJECT: Re: Collab?
+
+Hey Blue Mountains Guided Tours,
+
+I haven't heard back, so I'll close this enquiry off at my end.
+
+I'm Owais, I run Aussie Venture. We post travel content on Instagram, TikTok and Facebook.
+
+If you want to pick it up later, just reply.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 43]
+
+==============================================================================
+5. REACTIVATION EMAIL (day 90+)
+==============================================================================
+SUBJECT: Collab, take two?
+
+Hey Blue Mountains Guided Tours,
+
+I'm Owais. I run Aussie Venture, we post food, activities and travel from around the country, around 650k followers across Instagram, TikTok and Facebook.
+
+I emailed a few months back about working together and never heard back. I'm doing more travel and tours around Australia over the next few months, so I thought I'd try you again.
+
+Any better timing on your end?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 68]

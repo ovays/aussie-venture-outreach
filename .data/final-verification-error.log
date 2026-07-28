@@ -1,0 +1,45 @@
+BadRequestError: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."},"request_id":"req_011CdTZ7JiHTkzvb48f3zJVG"}
+    at APIError.generate (C:\agents\aussie-venture-outreach\node_modules\.pnpm\@anthropic-ai+sdk@0.91.1_zod@3.25.76\node_modules\@anthropic-ai\sdk\src\core\error.ts:75:14)
+    at Anthropic.makeStatusError (C:\agents\aussie-venture-outreach\node_modules\.pnpm\@anthropic-ai+sdk@0.91.1_zod@3.25.76\node_modules\@anthropic-ai\sdk\src\client.ts:516:28)
+    at Anthropic.makeRequest (C:\agents\aussie-venture-outreach\node_modules\.pnpm\@anthropic-ai+sdk@0.91.1_zod@3.25.76\node_modules\@anthropic-ai\sdk\src\client.ts:752:24)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async withRetry (C:\agents\aussie-venture-outreach\src\lib\retry.ts:10:14)
+    at async writeOutreachEmail (C:\agents\aussie-venture-outreach\src\lib\claude.ts:242:20)
+    at async main (C:\agents\aussie-venture-outreach\scripts\tmp-sequence-preview.ts:231:19) {
+  status: 400,
+  headers: Headers {
+    date: 'Tue, 28 Jul 2026 01:03:01 GMT',
+    'content-type': 'application/json',
+    'transfer-encoding': 'chunked',
+    connection: 'keep-alive',
+    'x-should-retry': 'false',
+    'request-id': 'req_011CdTZ7JiHTkzvb48f3zJVG',
+    'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
+    'anthropic-organization-id': '44a6e519-66b6-41bb-930b-0becd377a515',
+    traceresponse: '00-cd8b495265756e888b5f1fa424f9cdbc-05e45fbef60cd18d-01',
+    server: 'cloudflare',
+    'content-encoding': 'gzip',
+    vary: 'Accept-Encoding',
+    'x-robots-tag': 'none',
+    'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+    'cf-cache-status': 'DYNAMIC',
+    'cf-ray': 'a21ff62d3d1b100b-SYD'
+  },
+  requestID: 'req_011CdTZ7JiHTkzvb48f3zJVG',
+  error: {
+    type: 'error',
+    error: {
+      type: 'invalid_request_error',
+      message: 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'
+    },
+    request_id: 'req_011CdTZ7JiHTkzvb48f3zJVG'
+  },
+  type: 'invalid_request_error'
+}
+Generation failed for Halal Restaurants with exit code 1
+At C:\agents\aussie-venture-outreach\.data\final-verification-run.ps1:37 char:5
++     throw "Generation failed for $category with exit code $LASTEXITCO ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Generation fail...ith exit code 1:String) [], RuntimeException
+    + FullyQualifiedErrorId : Generation failed for Halal Restaurants with exit code 1
+ 

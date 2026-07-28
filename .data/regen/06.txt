@@ -1,0 +1,108 @@
+◇ injected env (18) from .env.local // tip: ⌁ auth for agents [www.vestauth.com]
+
+==============================================================================
+Beauty / Lash Studios — Lash Lounge Bondi, Bondi Junction Sydney
+==============================================================================
+content_type resolved:  visit  (row default: remote, city override: visit)
+reminder family:        Lifestyle
+reminder focus noun:    lifestyle content
+initial content focus:  Sydney-based lifestyle content
+reactivation focus:     lash and brow studios around Sydney
+
+==============================================================================
+1. INITIAL EMAIL
+==============================================================================
+SUBJECT: Quick one about a collab
+
+Hey Lash Lounge Bondi,
+
+I'm Owais. I run Aussie Venture, a Sydney page that posts food, activities and travel from around the country, around 650k followers across Instagram, TikTok and Facebook.
+
+You do lash and brow treatments in Bondi Junction. We're covering more beauty studios this year so I thought I'd start with you.
+
+Any interest in working together?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 59]
+
+==============================================================================
+2. FOLLOW-UP 1 (day 7)
+==============================================================================
+SUBJECT: Re: Quick one about a collab
+
+Hey Lash Lounge Bondi,
+
+My email from last week might have landed in the wrong inbox.
+
+I'm Owais from Aussie Venture. We create lifestyle content across Instagram, TikTok and Facebook.
+
+I was asking about doing a collab with you.
+
+Would you be interested?
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 43]
+
+==============================================================================
+3. FOLLOW-UP 2 (day 14)
+==============================================================================
+SUBJECT: Re: Quick one about a collab
+
+Hey Lash Lounge Bondi,
+
+Just wanted to check in once more in case my earlier emails got buried.
+
+I'm Owais, I run Aussie Venture. We post lifestyle content on Instagram, TikTok and Facebook.
+
+Would you be interested in a collab? A yes or no is all I need.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 48]
+
+==============================================================================
+4. FOLLOW-UP 3 (day 21)
+==============================================================================
+SUBJECT: Re: Quick one about a collab
+
+Hey Lash Lounge Bondi,
+
+I haven't heard back on this, so I'll close it off at my end.
+
+I'm Owais from Aussie Venture. We make lifestyle content for Instagram, TikTok and Facebook.
+
+If you want to pick it up later, just reply.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 42]
+
+==============================================================================
+5. REACTIVATION EMAIL (day 90+)
+==============================================================================
+SUBJECT: Better timing now?
+
+Hey Lash Lounge Bondi,
+
+I'm Owais, I run Aussie Venture. We're based in Sydney and post food, activities and travel from around Australia, around 650k followers across Instagram, TikTok and Facebook.
+
+I emailed a few months back about working together and never heard back. We're doing a lot more lash and brow studios around Sydney now, so you came up again.
+
+Would you be interested this time round?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 68]

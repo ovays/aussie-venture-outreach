@@ -1,0 +1,108 @@
+◇ injected env (18) from .env.local // tip: ⌘ suppress logs { quiet: true }
+
+==============================================================================
+Escape Rooms — Escape Hunt Sydney, Surry Hills Sydney
+==============================================================================
+content_type resolved:  visit  (row default: visit, city override: visit)
+reminder family:        Experiences
+reminder focus noun:    content featuring attractions and experiences
+initial content focus:  Sydney-based activities and entertainment content
+reactivation focus:     things to do around Sydney
+
+==============================================================================
+1. INITIAL EMAIL
+==============================================================================
+SUBJECT: Quick question
+
+Hey Escape Hunt Sydney,
+
+I'm Owais. I run Aussie Venture, a Sydney page that posts food, activities and travel from around the country, around 650k followers across Instagram, TikTok and Facebook.
+
+We're covering more group activity spots at the moment. You've got four rooms running at once.
+
+Would you be interested in doing something together?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 55]
+
+==============================================================================
+2. FOLLOW-UP 1 (day 7)
+==============================================================================
+SUBJECT: Re: Quick question
+
+Hey Escape Hunt Sydney,
+
+My email from last week might have landed in the wrong inbox.
+
+I'm Owais, I run Aussie Venture. We post content featuring attractions and experiences on Instagram, TikTok and Facebook.
+
+I was reaching out to ask if you'd be interested in a collab.
+
+Are you interested? Just let me know either way.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 56]
+
+==============================================================================
+3. FOLLOW-UP 2 (day 14)
+==============================================================================
+SUBJECT: Re: Quick question
+
+Hey Escape Hunt Sydney,
+
+Just wanted to check in once more in case my earlier emails got buried.
+
+I'm Owais from Aussie Venture. We create content featuring attractions and experiences across Instagram, TikTok and Facebook.
+
+Would you be interested in doing something together? Even a no is fine.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 48]
+
+==============================================================================
+4. FOLLOW-UP 3 (day 21)
+==============================================================================
+SUBJECT: Re: Quick question
+
+Hey Escape Hunt Sydney,
+
+I haven't heard anything back, so I'll close this one off at my end.
+
+I'm Owais from Aussie Venture. We make content featuring attractions and experiences for Instagram, TikTok and Facebook.
+
+If you want to pick it up later, just reply.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 45]
+
+==============================================================================
+5. REACTIVATION EMAIL (day 90+)
+==============================================================================
+SUBJECT: Better timing now?
+
+Hey Escape Hunt Sydney,
+
+I'm Owais. I run Aussie Venture, a Sydney page that posts food, activities and travel from around the country, around 650k followers across Instagram, TikTok and Facebook.
+
+I emailed a few months back about working together and haven't heard back. We're covering more things to do around Sydney at the moment, so you came to mind again.
+
+Is now a better time?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 66]

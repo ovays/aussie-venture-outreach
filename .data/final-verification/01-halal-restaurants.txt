@@ -1,0 +1,10 @@
+﻿Ôùç injected env (18) from .env.local // tip: Ôîÿ multiple files { path: ['.env.local', '.env'] }
+
+==============================================================================
+Halal Restaurants ÔÇö Nour Lebanese Kitchen, Lakemba Sydney
+==============================================================================
+content_type resolved:  visit  (row default: visit, city override: visit)
+reminder family:        Food
+reminder focus noun:    halal food content
+initial content focus:  Sydney-based halal food content
+reactivation focus:     halal restaurants around Sydney

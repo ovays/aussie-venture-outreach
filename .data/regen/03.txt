@@ -1,0 +1,108 @@
+◇ injected env (18) from .env.local // tip: ◈ encrypted .env [www.dotenvx.com]
+
+==============================================================================
+Halal Bakeries / Dessert Shops — Kova Patisserie, Auburn Sydney
+==============================================================================
+content_type resolved:  visit  (row default: visit, city override: visit)
+reminder family:        Food
+reminder focus noun:    halal food content
+initial content focus:  Sydney-based halal food content
+reactivation focus:     halal bakeries and dessert places around Sydney
+
+==============================================================================
+1. INITIAL EMAIL
+==============================================================================
+SUBJECT: Aussie Venture x Kova Patisserie
+
+Hey Kova Patisserie,
+
+I'm Owais. I run Aussie Venture, a Sydney page that posts food, activities and travel from around the country, around 650k followers across Instagram, TikTok and Facebook.
+
+You make Japanese-style cakes and pastries on site each morning. We're covering more dessert shops at the moment so I thought I'd start with you.
+
+Any interest in a collab?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 60]
+
+==============================================================================
+2. FOLLOW-UP 1 (day 7)
+==============================================================================
+SUBJECT: Re: Aussie Venture x Kova Patisserie
+
+Hey Kova Patisserie,
+
+My email from last week might have landed in the wrong inbox.
+
+I'm Owais from Aussie Venture. We create halal food content across Instagram, TikTok and Facebook.
+
+I was asking about doing a collab with you.
+
+Would you be interested?
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 43]
+
+==============================================================================
+3. FOLLOW-UP 2 (day 14)
+==============================================================================
+SUBJECT: Re: Aussie Venture x Kova Patisserie
+
+Hey Kova Patisserie,
+
+Just wanted to check in once more in case my earlier emails got buried.
+
+I'm Owais from Aussie Venture. We make halal food content for Instagram, TikTok and Facebook.
+
+Would you be interested in a collab? A yes or no is all I need.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 47]
+
+==============================================================================
+4. FOLLOW-UP 3 (day 21)
+==============================================================================
+SUBJECT: Re: Aussie Venture x Kova Patisserie
+
+Hey Kova Patisserie,
+
+I haven't heard anything back, so I'll close this one off at my end.
+
+I'm Owais, I run Aussie Venture. We post halal food content on Instagram, TikTok and Facebook.
+
+If you want to pick it up later, just reply.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 43]
+
+==============================================================================
+5. REACTIVATION EMAIL (day 90+)
+==============================================================================
+SUBJECT: Aussie Venture and Kova Patisserie
+
+Hey Kova Patisserie,
+
+I'm Owais, I run Aussie Venture. We're based in Sydney and post food, activities and travel from around Australia, around 650k followers across Instagram, TikTok and Facebook.
+
+I emailed a few months back about working together and never heard back. We're doing a lot more halal bakeries and dessert places around Sydney now, so you came up again.
+
+Is now a better time?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 66]

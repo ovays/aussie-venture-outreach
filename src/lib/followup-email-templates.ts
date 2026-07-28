@@ -1,82 +1,94 @@
-// Single source of truth for follow-up email copy — used by the production
-// follow-up sender (agents/followup.ts) and by staged-lead import backfill
-// (src/app/api/leads/route.ts) so both produce byte-identical content for a
-// given follow-up type.
+// Single source of truth for follow-up email copy — used as the fallback when
+// Claude generation fails (src/lib/followup-generation.ts) and by staged-lead
+// import backfill (src/app/api/leads/route.ts) so both produce byte-identical
+// content for a given follow-up type.
 //
-// Follow-ups are plain templates (no Claude call) — the only per-lead
-// variables are the business name, its generic category noun, and the
-// visit/remote location word, all resolved from the same shared classifiers
-// every other template uses.
+// These are plain templates (no Claude call). The per-lead variables are the
+// business name and the category reminder sentence, and nothing else. Every
+// earlier version of this file interpolated a category noun and a location word
+// into a sentence about our audience, which is exactly the re-pitching that
+// suppresses replies. The reminder is different: it says who is typing, not why
+// they should care, and it comes from getCategoryReminderFocus so it can never
+// produce an awkward sentence for an unseen category.
+//
+// Each stage is a different beat, matching the prompt stages in claude.ts's
+// buildFollowUpEmailPrompt:
+//   FU1 (day 7)  — the first email may never have been seen; re-introduce, ask
+//   FU2 (day 14) — one more check-in, made as cheap as possible to answer
+//   FU3 (day 21) — closing the loop
+//
+// Every stage carries the reminder, because the reader receiving a follow-up is
+// by definition the one who did not engage with email one. No stage mentions
+// packages, pricing, budgets or an offer to send anything through: once the first
+// email has gone out, the only question worth asking is whether they're
+// interested, and a second question halves the odds of either being answered.
+// Test:email-voice enforces both rules across all three stages so a future edit
+// can't quietly turn a follow-up back into a pitch.
 
 import { textToHtml } from '@/lib/utils'
-import { normalizeContentType, contentTypeLocationWord } from '@/lib/content-type'
-import { getCategoryNoun, getCategoryReferenceNoun } from '@/lib/category-copy'
+import { FOLLOW_UP_SIGN_OFF, reminderFor, fu3ClosingFor } from '@/lib/email-voice'
 import type { FollowUpType } from '@/lib/followup-eligibility'
+
+const BODIES: Record<FollowUpType, (leadName: string, reminder: string) => string> = {
+  // No packages, no pricing, no offer to send anything through. FU1 used to end
+  // "Happy to send our package options over if you want a look." — see
+  // NO_COMMERCIALS_RULE in email-voice.ts for why that line cost more replies
+  // than it earned. Every stage now asks one question and stops.
+  follow_up_1: (leadName, reminder) => `Hey ${leadName},
+
+I emailed you last week but it may not have reached you.
+
+${reminder}
+
+I was asking whether you'd want to do a collab with us.
+
+Would you be interested?
+
+${FOLLOW_UP_SIGN_OFF}`,
+
+  // FU2's job is to make the reply cheaper than the decision. Mentioning the
+  // silence here would collide with FU3's opening line, so this one is framed as
+  // "in case it was missed" instead.
+  follow_up_2: (leadName, reminder) => `Hey ${leadName},
+
+Checking once more in case my earlier emails got buried.
+
+${reminder}
+
+Is a collab something you'd be interested in? A yes or no is all I need.
+
+${FOLLOW_UP_SIGN_OFF}`,
+
+  // The opening line comes from FU3_CLOSING_LINES so the fallback closes a thread
+  // in the same first-person, active wording the generated version does.
+  follow_up_3: (leadName, reminder) => `Hey ${leadName},
+
+${fu3ClosingFor(leadName)}
+
+${reminder}
+
+If a collab is something you'd want to look at later, reply any time and I'll pick it back up.
+
+${FOLLOW_UP_SIGN_OFF}`,
+}
+
+// Salt matches buildFollowUpEmailPrompt's, so a lead that falls back to the
+// template mid-thread gets the same reminder wording it would have got from the
+// model rather than a visibly different sentence.
+const REMINDER_SALT: Record<FollowUpType, string> = {
+  follow_up_1: 'fu1',
+  follow_up_2: 'fu2',
+  follow_up_3: 'fu3',
+}
 
 export function buildFollowUpEmail(
   type: FollowUpType,
   leadName: string,
   initialSubject: string,
   category: string,
-  contentType: string
+  _contentType: string
 ): { subject: string; body: string; html: string } {
-  const normalized = normalizeContentType(contentType)
-  const location = contentTypeLocationWord(normalized)
-  const noun = getCategoryNoun(category)
-  const refNoun = getCategoryReferenceNoun(category)
-
-  if (type === 'follow_up_1') {
-    const body = `Hey ${leadName}!
-
-Still keen to feature your ${noun} on Aussie Venture — our ${location} audience genuinely loves discovering great local spots, and I think you'd be a wonderful fit.
-
-Happy to keep things simple on your end. Let me know if you're open to it!
-
-Cheers,
-Owais
-Aussie Venture
-hello@aussieventure.com`
-
-    return {
-      subject: `Re: ${initialSubject}`,
-      body,
-      html: textToHtml(body),
-    }
-  }
-
-  if (type === 'follow_up_2') {
-    const body = `Hey ${leadName},
-
-Timing can always be tricky — no worries if things have been busy on your end!
-
-A feature on Aussie Venture is a simple way to connect your ${noun} with a genuinely engaged ${location} audience, and we keep it as easy as possible from your side.
-
-If it sounds like something worth exploring, I'd love to hear your thoughts.
-
-Cheers,
-Owais
-Aussie Venture
-hello@aussieventure.com`
-
-    return {
-      subject: `Re: ${initialSubject}`,
-      body,
-      html: textToHtml(body),
-    }
-  }
-
-  // follow_up_3
-  const body = `Hey ${leadName},
-
-No worries at all if the timing hasn't been right — these things don't always line up!
-
-If a feature on Aussie Venture ever sounds like a good fit down the track, we'd genuinely love to hear from you at hello@aussieventure.com.
-
-Wishing you and the team all the best — hope the ${refNoun} keeps going from strength to strength!
-
-Cheers,
-Owais
-Aussie Venture`
+  const body = BODIES[type](leadName, reminderFor(category, leadName, REMINDER_SALT[type]))
 
   return {
     subject: `Re: ${initialSubject}`,

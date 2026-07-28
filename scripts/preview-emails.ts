@@ -4,7 +4,7 @@ import { resolve } from 'path'
 dotenv.config({ path: resolve(__dirname, '../.env.local') })
 
 import Anthropic from '@anthropic-ai/sdk'
-import { getBrandDescription, buildOutreachEmailPrompt } from '@/lib/claude'
+import { buildOutreachEmailPrompt } from '@/lib/claude'
 import { resolveContentType } from '@/lib/content-type'
 
 const SAMPLES = [
@@ -63,13 +63,34 @@ const SAMPLES = [
 
 function buildPrompt(sample: typeof SAMPLES[0]): string {
   const contentType = resolveContentType({ name: sample.category }, sample.city)
-  const brandDesc = getBrandDescription(sample.category, contentType)
-  return buildOutreachEmailPrompt(sample, brandDesc)
+  return buildOutreachEmailPrompt(sample, contentType)
 }
 
 function countWords(text: string): number {
   return text.split('Cheers,')[0].trim().split(/\s+/).filter(Boolean).length
 }
+
+// The specific wordings that mark an email as agency/AI-written rather than
+// typed by a person. Mirrors BANNED_WORDING in src/lib/email-voice.ts — that
+// list instructs the model, this one catches it when it ignores the instruction.
+const BANNED_TELLS: RegExp[] = [
+  /\b(perfect|great|ideal|good) fit\b/i,
+  /our (audience|followers)\b/i,
+  /would (love|resonate)\b/i,
+  /\bresonate\b/i,
+  /\bauthentic\b/i,
+  /\bengag(ing|ement)\b/i,
+  /\bshowcase\b/i,
+  /\b(immersive|vibrant|iconic|curated|elevate|amplify|leverage|synergy)\b/i,
+  /hidden gem|must[- ]visit|game changer|one of a kind|next level/i,
+  /\b(excited|thrilled|buzzing|stoked)\b/i,
+  /\bI (came|stumbled) across\b/i,
+  /\bI wanted to (reach out|see)\b/i,
+  /hope this (email )?finds you well/i,
+  /just checking in|touching base|circling back/i,
+  /worth a quick chat|quick chat/i,
+  /we'?d love to\b/i,
+]
 
 async function main() {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
@@ -93,21 +114,29 @@ async function main() {
       if (!jsonMatch) { console.log('ERROR: No JSON\n' + raw); continue }
 
       const result = JSON.parse(jsonMatch[0]) as { subject: string; body: string }
+      const bodyWithoutSignoff = result.body.split('Cheers,')[0].trimEnd()
       const wordCount = countWords(result.body)
       const hasEmDash = result.body.includes('—') || result.subject.includes('—')
-      const hasLogistics = /\b(visit|come in|pop in|remote|assets|photos|sponsored|partnership|free|paid collab)\b/i.test(
-        result.body.split('Cheers,')[0]
+      const hasLogistics = /\b(visit|come in|pop in|remote|assets|photos|video|sponsored|partnership|package|price|pricing|cost|budget|free|paid)\b/i.test(
+        bodyWithoutSignoff
       )
-      const bodyWithoutSignoff = result.body.split('Cheers,')[0].trimEnd()
-      const endsCorrectly = /would you be keen to collab\??\s*$/i.test(bodyWithoutSignoff)
+      // The ask must be a plain direct question, not a copywriter's closing line.
+      const endsCorrectly = /\?\s*$/.test(bodyWithoutSignoff) &&
+        /\b(interested|interest|working together|something together|a collab)\b/i.test(
+          bodyWithoutSignoff.split('\n').filter(Boolean).slice(-1)[0] ?? ''
+        )
+      const banned = BANNED_TELLS.filter((re) => re.test(bodyWithoutSignoff) || re.test(result.subject))
+      const hasBangOrEmoji = /!/.test(bodyWithoutSignoff) || /[\u{1F300}-\u{1FAFF}]/u.test(result.body)
 
       console.log(`SUBJECT: ${result.subject}\n`)
       console.log(`BODY:\n${result.body}`)
       console.log('\n--- Checks ---')
-      console.log(`Words (excl. sign-off): ${wordCount} ${wordCount <= 80 ? '✓' : '✗ OVER 80'}`)
+      console.log(`Words (excl. sign-off): ${wordCount} ${wordCount <= 75 ? '✓' : '✗ OVER 75'}`)
       console.log(`No em dashes:           ${hasEmDash ? '✗ FOUND EM DASH' : '✓'}`)
-      console.log(`No logistics:           ${hasLogistics ? '✗ MENTIONS LOGISTICS' : '✓'}`)
-      console.log(`Ends correctly:         ${endsCorrectly ? '✓' : '✗ WRONG CLOSING LINE'}`)
+      console.log(`No logistics/pricing:   ${hasLogistics ? '✗ MENTIONS LOGISTICS' : '✓'}`)
+      console.log(`No ! or emoji:          ${hasBangOrEmoji ? '✗ FOUND' : '✓'}`)
+      console.log(`Ends on a plain ask:    ${endsCorrectly ? '✓' : '✗ WEAK OR MISSING ASK'}`)
+      console.log(`No banned wording:      ${banned.length === 0 ? '✓' : `✗ ${banned.map((r) => r.source).join(', ')}`}`)
     } catch (err) {
       console.log(`ERROR: ${err}`)
     }

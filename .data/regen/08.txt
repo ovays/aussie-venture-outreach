@@ -1,0 +1,108 @@
+◇ injected env (18) from .env.local // tip: ⌘ suppress logs { quiet: true }
+
+==============================================================================
+Travel Agents — Wanderlust Travel Co, Parramatta Sydney
+==============================================================================
+content_type resolved:  remote  (row default: remote, city override: remote)
+reminder family:        Travel
+reminder focus noun:    travel content
+initial content focus:  Australian travel content
+reactivation focus:     travel and tours around Australia
+
+==============================================================================
+1. INITIAL EMAIL
+==============================================================================
+SUBJECT: Collab with Aussie Venture?
+
+Hey Wanderlust Travel Co,
+
+I'm Owais. I run Aussie Venture, we post food, activities and travel from around the country, around 650k followers across Instagram, TikTok and Facebook.
+
+I'm covering a few travel agents at the moment and you do group bookings, so I've added you to the list.
+
+Would you be up for a collab?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 56]
+
+==============================================================================
+2. FOLLOW-UP 1 (day 7)
+==============================================================================
+SUBJECT: Re: Collab with Aussie Venture?
+
+Hey Wanderlust Travel Co,
+
+My email from last week might have landed in the wrong inbox.
+
+I'm Owais from Aussie Venture. We create travel content across Instagram, TikTok and Facebook.
+
+I was asking about doing a collab with you.
+
+Would you be interested? Just let me know either way.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 49]
+
+==============================================================================
+3. FOLLOW-UP 2 (day 14)
+==============================================================================
+SUBJECT: Re: Collab with Aussie Venture?
+
+Hey Wanderlust Travel Co,
+
+Just wanted to check once more in case my earlier emails got buried.
+
+I'm Owais from Aussie Venture. We make travel content for Instagram, TikTok and Facebook.
+
+Would you be interested in a collab? A yes or no is all I need.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 46]
+
+==============================================================================
+4. FOLLOW-UP 3 (day 21)
+==============================================================================
+SUBJECT: Re: Collab with Aussie Venture?
+
+Hey Wanderlust Travel Co,
+
+I haven't heard back, so I'll close this enquiry off at my end.
+
+I'm Owais, I run Aussie Venture. We post travel content on Instagram, TikTok and Facebook.
+
+If you want to pick it up later, just reply.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 42]
+
+==============================================================================
+5. REACTIVATION EMAIL (day 90+)
+==============================================================================
+SUBJECT: Collab, take two?
+
+Hey Wanderlust Travel Co,
+
+I'm Owais, I run Aussie Venture. We post food, activities and travel from around Australia, around 650k followers across Instagram, TikTok and Facebook.
+
+I emailed a few months back about working together and never heard back. I'm working on more travel and tours around Australia at the moment, so I thought I'd come back to you.
+
+Is it worth another look now?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 66]

@@ -84,7 +84,16 @@
       "Bash(echo \"EXIT_CODE=$?\")",
       "Bash(echo \"EXIT=$?\")",
       "Bash(grep -n \"\\\\\"@/\\\\\\\\*\\\\\"\\\\|paths\" tsconfig.json)",
-      "Bash(git diff *)"
+      "Bash(git diff *)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Get-CimInstance *)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1 | Select-Object -First 30)",
+      "PowerShell(npm run *)",
+      "PowerShell(node check-doc.js)",
+      "PowerShell(npx tsx scripts/tmp-list-categories.ts)",
+      "PowerShell(npx tsx scripts/tmp-sequence-preview.ts \"Halal Restaurants\")",
+      "Bash(grep -n \"^#\\\\{2,3\\\\} \\\\|charcoal\\\\|package\\\\|another round\" docs/outreach-sequences.md)"
     ]
   }
 }

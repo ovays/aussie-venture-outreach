@@ -92,9 +92,7 @@ async function test2_historyReachesPrompt(): Promise<void> {
       notes:         BUSINESS.notes,
     },
     2,
-    history,
-    'a Sydney-based lifestyle platform',
-    'Sydney-based activities and entertainment content'
+    history
   )
 
   assert(prompt.includes('INITIAL_BODY_MARKER_12345'), 'prompt includes the initial pitch body')

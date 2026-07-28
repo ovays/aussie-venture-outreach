@@ -1,0 +1,108 @@
+◇ injected env (18) from .env.local // tip: ◈ secrets for agents [www.dotenvx.com]
+
+==============================================================================
+Nail Salons — Luxe Nail Bar, Melbourne CBD Melbourne
+==============================================================================
+content_type resolved:  remote  (row default: remote, city override: remote)
+reminder family:        Lifestyle
+reminder focus noun:    lifestyle content
+initial content focus:  Australian lifestyle content
+reactivation focus:     nail salons around Australia
+
+==============================================================================
+1. INITIAL EMAIL
+==============================================================================
+SUBJECT: Collab with Aussie Venture?
+
+Hey Luxe Nail Bar,
+
+I'm Owais from Aussie Venture. We post food, activities and travel around Australia, around 650k followers across Instagram, TikTok and Facebook.
+
+We've been covering things to do in Melbourne CBD, which is why I'm emailing. You do nail art.
+
+Would you be open to a collab?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 50]
+
+==============================================================================
+2. FOLLOW-UP 1 (day 7)
+==============================================================================
+SUBJECT: Re: Collab with Aussie Venture?
+
+Hey Luxe Nail Bar,
+
+My email from last week might have landed in the wrong inbox.
+
+I'm Owais, I run Aussie Venture. We post lifestyle content on Instagram, TikTok and Facebook.
+
+I was asking about doing a collab with you.
+
+Are you interested? Just let me know either way.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 49]
+
+==============================================================================
+3. FOLLOW-UP 2 (day 14)
+==============================================================================
+SUBJECT: Re: Collab with Aussie Venture?
+
+Hey Luxe Nail Bar,
+
+Just wanted to check once more in case my earlier emails got buried.
+
+I'm Owais from Aussie Venture. We create lifestyle content across Instagram, TikTok and Facebook.
+
+Would you be interested in a collab? A yes or no is all I need.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 46]
+
+==============================================================================
+4. FOLLOW-UP 3 (day 21)
+==============================================================================
+SUBJECT: Re: Collab with Aussie Venture?
+
+Hey Luxe Nail Bar,
+
+Since I haven't heard back, I'll close this off at my end.
+
+I'm Owais from Aussie Venture. We make lifestyle content for Instagram, TikTok and Facebook.
+
+If you want to pick it up later, just reply.
+
+Cheers,
+Owais
+
+[source: ai] [words before sign-off: 40]
+
+==============================================================================
+5. REACTIVATION EMAIL (day 90+)
+==============================================================================
+SUBJECT: Another go at a collab?
+
+Hey Luxe Nail Bar,
+
+I'm Owais, I run Aussie Venture. We post food, activities and travel from around Australia, around 650k followers across Instagram, TikTok and Facebook.
+
+I emailed a few months back about working together and didn't hear back. I'm doing more nail salons around Australia over the next few months, so I thought I'd try you again.
+
+Is it worth another look now?
+
+Cheers,
+Owais
+Aussie Venture
+aussieventure.com
+instagram.com/aussie.venture
+
+[words before sign-off: 65]
