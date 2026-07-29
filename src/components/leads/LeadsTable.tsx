@@ -421,24 +421,27 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   // Clear selection when page changes
   useEffect(() => { setSelectedIds(new Set()) }, [page])
 
-  // email_ready non-manual leads → send/regenerate/delete actions
-  const emailReadyEligibleLeads = leads.filter(l => l.status === 'email_ready' && l.source !== 'manual')
+  // Selection is independent of send eligibility: manual email_ready leads
+  // can still be selected for non-send actions.
+  const emailReadyLeads = leads.filter(l => l.status === 'email_ready')
+  const bulkSendEligibleLeads = emailReadyLeads.filter(l => l.source !== 'manual')
   // new leads → research action
   const researchEligibleLeads = leads.filter(l => l.status === 'new')
-  // combined for header checkbox and select-all
-  const bulkEligibleLeads = [...emailReadyEligibleLeads, ...researchEligibleLeads]
+  // combined for row checkboxes and select-all
+  const selectableLeads = [...emailReadyLeads, ...researchEligibleLeads]
 
-  const selectedEmailReadyLeads = emailReadyEligibleLeads.filter(l => selectedIds.has(l.id))
+  const selectedEmailReadyLeads = emailReadyLeads.filter(l => selectedIds.has(l.id))
+  const selectedBulkSendLeads = bulkSendEligibleLeads.filter(l => selectedIds.has(l.id))
   const selectedNewLeads = researchEligibleLeads.filter(l => selectedIds.has(l.id))
 
-  const allEligibleSelected = bulkEligibleLeads.length > 0 && bulkEligibleLeads.every(l => selectedIds.has(l.id))
-  const someEligibleSelected = bulkEligibleLeads.some(l => selectedIds.has(l.id))
+  const allSelectableSelected = selectableLeads.length > 0 && selectableLeads.every(l => selectedIds.has(l.id))
+  const someSelectableSelected = selectableLeads.some(l => selectedIds.has(l.id))
 
   useEffect(() => {
     if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = someEligibleSelected && !allEligibleSelected
+      selectAllRef.current.indeterminate = someSelectableSelected && !allSelectableSelected
     }
-  }, [someEligibleSelected, allEligibleSelected])
+  }, [someSelectableSelected, allSelectableSelected])
 
   function toggleSelect(id: string, e: React.ChangeEvent<HTMLInputElement> | React.MouseEvent) {
     e.stopPropagation()
@@ -450,16 +453,16 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   }
 
   function handleSelectAll() {
-    if (allEligibleSelected) {
+    if (allSelectableSelected) {
       setSelectedIds(prev => {
         const next = new Set(prev)
-        bulkEligibleLeads.forEach(l => next.delete(l.id))
+        selectableLeads.forEach(l => next.delete(l.id))
         return next
       })
     } else {
       setSelectedIds(prev => {
         const next = new Set(prev)
-        bulkEligibleLeads.forEach(l => next.add(l.id))
+        selectableLeads.forEach(l => next.add(l.id))
         return next
       })
     }
@@ -473,10 +476,13 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
       delete:     'delete',
       research:   'research_leads',
     }
-    // Research only operates on new leads; other actions use the full selection
-    const leadIds = bulkAction === 'research'
-      ? selectedNewLeads.map(l => l.id)
-      : Array.from(selectedIds)
+    // Each action receives only the leads it can operate on. In particular,
+    // manual leads remain selected but are excluded from Bulk Send.
+    const leadIds = bulkAction === 'send'
+      ? selectedBulkSendLeads.map(l => l.id)
+      : bulkAction === 'research'
+        ? selectedNewLeads.map(l => l.id)
+        : Array.from(selectedIds)
     try {
       const res = await fetch('/api/leads/bulk', {
         method: 'POST',
@@ -657,13 +663,13 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
 
           <div className="h-3.5 w-px hidden sm:block" style={{ background: '#2a2d3e' }} />
 
-          {bulkEligibleLeads.length > 0 && !allEligibleSelected && (
+          {selectableLeads.length > 0 && !allSelectableSelected && (
             <button
               onClick={handleSelectAll}
               className="text-xs transition-colors hover:opacity-80"
               style={{ color: '#64748b' }}
             >
-              Select all eligible ({bulkEligibleLeads.length})
+              Select all ({selectableLeads.length})
             </button>
           )}
 
@@ -687,13 +693,15 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
             )}
             {selectedEmailReadyLeads.length > 0 && (
               <>
-                <Button
-                  size="sm"
-                  onClick={() => { setBulkResult(null); setBulkAction('send') }}
-                >
-                  <Send size={12} />
-                  Send Initial Emails
-                </Button>
+                {selectedBulkSendLeads.length > 0 && (
+                  <Button
+                    size="sm"
+                    onClick={() => { setBulkResult(null); setBulkAction('send') }}
+                  >
+                    <Send size={12} />
+                    Send Initial Emails
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"
@@ -722,16 +730,16 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
-              {/* Checkbox header — only shown when non-manual email_ready leads exist */}
+              {/* Checkbox header */}
               <th className="w-10 px-3 py-3">
-                {bulkEligibleLeads.length > 0 && (
+                {selectableLeads.length > 0 && (
                   <input
                     ref={selectAllRef}
                     type="checkbox"
-                    checked={allEligibleSelected}
+                    checked={allSelectableSelected}
                     onChange={handleSelectAll}
                     onClick={(e) => e.stopPropagation()}
-                    title="Select all eligible leads"
+                    title="Select all leads"
                     className="w-3.5 h-3.5 rounded cursor-pointer"
                     style={{ accentColor: '#38bdf8' }}
                   />
@@ -762,8 +770,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
                 const isSelected    = selectedIds.has(lead.id)
                 const isEmailReady  = lead.status === 'email_ready'
                 const isNew         = lead.status === 'new'
-                const isManual      = lead.source === 'manual'
-                const isBulkEligible = (isEmailReady && !isManual) || isNew
+                const isSelectable  = isEmailReady || isNew
                 return (
                   <tr
                     key={lead.id}
@@ -776,21 +783,13 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
                   >
                     {/* Checkbox cell */}
                     <td className="w-10 px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                      {isBulkEligible && (
+                      {isSelectable && (
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={(e) => toggleSelect(lead.id, e)}
                           className="w-3.5 h-3.5 rounded cursor-pointer"
                           style={{ accentColor: '#38bdf8' }}
-                        />
-                      )}
-                      {isEmailReady && isManual && (
-                        <input
-                          type="checkbox"
-                          disabled
-                          title="Manual lead — use the individual Send button in the lead drawer"
-                          className="w-3.5 h-3.5 rounded cursor-not-allowed opacity-25"
                         />
                       )}
                     </td>
@@ -857,7 +856,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
       {bulkAction && (
         <BulkModal
           action={bulkAction}
-          count={selectedIds.size}
+          count={bulkAction === 'send' ? selectedBulkSendLeads.length : bulkAction === 'research' ? selectedNewLeads.length : selectedIds.size}
           running={bulkRunning}
           result={bulkResult}
           onConfirm={runBulkAction}
