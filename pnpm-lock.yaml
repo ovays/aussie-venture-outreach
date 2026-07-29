@@ -21,8 +21,8 @@ importers:
         specifier: ^2.105.1
         version: 2.108.2
       '@trigger.dev/sdk':
-        specifier: 4.5.6
-        version: 4.5.6(react@19.2.4)(zod@3.25.76)
+        specifier: 4.5.8
+        version: 4.5.8(react@19.2.4)(zod@3.25.76)
       lucide-react:
         specifier: ^1.14.0
         version: 1.20.0(react@19.2.4)
@@ -763,12 +763,12 @@ packages:
   '@tailwindcss/postcss@4.3.1':
     resolution: {integrity: sha512-dNJuNbdEJT/SWRuXTYP1WSamelsz3ztkUsdtWQPjrexysrTpaEPM40P/71knXiXLYEojqPOEGitVLLpPMS5T6A==}
 
-  '@trigger.dev/core@4.5.6':
-    resolution: {integrity: sha512-G4moEUr3UeQ44AcbEoW8picaWBO+akw89u4fNDfIqXlR3LVCVgrDx2BGdCeopMSKuNVKfdCtmfZf8LphK8gIvg==}
+  '@trigger.dev/core@4.5.8':
+    resolution: {integrity: sha512-40YOQW67xbj79LlgAHjGHI/eZQCREaWTo/9oD2FemIgRd0agzmsh+eECmzDe2GPBTAaTBCaPj8pj55UMpzMnag==}
     engines: {node: '>=18.20.0'}
 
-  '@trigger.dev/sdk@4.5.6':
-    resolution: {integrity: sha512-RktMdYsJkZgOZaemhWax6i0sCiDAUNPOMej41DZlC73NISBFkRNutIL91ngt0TjD733Xe+a+wKD7Ei+u8uvsVA==}
+  '@trigger.dev/sdk@4.5.8':
+    resolution: {integrity: sha512-bDCQgbu9B9B+UfLmN/WQNrT3m02CSQ+0wN6dutGYDFg0z6PJi+caT6MNwA3bems1fZhbXDaiBZHFQHJgu1j92A==}
     engines: {node: '>=18.20.0'}
     peerDependencies:
       '@ai-sdk/otel': '>=1.0.0-0 <2'
@@ -2020,7 +2020,7 @@ snapshots:
       postcss: 8.5.15
       tailwindcss: 4.3.1
 
-  '@trigger.dev/core@4.5.6':
+  '@trigger.dev/core@4.5.8':
     dependencies:
       '@bugsnag/cuid': 3.2.2
       '@electric-sql/client': 1.0.14
@@ -2062,11 +2062,11 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@trigger.dev/sdk@4.5.6(react@19.2.4)(zod@3.25.76)':
+  '@trigger.dev/sdk@4.5.8(react@19.2.4)(zod@3.25.76)':
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/semantic-conventions': 1.41.1
-      '@trigger.dev/core': 4.5.6
+      '@trigger.dev/core': 4.5.8
       chalk: 5.6.2
       cronstrue: 2.59.0
       debug: 4.4.3
