@@ -52,10 +52,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         failed.push({ lead_id, business_name: lead_id, reason: 'Lead not found' })
         continue
       }
-      if (lead.source === 'manual') {
-        failed.push({ lead_id, business_name: lead.business_name, reason: 'Manual leads cannot be bulk sent — use the individual Send button' })
-        continue
-      }
       if (lead.status !== 'email_ready') {
         failed.push({ lead_id, business_name: lead.business_name, reason: `Status is ${lead.status}, not email_ready` })
         continue

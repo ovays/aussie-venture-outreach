@@ -421,10 +421,9 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   // Clear selection when page changes
   useEffect(() => { setSelectedIds(new Set()) }, [page])
 
-  // Selection is independent of send eligibility: manual email_ready leads
-  // can still be selected for non-send actions.
+  // Only email_ready leads are eligible for Bulk Send, regardless of source.
   const emailReadyLeads = leads.filter(l => l.status === 'email_ready')
-  const bulkSendEligibleLeads = emailReadyLeads.filter(l => l.source !== 'manual')
+  const bulkSendEligibleLeads = emailReadyLeads
   // new leads → research action
   const researchEligibleLeads = leads.filter(l => l.status === 'new')
   // combined for row checkboxes and select-all
@@ -476,8 +475,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
       delete:     'delete',
       research:   'research_leads',
     }
-    // Each action receives only the leads it can operate on. In particular,
-    // manual leads remain selected but are excluded from Bulk Send.
+    // Each action receives only the leads it can operate on.
     const leadIds = bulkAction === 'send'
       ? selectedBulkSendLeads.map(l => l.id)
       : bulkAction === 'research'
