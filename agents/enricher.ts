@@ -113,27 +113,6 @@ async function enrichLead(lead: {
   return { email: null, emailMethod: 'not_found', instagramHandle, facebookUrl, description, services }
 }
 
-async function findInstagramOnly(lead: {
-  website?: string | null
-}): Promise<{ instagramHandle: string | null; facebookUrl: string | null; description: string; services: string }> {
-  if (!lead.website) return { instagramHandle: null, facebookUrl: null, description: '', services: '' }
-
-  const homepageText = await fetchText(lead.website)
-  if (!homepageText) return { instagramHandle: null, facebookUrl: null, description: '', services: '' }
-
-  try {
-    const enriched = await extractWebsiteData(homepageText)
-    return {
-      instagramHandle: enriched.instagram_handle,
-      facebookUrl: enriched.facebook_url,
-      description: enriched.description,
-      services: enriched.services,
-    }
-  } catch {
-    return { instagramHandle: null, facebookUrl: null, description: '', services: '' }
-  }
-}
-
 export async function runEnricherAgent(): Promise<number> {
   const supabase = createServiceClient()
 
@@ -149,26 +128,21 @@ export async function runEnricherAgent(): Promise<number> {
   }
 
   // Read quota targets
-  const [emailLimitRow, dmLimitRow, leadLimitRow] = await Promise.all([
+  const [emailLimitRow, leadLimitRow] = await Promise.all([
     supabase.from('settings').select('value').eq('key', 'daily_initial_outreach_limit').single(),
-    supabase.from('settings').select('value').eq('key', 'daily_dm_limit').single(),
     supabase.from('settings').select('value').eq('key', 'daily_lead_limit').single(),
   ])
 
   const DAILY_INITIAL_OUTREACH_LIMIT = parseInt(emailLimitRow.data?.value ?? '30', 10)
-  const DAILY_DM_LIMIT = parseInt(dmLimitRow.data?.value ?? '10', 10)
   // daily_lead_limit = global daily send limit; used here as the total allocation budget.
   const TOTAL_TARGET = parseInt(leadLimitRow.data?.value ?? '50', 10)
   const EMAIL_TARGET = Math.min(DAILY_INITIAL_OUTREACH_LIMIT, TOTAL_TARGET)
-  const INSTA_TARGET = Math.min(DAILY_DM_LIMIT, Math.max(0, TOTAL_TARGET - EMAIL_TARGET))
 
-  console.log(`[enricher] Targets — email: ${EMAIL_TARGET}, instagram: ${INSTA_TARGET}, total: ${TOTAL_TARGET}`)
+  console.log(`[enricher] Target — email: ${EMAIL_TARGET}`)
   console.log('[OUTBOUND_ALLOCATION]', {
     global_daily_send_limit:                TOTAL_TARGET,
     initial_outreach_limit:                 EMAIL_TARGET,
-    dm_target:                              INSTA_TARGET,
     configured_daily_initial_outreach_limit: DAILY_INITIAL_OUTREACH_LIMIT,
-    configured_daily_dm_limit:              DAILY_DM_LIMIT,
   })
 
   // Read all 'new' leads, highest rated first
@@ -187,16 +161,13 @@ export async function runEnricherAgent(): Promise<number> {
   console.log(`[enricher] Pool: ${pool.length} candidates to process`)
 
   const emailLeadIds: string[] = []
-  const instaLeadIds: string[] = []
   const overflowIds: string[] = []
 
   for (const lead of pool) {
     const emailFull = emailLeadIds.length >= EMAIL_TARGET
-    const instaFull = instaLeadIds.length >= INSTA_TARGET
-    const totalFull = emailLeadIds.length + instaLeadIds.length >= TOTAL_TARGET
 
-    // Quotas met — pool overflow, delete these candidates so finder re-discovers next run
-    if ((emailFull && instaFull) || totalFull) {
+    // Email quota met — pool overflow, delete these candidates so finder re-discovers next run
+    if (emailFull) {
       overflowIds.push(lead.id)
       continue
     }
@@ -231,33 +202,6 @@ export async function runEnricherAgent(): Promise<number> {
           await supabase.from('leads').update({ status: 'dead' }).eq('id', lead.id)
           console.log(`❌ Skipped (no email): "${lead.business_name}"`)
         }
-      } else {
-        // Email bucket full — Instagram fallback mode
-        const found = await findInstagramOnly(lead)
-
-        if (found.instagramHandle || found.facebookUrl) {
-          await supabase.from('leads').update({
-            instagram_handle: found.instagramHandle || null,
-            facebook_url: found.facebookUrl || null,
-            description: found.description || null,
-            services: found.services || null,
-            status: 'researched',
-            outreach_channel: 'instagram',
-          }).eq('id', lead.id)
-
-          instaLeadIds.push(lead.id)
-          console.log(`📱 Instagram lead: "${lead.business_name}" — ${found.instagramHandle ?? found.facebookUrl}`)
-
-          await supabase.from('activity_log').insert({
-            event_type: 'lead_enriched',
-            lead_id: lead.id,
-            description: `Instagram found: ${lead.business_name} — ${found.instagramHandle ?? found.facebookUrl}`,
-            metadata: { type: 'instagram', instagram: found.instagramHandle, facebook: found.facebookUrl },
-          })
-        } else {
-          await supabase.from('leads').update({ status: 'dead' }).eq('id', lead.id)
-          console.log(`❌ Skipped (no Instagram): "${lead.business_name}"`)
-        }
       }
     } catch (error) {
       console.error(`[enricher] Exception for "${lead.business_name}":`, error)
@@ -271,18 +215,16 @@ export async function runEnricherAgent(): Promise<number> {
     console.log(`[enricher] Deleted ${overflowIds.length} pool overflow candidates (will be re-discovered)`)
   }
 
-  const total = emailLeadIds.length + instaLeadIds.length
-  console.log(`[enricher] Done — Email leads: ${emailLeadIds.length}/${EMAIL_TARGET}, Instagram leads: ${instaLeadIds.length}/${INSTA_TARGET}`)
+  const total = emailLeadIds.length
+  console.log(`[enricher] Done — Email leads: ${emailLeadIds.length}/${EMAIL_TARGET}`)
 
   await supabase.from('activity_log').insert({
     event_type: 'enricher_complete',
-    description: `Enricher complete — ${emailLeadIds.length} email leads, ${instaLeadIds.length} instagram leads`,
+    description: `Enricher complete — ${emailLeadIds.length} email leads`,
     metadata: {
       email_leads: emailLeadIds.length,
-      insta_leads: instaLeadIds.length,
       overflow_deleted: overflowIds.length,
       email_target: EMAIL_TARGET,
-      insta_target: INSTA_TARGET,
     },
   })
 

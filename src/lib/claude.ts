@@ -443,44 +443,6 @@ ${signOffRule(FOLLOW_UP_SIGN_OFF)}
 Respond in JSON: { "body": "..." }`
 }
 
-export async function writeFollowUpEmail(params: {
-  business_name: string
-  category: string
-  suburb: string
-  city: string
-  website: string
-  description: string
-  services: string
-  notes: string
-  content_type: string
-  follow_up_number: 1 | 2 | 3
-  initial_subject: string
-  history: FollowUpThreadEmail[]
-}): Promise<{ subject: string; body: string }> {
-  const subject = `Re: ${params.initial_subject}`
-
-  const response = await rateLimitedCall(() =>
-    anthropic.messages.create({
-      model: SONNET_MODEL,
-      max_tokens: 400,
-      messages: [{
-        role: 'user',
-        content: buildFollowUpEmailPrompt(params, params.follow_up_number, params.history),
-      }],
-    })
-  )
-
-  const text = response.content[0].type === 'text' ? response.content[0].text : ''
-  const jsonMatch = text.match(/\{[\s\S]*\}/)
-  if (jsonMatch) {
-    const parsed = JSON.parse(jsonMatch[0]) as { body?: string }
-    if (parsed.body && parsed.body.trim().length > 0) {
-      return { subject, body: enforceSignOff(parsed.body.trim(), FOLLOW_UP_SIGN_OFF) }
-    }
-  }
-  throw new Error('writeFollowUpEmail: Claude response did not contain a usable body')
-}
-
 // ─── Haiku email extractor ───────────────────────────────────────────────────
 
 export async function extractEmailWithHaiku(content: string, businessName: string): Promise<string | null> {
@@ -744,30 +706,8 @@ export async function writeReactivationEmail(params: {
 }): Promise<{ subject: string; body: string }> {
   const contentType = normalizeContentType(params.content_type)
   const contentContext = getReactivationFocus(params.category, contentType)
-
-  const response = await rateLimitedCall(() =>
-    anthropic.messages.create({
-      model: SONNET_MODEL,
-      max_tokens: 500,
-      messages: [{ role: 'user', content: buildReactivationEmailPrompt(params, contentType) }],
-    })
-  )
-
-  // Subject and sign-off are ours, not the model's — same reasoning as
-  // writeOutreachEmail. Only the body is Claude's work.
   const subject = reactivationSubjectFor(params.business_name)
-  const text = response.content[0].type === 'text' ? response.content[0].text : ''
-  try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]) as { body?: string }
-      if (parsed.body?.trim()) {
-        return { subject, body: enforceSignOff(parsed.body.trim(), INITIAL_SIGN_OFF) }
-      }
-    }
-  } catch {
-    // fallback
-  }
+
   return {
     subject,
     body: `Hey ${params.business_name},\n\n${brandIntroOptions(contentType)[0]}\n\nI emailed you about a collab a few months back and never heard anything. ${reactivationContextFor(params.business_name, contentContext)}\n\n${pickVariant(REACTIVATION_ASKS, params.business_name, 'reactivation-ask')}\n\n${INITIAL_SIGN_OFF}`,

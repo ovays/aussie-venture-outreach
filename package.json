@@ -28,6 +28,7 @@
     "test:distributed-lock": "tsx scripts/test-distributed-lock.ts",
     "test:atomic-quota-enforcement": "tsx scripts/test-atomic-quota-enforcement.ts",
     "test:resend-duplicate-protection": "tsx scripts/test-resend-duplicate-protection.ts",
+    "test:import-no-ai": "tsx scripts/test-import-no-ai.ts",
     "test:stage-import-rollback": "tsx scripts/test-stage-import-rollback.ts",
     "test:migration-duplicate-resolution": "tsx scripts/test-migration-duplicate-resolution.ts",
     "test:writer-dedupe-index-refresh": "tsx scripts/test-writer-dedupe-index-refresh.ts",

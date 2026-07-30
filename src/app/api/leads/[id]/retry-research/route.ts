@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { researchOneLead } from '@/lib/research-lead'
-import { writeOneLead, type DmState } from '@/lib/write-lead'
+import { writeOneLead } from '@/lib/write-lead'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
 
 export async function POST(
@@ -68,25 +68,9 @@ export async function POST(
     return NextResponse.json({ error: 'Failed to fetch enriched lead' }, { status: 500 })
   }
 
-  // Build DM state
-  const { data: dmLimitSetting } = await supabase
-    .from('settings')
-    .select('value')
-    .eq('key', 'daily_dm_limit')
-    .single()
-  const dailyDmLimit = parseInt(dmLimitSetting?.value ?? '10', 10)
-
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const { count: todayDmCount } = await supabase
-    .from('dm_queue')
-    .select('*', { count: 'exact', head: true })
-    .gte('created_at', todayStart.toISOString())
-  const dmState: DmState = { dmsAddedToday: todayDmCount ?? 0, dailyDmLimit }
-
   const dedupeIndex = await fetchPipelineDedupeIndex(supabase)
 
-  const writeResult = await writeOneLead(supabase, enrichedLead, dedupeIndex, dmState)
+  const writeResult = await writeOneLead(supabase, enrichedLead, dedupeIndex)
 
   if (!writeResult.success) {
     return NextResponse.json({ error: `Draft generation failed: ${writeResult.error}` }, { status: 500 })

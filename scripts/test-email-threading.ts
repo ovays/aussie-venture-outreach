@@ -7,8 +7,8 @@
  *   - buildReferenceChain (agents/followup.ts) builds the correct oldest-first
  *     chain from a lead's prior sent emails, skipping unsent/pre-migration
  *     (message_id-less) rows
- *   - "Re:" subjects are unchanged for both the AI path (writeFollowUpEmail)
- *     and its static-template fallback (buildFollowUpEmail) — this fix only
+ *   - "Re:" subjects are unchanged for the shared template path
+ *     (buildFollowUpEmail) — this fix only
  *     adds headers, it does not touch subject/AI prompt behaviour
  *
  * Pure / in-memory — no network, no DB.
@@ -98,34 +98,33 @@ console.log('\n  6. "Re:" subject preserved — static template fallback')
   assert(result.subject === 'Re: Collab with Aussie Venture?', '"Re:" prefix + exact original subject is preserved', result.subject)
 }
 
-// ── 7. "Re:" subject is unchanged — generateFollowUpEmail (AI path, stubbed) ──
+// ── 7. "Re:" subject is unchanged — generateFollowUpEmail template path ─────
 async function testGenerateFollowUpSubject() {
-  console.log('\n  7. "Re:" subject preserved — generateFollowUpEmail with AI stub')
+  console.log('\n  7. "Re:" subject preserved — generateFollowUpEmail template path')
 
   const context = {
     businessName: 'Test Biz', category: 'Nail Salons', suburb: 'Bondi', city: 'Sydney',
     website: '', description: '', services: '', notes: '', contentType: 'remote',
   }
 
-  // AI generator stub that returns a body but relies on the caller for subject —
-  // matches writeFollowUpEmail's real contract (subject is always `Re: ${initial_subject}`,
-  // computed before the API call, not returned by the model).
-  const aiStub = async (params: { initial_subject: string }) => ({
-    subject: `Re: ${params.initial_subject}`,
-    body: 'AI generated body',
-  })
+  let aiCalls = 0
+  const aiStub = async () => {
+    aiCalls++
+    return { subject: 'AI subject', body: 'AI generated body' }
+  }
 
   const result = await generateFollowUpEmail('follow_up_1', context, 'Original Subject', [], aiStub as never)
-  assert(result.subject === 'Re: Original Subject', 'AI-path subject keeps the exact "Re: " + original subject format', result.subject)
-  assert(result.source === 'ai', 'Source is "ai" when the generator succeeds')
+  assert(result.subject === 'Re: Original Subject', 'template subject keeps the exact "Re: " + original subject format', result.subject)
+  assert(result.source === 'template', 'Source is always "template"')
+  assert(aiCalls === 0, 'the legacy AI generator argument is not invoked')
 
-  // Failure path — falls back to the static template, subject rule still holds.
+  // A throwing legacy stub is also ignored, so generation remains deterministic.
   const failingStub = async (): Promise<{ subject: string; body: string }> => {
     throw new Error('simulated Claude failure')
   }
-  const fallback = await generateFollowUpEmail('follow_up_1', context, 'Original Subject', [], failingStub as never)
-  assert(fallback.subject === 'Re: Original Subject', 'Fallback-path subject also keeps "Re: " + original subject', fallback.subject)
-  assert(fallback.source === 'template', 'Source is "template" when the AI generator throws')
+  const template = await generateFollowUpEmail('follow_up_1', context, 'Original Subject', [], failingStub as never)
+  assert(template.subject === 'Re: Original Subject', 'template path still keeps "Re: " + original subject', template.subject)
+  assert(template.source === 'template', 'Source remains "template" with a throwing legacy stub')
 }
 
 testGenerateFollowUpSubject().then(() => {

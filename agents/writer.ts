@@ -1,7 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { logger } from '@/lib/logger'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
-import { writeOneLead, type DmState } from '@/lib/write-lead'
+import { writeOneLead } from '@/lib/write-lead'
 
 type CategoryStatusRow = {
   name: string
@@ -27,15 +27,6 @@ export async function runWriterAgent(): Promise<void> {
       return
     }
 
-    // Read daily DM limit
-    const { data: dmLimitSetting } = await supabase
-      .from('settings')
-      .select('value')
-      .eq('key', 'daily_dm_limit')
-      .single()
-
-    const dailyDmLimit = parseInt(dmLimitSetting?.value ?? '10', 10)
-
     const { data: categoryRows } = await supabase
       .from('categories')
       .select('name, status')
@@ -48,16 +39,6 @@ export async function runWriterAgent(): Promise<void> {
       filtersByActiveCategoryStatus: false,
       note: 'Writer fetches researched leads by lead status only; category status is logged for diagnostics.',
     })
-
-    const todayStart = new Date()
-    todayStart.setHours(0, 0, 0, 0)
-    const { count: todayDmCount } = await supabase
-      .from('dm_queue')
-      .select('*', { count: 'exact', head: true })
-      .gte('created_at', todayStart.toISOString())
-
-    const dmState: DmState = { dmsAddedToday: todayDmCount ?? 0, dailyDmLimit }
-    logger.info('writer', `DM limit: ${dailyDmLimit}, already queued today: ${dmState.dmsAddedToday}`)
 
     // Reset stale email_ready leads (no pending_send email) back to researched
     const { data: emailReadyLeads } = await supabase
@@ -136,31 +117,25 @@ export async function runWriterAgent(): Promise<void> {
 
     let processed = 0
     let emailsQueued = 0
-    let dmsQueued = 0
     let deadCount = 0
     let duplicateSkipped = 0
 
     for (const lead of leads) {
-      const result = await writeOneLead(supabase, lead, dedupeIndex, dmState)
+      const result = await writeOneLead(supabase, lead, dedupeIndex)
       if (result.success) {
         if (result.channel === 'email') {
           emailsQueued++
-          processed++
-        } else if (result.channel === 'dm') {
-          if (result.dmQueued) dmsQueued++
           processed++
         } else if (result.channel === 'dead') {
           deadCount++
         } else if (result.channel === 'duplicate') {
           duplicateSkipped++
         }
-        // 'dm_limit_reached' — no counter incremented
       }
     }
 
     logger.info('writer', '[PIPELINE_STAGE] Writer complete', {
       emailsQueued,
-      dmsQueued,
       deadCount,
       duplicateSkipped,
       totalProcessed: processed,
@@ -168,10 +143,9 @@ export async function runWriterAgent(): Promise<void> {
 
     await supabase.from('activity_log').insert({
       event_type: 'writer_complete',
-      description: `Writer complete: ${emailsQueued} emails, ${dmsQueued} DMs, ${deadCount} dead`,
+      description: `Writer complete: ${emailsQueued} emails, ${deadCount} dead`,
       metadata: {
         emails_queued: emailsQueued,
-        dms_queued: dmsQueued,
         dead_count: deadCount,
         duplicate_skipped: duplicateSkipped,
         total_processed: processed,

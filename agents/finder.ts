@@ -1202,44 +1202,6 @@ async function getDailyOutscraperSpend(supabase: ReturnType<typeof createService
   }, 0)
 }
 
-// ── DM Queue cleanup ─────────────────────────────────────────────────────────
-
-async function cleanupDmQueue(supabase: ReturnType<typeof createServiceClient>): Promise<void> {
-  logger.info('finder', 'Cleaning up DM queue entries')
-
-  const { error: fbErr } = await supabase.from('dm_queue').delete().eq('platform', 'facebook')
-  if (fbErr) logger.error('finder', 'DM cleanup Facebook delete error', { error: fbErr.message })
-
-  const invalidValues = ['Not found', 'Not mentioned', 'N/A', 'None', 'null', 'Unknown']
-  for (const val of invalidValues) {
-    await supabase.from('dm_queue').delete().eq('handle', val)
-  }
-
-  // Remove duplicate lead entries — keep oldest per lead_id
-  const { data: allDms } = await supabase
-    .from('dm_queue')
-    .select('id, lead_id, created_at')
-    .order('created_at', { ascending: true })
-
-  if (allDms?.length) {
-    const seenLeadIds = new Map<string, string>()
-    const toDelete: string[] = []
-    for (const dm of allDms) {
-      if (seenLeadIds.has(dm.lead_id)) {
-        toDelete.push(dm.id)
-      } else {
-        seenLeadIds.set(dm.lead_id, dm.id)
-      }
-    }
-    if (toDelete.length) {
-      logger.info('finder', `Removing ${toDelete.length} duplicate DM queue entries`)
-      await supabase.from('dm_queue').delete().in('id', toDelete)
-    } else {
-      logger.info('finder', 'DM queue clean — no duplicates')
-    }
-  }
-}
-
 // ── Main agent ───────────────────────────────────────────────────────────────
 
 export async function runFinderAgent(): Promise<{ leadsFound: number; runtimeLimitHit: boolean }> {
@@ -2175,81 +2137,9 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
     })
   }
 
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // PHASE 2 — MANUAL INSTAGRAM DM QUEUE
-  // No Outscraper calls — queue existing leads for manual Instagram outreach
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   const runtimeLimitHit = safetyLimitHit && safetyLimitReason.includes('max_runtime')
 
-  if (runtimeLimitHit) {
-    logger.info('finder', 'Phase 2 skipped — runtime limit hit')
-  } else {
-  logger.info('finder', 'Phase 2: Instagram DM Queue (free)')
-
-  await cleanupDmQueue(supabase)
-
-  // Get lead IDs already in dm_queue so we don't double-queue
-  const { data: existingDms } = await supabase
-    .from('dm_queue')
-    .select('lead_id')
-  const alreadyQueued = new Set((existingDms ?? []).map((r) => r.lead_id))
-
-  // Find leads in DM categories with no email — not yet queued, in active cities
-  const { data: dmCandidates } = activeFinderCategoryNames.length
-    ? await supabase
-      .from('leads')
-      .select('id, business_name, category_name, city, state, halal_confidence_score')
-      .in('category_name', activeFinderCategoryNames)
-      .is('email', null)
-      .eq('status', 'new')
-      .in('city', activeCities)
-      .order('created_at', { ascending: false })
-      .limit(DM_TARGET * 3)
-    : { data: [] }
-
-  for (const lead of dmCandidates ?? []) {
-    if (dmCount >= DM_TARGET) break
-    if (emailCount + dmCount >= TOTAL_TARGET) break
-    if (alreadyQueued.has(lead.id)) continue
-
-    // Derive a suggested Instagram handle from the business name
-    const suggestedHandle = lead.business_name
-      .toLowerCase()
-      .replace(/\s+/g, '')
-      .replace(/[^a-z0-9_.]/g, '')
-      .slice(0, 30) || 'instagram'
-
-    const dmMessage =
-      `Hi! We're Aussie Venture, a food & lifestyle media platform based in Sydney. ` +
-      `We'd love to feature ${lead.business_name} in our content. ` +
-      `Would you be open to a collaboration? DM us back if you're keen!`
-
-    const { error } = await supabase.from('dm_queue').insert({
-      lead_id:      lead.id,
-      platform:     'instagram',
-      handle:       suggestedHandle,
-      message_text: dmMessage,
-      status:       'pending',
-    })
-
-    if (error) {
-      logger.error('finder', `DM queue insert failed: ${lead.business_name}`, { error: error.message })
-      continue
-    }
-
-    dmCount++
-    logger.info('finder', `DM queued: ${lead.business_name}`, { handle: suggestedHandle })
-
-    await supabase.from('activity_log').insert({
-      event_type:  'lead_found',
-      description: `DM queued: ${lead.business_name} — search @${suggestedHandle} on Instagram`,
-      metadata:    { category: lead.category_name, city: lead.city, suggested_handle: suggestedHandle, type: 'dm' },
-    })
-  }
-
-  logger.info('finder', 'Phase 2 complete', { dmCount, target: DM_TARGET })
-  } // end if (!runtimeLimitHit)
-
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // SUMMARY
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
