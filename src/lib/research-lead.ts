@@ -1,5 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { extractWebsiteData, agenticEmailSearch } from '@/lib/claude'
+import { extractWebsiteData, agenticEmailSearch } from '@/ai/workflows'
 import { logger } from '@/lib/logger'
 import {
   HALAL_QUALIFICATION_THRESHOLD,

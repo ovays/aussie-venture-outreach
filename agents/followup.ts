@@ -70,7 +70,7 @@ async function sentTodayCount(
   return count ?? 0
 }
 
-// aiGenerator/sendEmailFn exist purely for tests to stub the Claude and
+// aiGenerator/sendEmailFn exist purely for tests to stub the AI generation and
 // Resend network calls — every production call site omits them and gets the
 // real writeFollowUpEmail / sendEmail.
 export async function sendFollowUp(

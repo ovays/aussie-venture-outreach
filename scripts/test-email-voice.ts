@@ -11,7 +11,7 @@
  *   - the static follow-up templates stay distinct per stage, get shorter each
  *     stage, and contain none of the banned wording
  *
- * No network, no DB, no ANTHROPIC_API_KEY needed.
+ * No network, no DB, and no AI provider credentials needed.
  *
  * Run: npm run test:email-voice
  */
@@ -41,7 +41,7 @@ import {
   buildOutreachEmailPrompt,
   buildFollowUpEmailPrompt,
   buildReactivationEmailPrompt,
-} from '@/lib/claude'
+} from '@/ai/workflows'
 import type { FollowUpType } from '@/lib/followup-eligibility'
 
 let failures = 0

@@ -1,9 +1,8 @@
-// Single source of truth for follow-up email copy — used as the fallback when
-// Claude generation fails (src/lib/followup-generation.ts) and by staged-lead
-// import backfill (src/app/api/leads/route.ts) so both produce byte-identical
-// content for a given follow-up type.
+// Single source of truth for follow-up email copy — used by the live sender and
+// staged-lead import backfill so both produce byte-identical content for a given
+// follow-up type.
 //
-// These are plain templates (no Claude call). The per-lead variables are the
+// These are plain templates (no AI provider call). The per-lead variables are the
 // business name and the category reminder sentence, and nothing else. Every
 // earlier version of this file interpolated a category noun and a location word
 // into a sentence about our audience, which is exactly the re-pitching that
@@ -11,8 +10,7 @@
 // they should care, and it comes from getCategoryReminderFocus so it can never
 // produce an awkward sentence for an unseen category.
 //
-// Each stage is a different beat, matching the prompt stages in claude.ts's
-// buildFollowUpEmailPrompt:
+// Each stage is a different beat:
 //   FU1 (day 7)  — the first email may never have been seen; re-introduce, ask
 //   FU2 (day 14) — one more check-in, made as cheap as possible to answer
 //   FU3 (day 21) — closing the loop

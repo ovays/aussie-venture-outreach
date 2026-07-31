@@ -1,8 +1,12 @@
 # ReachAgent Architecture Reference
 
+AI provider configuration and Phase 6 observability are documented in
+`docs/architecture/ai-provider.md`, including request logging, token normalization,
+centralized cost estimation, access controls, and the administrator analytics UI.
+
 ReachAgent is a private AI-powered outreach automation system. It discovers business leads, enriches contact and context data, generates outreach content, sends email, manages follow-ups, and exposes CRM workflows through a secured dashboard.
 
-This document is the technical reference for the current architecture as of May 2026.
+This document is the technical reference for the current architecture as of July 2026.
 
 ## System Overview
 
@@ -83,15 +87,19 @@ Key controls:
 
 Responsibility: enrich new leads with website context, email addresses, social handles, descriptions, and services.
 
-Researcher uses Claude Haiku for structured extraction and short reasoning loops over fetched web pages. It updates lead records to `status = 'researched'` when enrichment is complete or when the lead has enough information for downstream processing.
+Researcher uses the configured AI provider for structured extraction and short reasoning loops over fetched web pages. It updates lead records to `status = 'researched'` when enrichment is complete or when the lead has enough information for downstream processing.
 
 ### Writer
 
 Responsibility: generate outreach content for researched leads.
 
-Writer reads leads with `status = 'researched'`, generates email or DM content using Claude Sonnet, inserts pending email or DM queue records, and advances lead status.
+Writer reads leads with `status = 'researched'`, generates email or DM content using the configured AI provider, inserts pending email or DM queue records, and advances lead status.
 
 Writer currently logs category status diagnostics so operators can distinguish between newly discovered active-category leads and older researched leads that were already in the database before a category was disabled.
+
+### AI Provider Selection
+
+Anthropic, OpenAI, and Gemini are registered runtime providers. Each AI workflow resolves its provider and model from `ai_workflow_configurations`; switching among the three providers requires only a database assignment update and cache invalidation or expiry. Gemini supports `gemini-2.5-pro` and `gemini-2.5-flash` through the official Google Gen AI SDK.
 
 ### Sender
 
@@ -155,6 +163,8 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GEMINI_API_KEY=
 RESEND_API_KEY=
 RESEND_WEBHOOK_SECRET=
 GOOGLE_MAPS_API_KEY=

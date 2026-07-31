@@ -3,9 +3,9 @@
  *
  * Generates the COMPLETE five-email sequence for one category using the real
  * production code paths:
- *   1. writeOutreachEmail        (src/lib/claude.ts)
+ *   1. writeOutreachEmail        (src/ai/workflows.ts)
  *   2/3/4. generateFollowUpEmail (src/lib/followup-generation.ts) with real thread history
- *   5. writeReactivationEmail    (src/lib/claude.ts)
+ *   5. writeReactivationEmail    (src/ai/workflows.ts)
  *
  * Content type is resolved from the live categories row + city, exactly as the
  * sender does. Run: npx tsx scripts/tmp-sequence-preview.ts "Halal Restaurants"
@@ -18,8 +18,8 @@ import { createClient } from '@supabase/supabase-js'
 import type { FollowUpThreadEmail } from '@/lib/followup-generation'
 
 // Loaded dynamically below: static imports are hoisted above dotenv.config(),
-// and src/lib/claude.ts builds its Anthropic client at module load time.
-type ClaudeMod = typeof import('@/lib/claude')
+// and the configured AI provider is initialized at module load time.
+type AIWorkflows = typeof import('@/ai/workflows')
 type FollowUpMod = typeof import('@/lib/followup-generation')
 type ContentTypeMod = typeof import('@/lib/content-type')
 type CategoryCopyMod = typeof import('@/lib/category-copy')
@@ -197,7 +197,7 @@ function words(body: string): number {
 }
 
 async function main() {
-  const { writeOutreachEmail, writeReactivationEmail }: ClaudeMod = await import('@/lib/claude')
+  const { writeOutreachEmail, writeReactivationEmail }: AIWorkflows = await import('@/ai/workflows')
   const { generateFollowUpEmail }: FollowUpMod = await import('@/lib/followup-generation')
   const { resolveContentType }: ContentTypeMod = await import('@/lib/content-type')
   const { getReminderFamily, getCategoryReminderFocus, getContentFocus, getReactivationFocus }: CategoryCopyMod =

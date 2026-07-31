@@ -32,7 +32,7 @@ export interface GeneratedFollowUpEmail {
 }
 
 // Retained for source compatibility with callers and tests that previously
-// injected the Claude writer. generateFollowUpEmail intentionally ignores it.
+// injected an AI writer. generateFollowUpEmail intentionally ignores it.
 export type FollowUpAiGenerator = (params: {
   business_name: string
   category: string

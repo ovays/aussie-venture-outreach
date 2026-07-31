@@ -3,7 +3,7 @@ import { resolve } from 'path'
 
 dotenv.config({ path: resolve(__dirname, '../.env.local') })
 
-import Anthropic from '@anthropic-ai/sdk'
+import { aiRegistry } from '@/ai/AIRuntime'
 import { Resend } from 'resend'
 
 const TO = 'owais_ahmed12@hotmail.com'
@@ -199,7 +199,6 @@ function bodyToHtml(text: string, label: string): string {
 }
 
 async function main() {
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   const resend = new Resend(process.env.RESEND_API_KEY!)
 
   console.log(`Generating and sending ${SAMPLES.length} test emails to ${TO}...\n`)
@@ -211,16 +210,15 @@ async function main() {
 
     try {
       // Generate email body
-      const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 512,
+      const response = await aiRegistry.generate('outreach_email_generation', {
+        maxTokens: 512,
         messages: [{ role: 'user', content: buildPrompt(sample) }],
       })
 
-      const raw = response.content[0].type === 'text' ? response.content[0].text : ''
+      const raw = response.text
       const jsonMatch = raw.match(/\{[\s\S]*\}/)
       if (!jsonMatch) {
-        console.log('ERROR: No JSON in Claude response')
+        console.log('ERROR: No JSON in AI provider response')
         console.log(raw)
         continue
       }

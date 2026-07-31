@@ -3,7 +3,7 @@
 // (initial pitch + follow-ups 1/2/3).
 //
 // Why this file exists: the ban list and style rules used to be copy-pasted
-// into each prompt builder in claude.ts, so a new banned phrase had to be added
+// into each AI prompt builder, so a new banned phrase had to be added
 // in three places and drifted between them. Anything that applies to more than
 // one email in the sequence belongs here; anything specific to one stage stays
 // with that stage's prompt.
@@ -210,7 +210,7 @@ ${signOff}`
 // Replaces whatever sign-off the model produced with the real one.
 //
 // This is not belt-and-braces, it fixes an observed failure: asked to reproduce
-// the sign-off verbatim, Sonnet returned "austieventure.com". A typo in a domain
+// the sign-off verbatim, the model returned "austieventure.com". A typo in a domain
 // is worse than any wording problem in the body, because the one reader who
 // tries to go and check who emailed them lands nowhere. The sign-off is fixed
 // text, so there is no reason to let a language model retype it.
@@ -243,7 +243,7 @@ export function enforceSignOff(body: string, signOff: string): string {
 
 // ─── Per-lead variation ──────────────────────────────────────────────────────
 
-// Each lead gets its own independent Claude call, so the model has no way to
+// Each lead gets its own independent AI generation call, so the model has no way to
 // know what it wrote for the last hundred businesses. Left to itself it
 // converges hard: three consecutive previews came back with the same paragraph
 // shape, the same connector, the same ask and the same subject line. No single

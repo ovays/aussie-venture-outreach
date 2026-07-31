@@ -40,7 +40,7 @@ const FOLLOW_UP_TYPES = [
 ] as const
 
 async function main() {
-  const { writeOutreachEmail } = await import('@/lib/claude')
+  const { writeOutreachEmail } = await import('@/ai/workflows')
   const { generateFollowUpEmail } = await import('@/lib/followup-generation')
 
   for (const sample of SAMPLE_BUSINESSES) {

@@ -18,7 +18,7 @@
  *
  * This is a static source check (consistent with this repo's existing
  * convention — see scripts/test-resend-duplicate-protection.ts) since this
- * route handler calls the real Supabase/Resend/Claude clients directly with
+ * route handler calls the real Supabase, Resend, and AI provider clients directly with
  * no injection seam for a full dynamic run.
  *
  * Run: npx tsx scripts/test-bulk-send-duplicate-protection.ts

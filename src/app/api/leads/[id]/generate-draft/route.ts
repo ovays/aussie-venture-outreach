@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { writeOutreachEmail } from '@/lib/claude'
+import { writeOutreachEmail } from '@/ai/workflows'
 import { emailBodyToHtml } from '@/lib/utils'
 
 export async function POST(

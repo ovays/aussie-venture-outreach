@@ -6,7 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeEmail, extractRootDomainFromEmail, PERSONAL_EMAIL_PROVIDER_DOMAINS } from '@/lib/deduplication'
 import { resolveContentType } from '@/lib/content-type'
-import { writeOutreachEmail } from '@/lib/claude'
+import { writeOutreachEmail } from '@/ai/workflows'
 import { emailBodyToHtml } from '@/lib/utils'
 import { generateFollowUpEmail, type FollowUpThreadEmail } from '@/lib/followup-generation'
 import { logger } from '@/lib/logger'

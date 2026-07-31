@@ -257,7 +257,7 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
             value={form.pitch_template ?? ''}
             onChange={(e) => set('pitch_template', e.target.value)}
             rows={5}
-            placeholder="Base template — Claude personalises this per business"
+            placeholder="Base template — the configured AI provider personalises this per business"
             className="w-full px-3 py-2 rounded-lg text-sm text-white placeholder-gray-500 outline-none focus:ring-2 focus:ring-sky-500 resize-none"
             style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
           />

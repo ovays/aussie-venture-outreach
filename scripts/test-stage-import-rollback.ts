@@ -7,7 +7,7 @@
  * if AI generation or email creation fails partway through.
  *
  *   1. Static check: the backfill call is wrapped in try/catch, so a thrown
- *      exception (e.g. writeOutreachEmail's Anthropic call failing/throwing,
+ *      exception (e.g. writeOutreachEmail's configured AI provider call failing/throwing,
  *      not just returning an error) is caught — not just the explicit
  *      backfillResult.ok === false path.
  *   2. Static check: both the catch block and the explicit ok:false branch

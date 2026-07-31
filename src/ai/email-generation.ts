@@ -1,7 +1,6 @@
-import Anthropic, { APIError } from '@anthropic-ai/sdk'
-import { withRetry } from './retry'
-import { normalizeContentType, contentTypeBrandPrefix, type ContentType } from './content-type'
-import { getContentFocus, getReactivationFocus, getCategoryReferenceNoun } from './category-copy'
+import { aiRegistry } from './AIRuntime'
+import { normalizeContentType, type ContentType } from '../lib/content-type'
+import { getContentFocus, getReactivationFocus } from '../lib/category-copy'
 import {
   VOICE_RULES,
   BANNED_WORDING,
@@ -24,122 +23,10 @@ import {
   REACTIVATION_ASKS,
   reactivationContextFor,
   reactivationSubjectFor,
-} from './email-voice'
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-})
-
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001'
-const SONNET_MODEL = 'claude-sonnet-4-6'
-
-let claudeCallCount = 0
-let claudeCallWindowStart = Date.now()
-const CLAUDE_RATE_LIMIT = 20
-
-function is529Overload(err: unknown): boolean {
-  if (err instanceof APIError) return err.status === 529
-  const msg = err instanceof Error ? err.message : String(err)
-  return msg.includes('529') || msg.toLowerCase().includes('overloaded')
-}
-
-async function rateLimitedCall<T>(fn: () => Promise<T>): Promise<T> {
-  const now = Date.now()
-  if (now - claudeCallWindowStart > 60_000) {
-    claudeCallCount = 0
-    claudeCallWindowStart = now
-  }
-  if (claudeCallCount >= CLAUDE_RATE_LIMIT) {
-    const wait = 60_000 - (now - claudeCallWindowStart)
-    await new Promise((r) => setTimeout(r, wait))
-    claudeCallCount = 0
-    claudeCallWindowStart = Date.now()
-  }
-  claudeCallCount++
-  // 3 retries (4 total attempts) for 529 overload: delays ~1s, 2s, 4s
-  return withRetry(fn, { maxAttempts: 4, baseDelayMs: 1000, isRetryable: is529Overload })
-}
-
-// Aussie Venture is always described as one consistent lifestyle brand — never
-// redefined per category (no "activities and entertainment platform" for one
-// business and "food, travel and lifestyle platform" for another).
-export function getBrandDescription(_category: string, contentType: ContentType): string {
-  const prefix = contentTypeBrandPrefix(contentType)
-  const article = prefix === 'Sydney-based' ? 'a' : 'an'
-  return `${article} ${prefix} lifestyle platform`
-}
-
-function getCategoryPitch(category: string, contentType: ContentType): string {
-  const focus = getContentFocus(category, contentType)
-  const noun = getCategoryReferenceNoun(category)
-  return `Owais creates ${focus} for 650K+ Australians and wants to collab with this ${noun}.`
-}
-
-export async function extractWebsiteData(websiteContent: string): Promise<{
-  description: string
-  services: string
-  instagram_handle: string | null
-  facebook_url: string | null
-  other_social: string | null
-}> {
-  const response = await rateLimitedCall(() =>
-    anthropic.messages.create({
-      model: HAIKU_MODEL,
-      max_tokens: 512,
-      messages: [
-        {
-          role: 'user',
-          content: `Extract the following from this business website content:
-- Brief description (1-2 sentences)
-- Main services offered
-- Instagram handle (if mentioned, just the handle like @businessname)
-- Facebook URL (if mentioned)
-- Any other social media
-
-Website content: ${websiteContent.slice(0, 4000)}
-
-Respond in JSON only with keys: description, services, instagram_handle, facebook_url, other_social`,
-        },
-      ],
-    })
-  )
-
-  const text = response.content[0].type === 'text' ? response.content[0].text : ''
-  try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
-      return {
-        // Claude sometimes returns "services" as a list even though the prompt
-        // asks for prose — coerce here since this is stored in a TEXT column
-        // and interpolated directly into prompt strings by every caller.
-        description: coerceToText(parsed.description),
-        services: coerceToText(parsed.services),
-        instagram_handle: parsed.instagram_handle || null,
-        facebook_url: parsed.facebook_url || null,
-        other_social: parsed.other_social || null,
-      }
-    }
-  } catch {
-    // fallback
-  }
-  return {
-    description: '',
-    services: '',
-    instagram_handle: null,
-    facebook_url: null,
-    other_social: null,
-  }
-}
-
-function coerceToText(value: unknown): string {
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) return value.join(', ')
-  return ''
-}
+} from '../lib/email-voice'
 
 // Pure prompt builder — exported so preview/test scripts can generate the exact
-// same prompt Claude receives in production without duplicating the copy.
+// same prompt the configured AI provider receives without duplicating the copy.
 //
 // Email 1 of the sequence. Its only job is to START A CONVERSATION: say who you
 // are, say why you are emailing this business specifically, ask the question.
@@ -239,18 +126,15 @@ export async function writeOutreachEmail(params: {
   content_type: string
 }): Promise<{ subject: string; body: string }> {
   const contentType = normalizeContentType(params.content_type)
-  const response = await rateLimitedCall(() =>
-    anthropic.messages.create({
-      model: SONNET_MODEL,
-      max_tokens: 400,
+  const response = await aiRegistry.generate('outreach_email_generation', {
+      maxTokens: 400,
       messages: [{ role: 'user', content: buildOutreachEmailPrompt(params, contentType) }],
     })
-  )
 
   // The subject and the sign-off are decided by us, not by the model — see
-  // outreachSubjectFor and enforceSignOff. Only the body is Claude's work.
+  // outreachSubjectFor and enforceSignOff. Only the body is AI-generated.
   const subject = outreachSubjectFor(params.business_name)
-  const text = response.content[0].type === 'text' ? response.content[0].text : ''
+  const text = response.text
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
@@ -278,7 +162,7 @@ export interface FollowUpThreadEmail {
   body: string
 }
 
-// Pure prompt builder — exported so tests can verify what Claude actually
+// Pure prompt builder — exported so tests can verify what the AI provider
 // receives (e.g. that prior thread emails are present) without a live API call.
 //
 // The three follow-ups are NOT the pitch reworded three times. Each is a
@@ -443,177 +327,6 @@ ${signOffRule(FOLLOW_UP_SIGN_OFF)}
 Respond in JSON: { "body": "..." }`
 }
 
-// ─── Haiku email extractor ───────────────────────────────────────────────────
-
-export async function extractEmailWithHaiku(content: string, businessName: string): Promise<string | null> {
-  const response = await rateLimitedCall(() =>
-    anthropic.messages.create({
-      model: HAIKU_MODEL,
-      max_tokens: 64,
-      messages: [
-        {
-          role: 'user',
-          content: `Find a contact email address for "${businessName}" in this text. Return ONLY the email address, nothing else. If no email is found, return "none".\n\n${content.slice(0, 3000)}`,
-        },
-      ],
-    })
-  )
-
-  const text = response.content[0].type === 'text' ? response.content[0].text.trim() : ''
-  if (text && text.toLowerCase() !== 'none' && text.includes('@') && !text.includes(' ') && text.length < 100) {
-    return text
-  }
-  return null
-}
-
-// ─── Agentic email search (legacy) ───────────────────────────────────────────
-
-interface AgentDecision {
-  action: 'found' | 'fetch_url' | 'search_google' | 'not_found'
-  email?: string
-  url?: string
-  search_query?: string
-}
-
-async function fetchPageText(url: string): Promise<string> {
-  try {
-    const normalised = url.startsWith('http') ? url : `https://${url}`
-    const res = await fetch(normalised, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)' },
-      signal: AbortSignal.timeout(10_000),
-    })
-    const html = await res.text()
-    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 4000)
-  } catch {
-    return ''
-  }
-}
-
-async function searchWeb(query: string): Promise<string> {
-  try {
-    const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)',
-        Accept: 'text/html',
-      },
-      signal: AbortSignal.timeout(10_000),
-    })
-    const html = await res.text()
-    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 4000)
-  } catch {
-    return ''
-  }
-}
-
-function parseDecision(text: string): AgentDecision {
-  try {
-    const m = text.match(/\{[\s\S]*?\}/)
-    if (m) return JSON.parse(m[0]) as AgentDecision
-  } catch {}
-  return { action: 'not_found' }
-}
-
-export async function agenticEmailSearch(params: {
-  business_name: string
-  website_url: string
-  category: string
-  homepage_content: string
-}): Promise<{ email: string | null; method: string; rounds: number }> {
-  const MAX_ROUNDS = 3
-
-  const SYSTEM = `You are a research agent that finds contact email addresses for businesses. Respond in valid JSON only — no other text.`
-
-  const firstPrompt = `Find the contact email for this business.
-
-Business: ${params.business_name}
-Website: ${params.website_url}
-Category: ${params.category}
-
-Homepage content:
-${params.homepage_content}
-
-Choose ONE action and respond with JSON only:
-- Found an email → {"action":"found","email":"email@domain.com"}
-- Need to fetch a subpage → {"action":"fetch_url","url":"/contact"}
-- Need an online search → {"action":"search_google","search_query":"${params.business_name} contact email"}
-- Cannot find → {"action":"not_found"}`
-
-  const messages: { role: 'user' | 'assistant'; content: string }[] = [
-    { role: 'user', content: firstPrompt },
-  ]
-
-  let method = 'not_found'
-
-  for (let round = 1; round <= MAX_ROUNDS; round++) {
-    const response = await rateLimitedCall(() =>
-      anthropic.messages.create({
-        model: SONNET_MODEL,
-        max_tokens: 256,
-        system: SYSTEM,
-        messages,
-      })
-    )
-
-    const raw = response.content[0].type === 'text' ? response.content[0].text : '{}'
-    const decision = parseDecision(raw)
-
-    console.log(`[email-agent] round=${round} action=${decision.action} email=${decision.email ?? '-'}`)
-
-    if (decision.action === 'found' && decision.email) {
-      if (round === 1) method = 'homepage'
-      else if (method !== 'google_search') method = 'subpage'
-      return { email: decision.email, method, rounds: round }
-    }
-
-    if (decision.action === 'not_found') {
-      break
-    }
-
-    // Execute the suggested action
-    let fetchedContent = ''
-
-    if (decision.action === 'fetch_url' && decision.url) {
-      let target = decision.url
-      if (!target.startsWith('http')) {
-        try {
-          const base = new URL(
-            params.website_url.startsWith('http') ? params.website_url : `https://${params.website_url}`
-          )
-          target = base.origin + (decision.url.startsWith('/') ? decision.url : `/${decision.url}`)
-        } catch {
-          target = params.website_url + decision.url
-        }
-      }
-      fetchedContent = await fetchPageText(target)
-      method = 'subpage'
-    } else if (decision.action === 'search_google' && decision.search_query) {
-      fetchedContent = await searchWeb(decision.search_query)
-      method = 'google_search'
-    }
-
-    messages.push({ role: 'assistant', content: raw })
-
-    if (!fetchedContent) {
-      messages.push({
-        role: 'user',
-        content: 'That returned no content. Try a different approach or return {"action":"not_found"}.',
-      })
-      continue
-    }
-
-    messages.push({
-      role: 'user',
-      content: `Content from ${decision.action === 'search_google' ? 'search results' : 'that page'}:
-
-${fetchedContent}
-
-Now decide. JSON only: {"action":"found","email":"..."} or {"action":"fetch_url","url":"..."} or {"action":"search_google","search_query":"..."} or {"action":"not_found"}`,
-    })
-  }
-
-  return { email: null, method: 'not_found', rounds: MAX_ROUNDS }
-}
-
 // ─── Reactivation email writer ───────────────────────────────────────────────
 
 // Email 5 of the sequence, 90+ days after the thread went quiet.
@@ -714,55 +427,4 @@ export async function writeReactivationEmail(params: {
   }
 }
 
-// ─── DM writer ───────────────────────────────────────────────────────────────
 
-export function buildOutreachDMPrompt(
-  params: { business_name: string; suburb: string; city: string; category: string },
-  brandDesc: string,
-  pitch: string
-): string {
-  return `You're Owais. You run Aussie Venture, ${brandDesc} with 650K+ followers across Facebook, Instagram and TikTok. Write a short Instagram DM to this business.
-
-Business: ${params.business_name}, ${params.suburb} ${params.city}
-Category: ${params.category}
-
-Pitch angle: ${pitch}
-
-Rules:
-- Max 2-3 sentences
-- Sound like a real person, not a platform
-- No em dashes, no bullet points, no corporate language
-- No "I wanted to reach out", no "I came across your page"
-- You may mention 650K+ followers once if it adds credibility
-- NEVER mention free, no cost, no charge, or anything being free
-- NEVER say "paid collab" - use "sponsored feature" or "collab" instead
-- Never state a price
-- Never say "I'm based in ${params.city}" or otherwise claim you live in, are based in, or are physically located in the business's city — Aussie Venture's audience is national, don't invent a location for yourself
-- Never invent familiarity with the business — you only know its name, category and suburb. No claims implying you already know their page, food, or space
-- Casual and direct
-- End with "Would you be keen?" or "Keen to work together?"
-
-Respond with just the DM text, nothing else.`
-}
-
-export async function writeOutreachDM(params: {
-  business_name: string
-  suburb: string
-  city: string
-  category: string
-  content_type: string
-}): Promise<string> {
-  const contentType = normalizeContentType(params.content_type)
-  const brandDesc = getBrandDescription(params.category, contentType)
-  const pitch = getCategoryPitch(params.category, contentType)
-
-  const response = await rateLimitedCall(() =>
-    anthropic.messages.create({
-      model: SONNET_MODEL,
-      max_tokens: 200,
-      messages: [{ role: 'user', content: buildOutreachDMPrompt(params, brandDesc, pitch) }],
-    })
-  )
-
-  return response.content[0].type === 'text' ? response.content[0].text : ''
-}

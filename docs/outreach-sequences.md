@@ -2,7 +2,7 @@
 
 Reference copy for the full sequence. These are the standard the generated
 emails are held to, not literal templates — the live copy comes from the prompts
-in `src/lib/claude.ts`, the voice rules in `src/lib/email-voice.ts` and the
+in `src/ai/workflows.ts`, the voice rules in `src/lib/email-voice.ts` and the
 category wording in `src/lib/category-copy.ts`.
 
 ## The design
@@ -1680,7 +1680,7 @@ minimum" added. Optimising for readability and reply rate means the shortest ema
 that does the job wins, every time.
 
 If the longer versions are ever wanted, the bands are one line each in
-`stageGuidance` in `src/lib/claude.ts` and one line in
+`stageGuidance` in `src/ai/workflows.ts` and one line in
 `buildReactivationEmailPrompt`. Nothing else needs to change.
 
 **The reminder repeats down the thread.** A reader who *did* see email one gets

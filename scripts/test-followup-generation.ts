@@ -1,7 +1,7 @@
 /**
  * Pure-logic coverage for template-only FU1/FU2/FU3 generation.
  *
- * No DB, network, or Claude calls. The legacy injectable generator parameter is
+ * No DB, network, or AI provider calls. The legacy injectable generator parameter is
  * still passed to prove the public interface remains compatible, but invoking it
  * is a test failure.
  *
@@ -74,7 +74,7 @@ async function testTemplatesReturnedDirectly(): Promise<void> {
   let aiCalls = 0
   const forbiddenGenerator: FollowUpAiGenerator = async () => {
     aiCalls++
-    throw new Error('Claude generator must never be called')
+    throw new Error('AI generator must never be called')
   }
 
   for (const type of ['follow_up_1', 'follow_up_2', 'follow_up_3'] as FollowUpType[]) {
@@ -102,20 +102,15 @@ async function testTemplatesReturnedDirectly(): Promise<void> {
   assert(aiCalls === 0, 'the legacy AI generator parameter is never invoked')
 }
 
-async function testNoFollowUpClaudeWriter(): Promise<void> {
-  console.log('\n[3] Claude follow-up writer is removed')
+async function testNoFollowUpAiWriter(): Promise<void> {
+  console.log('\n[3] AI follow-up writer is removed')
 
-  const claudeSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/lib/claude.ts'), 'utf8')
+  const aiSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/ai/email-generation.ts'), 'utf8')
   const generationSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/lib/followup-generation.ts'), 'utf8')
-  const reactivationWriter = claudeSrc.slice(
-    claudeSrc.indexOf('export async function writeReactivationEmail('),
-    claudeSrc.indexOf('export function buildOutreachDMPrompt(')
-  )
 
-  assert(!/export async function writeFollowUpEmail\(/.test(claudeSrc), 'writeFollowUpEmail is no longer exported')
-  assert(!/anthropic\.messages\.create/.test(generationSrc), 'generateFollowUpEmail contains no Claude API call')
+  assert(!/export async function writeFollowUpEmail\(/.test(aiSrc), 'writeFollowUpEmail is no longer exported')
+  assert(!/aiRegistry\.generate\(/.test(generationSrc), 'generateFollowUpEmail contains no AI provider call')
   assert(/buildFollowUpEmail\(/.test(generationSrc), 'generateFollowUpEmail calls buildFollowUpEmail directly')
-  assert(!/anthropic\.messages\.create/.test(reactivationWriter), 'writeReactivationEmail contains no Claude API call')
 }
 
 async function testNeverSentTwice(): Promise<void> {
@@ -154,7 +149,7 @@ async function main(): Promise<void> {
 
   await testSharedGeneratorCallers()
   await testTemplatesReturnedDirectly()
-  await testNoFollowUpClaudeWriter()
+  await testNoFollowUpAiWriter()
   await testNeverSentTwice()
 
   console.log('\n' + '═'.repeat(62))

@@ -11,12 +11,7 @@
  * Run: npm run test:reactivation-email
  */
 
-import * as dotenv from 'dotenv'
-import * as path from 'path'
-import 'dotenv/config'
-
-// Load .env.local before any module that reads process.env at import time
-dotenv.config({ path: path.resolve(process.cwd(), '.env.local') })
+import { writeReactivationEmail } from '../src/ai/workflows'
 
 const TEST_BUSINESSES = [
   {
@@ -60,19 +55,10 @@ const SEP = '═'.repeat(62)
 const DIV = '─'.repeat(62)
 
 async function main() {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('\n✗ ANTHROPIC_API_KEY not set — check .env.local')
-    process.exit(1)
-  }
-
-  // Dynamic import ensures claude.ts (and its `new Anthropic()` call) is
-  // evaluated only after dotenv has populated process.env above.
-  const { writeReactivationEmail } = await import('../src/lib/claude')
-
   console.log(SEP)
   console.log('  TEST-REACTIVATION-EMAIL  —  DRY RUN')
   console.log('  No DB reads/writes. No emails sent.')
-  console.log(`  Generating ${TEST_BUSINESSES.length} sample emails via Claude`)
+  console.log(`  Generating ${TEST_BUSINESSES.length} deterministic sample emails`)
   console.log(SEP)
   console.log()
 

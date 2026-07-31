@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { writeOutreachEmail } from '@/lib/claude'
+import { writeOutreachEmail } from '@/ai/workflows'
 import { sendEmail } from '@/lib/resend'
 import { emailBodyToHtml } from '@/lib/utils'
 import { handleEmailSyncFailure } from '@/lib/email-status'

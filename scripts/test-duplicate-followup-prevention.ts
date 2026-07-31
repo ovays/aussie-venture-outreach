@@ -5,7 +5,7 @@
  * follow-ups (High audit finding):
  *   1. sendFollowUp's pre-send idempotency re-check skips a lead+type that
  *      was already delivered — real call against agents/followup.ts with a
- *      fake Supabase client (Claude/Resend are stubbed and MUST NOT be
+ *      fake Supabase client (AI generation and Resend are stubbed and MUST NOT be
  *      called on the skip path, since the whole point is to avoid work when
  *      a concurrent run already handled this lead)
  *   2. If the idempotency check still loses the race (TOCTOU: another run
@@ -161,7 +161,7 @@ async function main() {
     const result = await sendFollowUp(db, makeCandidate('lead-2'), 'follow_up_1', countingAi as never, stubSendEmail as never)
     assert(result === false, 'sendFollowUp returns false (skip) when already delivered')
     assert(sendCalls === 0, 'Resend is never called for an already-delivered lead+type (no duplicate email)')
-    assert(aiCalls === 0, 'Claude is never called either — the skip happens before any generation work')
+    assert(aiCalls === 0, 'AI generation is never called either — the skip happens before any generation work')
   }
 
   // ── 3. Idempotency skip also covers email_sync_failed (delivered, DB-lagging) ──

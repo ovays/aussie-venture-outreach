@@ -2,7 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
 import { emailBodyToHtml } from '@/lib/utils'
 import { logger } from '@/lib/logger'
-import { writeReactivationEmail } from '@/lib/claude'
+import { writeReactivationEmail } from '@/ai/workflows'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
 import { getAnalyticsDayRange } from '@/lib/analytics'
 

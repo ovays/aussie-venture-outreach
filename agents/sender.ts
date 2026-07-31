@@ -327,11 +327,11 @@ const result = await sendEmail({
     metadata: { sent, failed, global_daily_send_limit: globalDailyLimit, daily_initial_outreach_limit: dailyLimit, initial_pitch_sent_before_run: sentToday ?? 0 },
   })
 
-  // Haiku writing (~$0.001/email) + Resend API (free tier / ~$0.0001/email)
+  // Estimated AI generation and Resend API cost per email.
   const estimatedCost = (sent * 0.0011).toFixed(4)
   logger.info('sender', '[OUTREACH_SENT]', { new_outreach_sent: sent })
   logger.info('sender', '[PIPELINE_STAGE] Sender complete', { sent, failed })
-  logger.info('sender', `Total pipeline cost estimate: $${estimatedCost} (Haiku writing + Resend; see finder log for Outscraper cost)`)
+  logger.info('sender', `Total pipeline cost estimate: $${estimatedCost} (AI generation + Resend; see finder log for Outscraper cost)`)
   return { sent, failed }
 
   } finally {

@@ -1,5 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { extractWebsiteData, extractEmailWithHaiku } from '@/lib/claude'
+import { extractWebsiteData, extractEmailWithHaiku } from '@/ai/workflows'
 
 const EMAIL_REGEX = /[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/gi
 
@@ -72,7 +72,7 @@ async function enrichLead(lead: {
   const homepageText = await fetchText(lead.website)
   let email = firstValidEmail(homepageText)
 
-  // Extract social + description from homepage (Haiku call — cheap)
+  // Extract social details and a description from the homepage via the configured AI provider.
   let instagramHandle: string | null = null
   let facebookUrl: string | null = null
   let description = ''
@@ -102,7 +102,7 @@ async function enrichLead(lead: {
       return { email, emailMethod: 'contact_regex', instagramHandle, facebookUrl, description, services }
     }
 
-    // 4. Claude Haiku extraction on combined content
+    // 4. AI extraction on combined content
     const combined = `${homepageText}\n${contactText}`.slice(0, 5000)
     const haikuEmail = await extractEmailWithHaiku(combined, lead.business_name)
     if (haikuEmail) {

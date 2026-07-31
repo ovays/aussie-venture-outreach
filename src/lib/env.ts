@@ -5,6 +5,8 @@ const schema = z.object({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   ANTHROPIC_API_KEY: z.string().startsWith('sk-ant-'),
+  OPENAI_API_KEY: z.string().startsWith('sk-').optional(),
+  GEMINI_API_KEY: z.string().min(1).optional(),
   RESEND_API_KEY: z.string().startsWith('re_'),
   OUTSCRAPER_API_KEY: z.string().min(1),
   TRIGGER_SECRET_KEY: z.string().min(1),

@@ -3,8 +3,8 @@ import { resolve } from 'path'
 
 dotenv.config({ path: resolve(__dirname, '../.env.local') })
 
-import Anthropic from '@anthropic-ai/sdk'
-import { buildOutreachEmailPrompt } from '@/lib/claude'
+import { aiRegistry } from '@/ai/AIRuntime'
+import { buildOutreachEmailPrompt } from '@/ai/workflows'
 import { resolveContentType } from '@/lib/content-type'
 
 const SAMPLES = [
@@ -93,8 +93,6 @@ const BANNED_TELLS: RegExp[] = [
 ]
 
 async function main() {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
-
   console.log(`Generating ${SAMPLES.length} sample emails...\n`)
   console.log('='.repeat(70))
 
@@ -103,13 +101,12 @@ async function main() {
     process.stdout.write('-'.repeat(70) + '\n')
 
     try {
-      const response = await client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 400,
+      const response = await aiRegistry.generate('outreach_email_generation', {
+        maxTokens: 400,
         messages: [{ role: 'user', content: buildPrompt(sample) }],
       })
 
-      const raw = response.content[0].type === 'text' ? response.content[0].text : ''
+      const raw = response.text
       const jsonMatch = raw.match(/\{[\s\S]*\}/)
       if (!jsonMatch) { console.log('ERROR: No JSON\n' + raw); continue }
 

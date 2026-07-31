@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { writeOutreachEmail } from '@/lib/claude'
+import { writeOutreachEmail } from '@/ai/workflows'
 import { emailBodyToHtml } from '@/lib/utils'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resolveContentType } from '@/lib/content-type'

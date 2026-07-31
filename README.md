@@ -3,13 +3,13 @@
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
 ![Supabase](https://img.shields.io/badge/Supabase-Postgres-green?logo=supabase)
-![Claude AI](https://img.shields.io/badge/Claude-Sonnet%204.6%20%2B%20Haiku%204.5-orange?logo=anthropic)
+![Configurable AI](https://img.shields.io/badge/AI-configurable-blue)
 ![Trigger.dev](https://img.shields.io/badge/Trigger.dev-Scheduled%20Jobs-purple)
 ![Resend](https://img.shields.io/badge/Resend-Email%20API-blue)
 
 ReachAgent is a private, AI-powered outreach automation system for discovering leads, enriching contact data, generating personalized messages, sending outbound email, and tracking follow-up activity through a CRM dashboard.
 
-The application is built with Next.js 16, TypeScript, Supabase, Trigger.dev, Anthropic Claude, Resend, Google Maps API, and Outscraper. It is designed as internal operations software with administrator-created accounts, role-based access control, configurable quotas, and database-driven category and location controls.
+The application is built with Next.js 16, TypeScript, Supabase, Trigger.dev, database-configured Anthropic, OpenAI, and Gemini providers, Resend, Google Maps API, and Outscraper. It is designed as internal operations software with administrator-created accounts, role-based access control, configurable quotas, and database-driven category and location controls.
 
 ## Core Features
 
@@ -75,7 +75,7 @@ Suburbs are loaded from `city_suburbs` and ordered by `last_used_at ASC NULLS FI
 | Framework | Next.js 16 App Router, React 19, TypeScript |
 | Database/Auth | Supabase Postgres, Supabase Auth, RLS |
 | Scheduling | Trigger.dev |
-| AI | Anthropic Claude Haiku for extraction, Claude Sonnet for generation |
+| AI | Database-configured Anthropic, OpenAI, and Gemini models by workflow |
 | Email | Resend |
 | Lead Discovery | Google Maps API, Outscraper |
 | UI | Tailwind CSS, Recharts, lucide-react |
@@ -90,6 +90,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 
 ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GEMINI_API_KEY=
 
 RESEND_API_KEY=
 RESEND_WEBHOOK_SECRET=

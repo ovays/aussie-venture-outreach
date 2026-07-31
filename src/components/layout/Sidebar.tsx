@@ -11,8 +11,10 @@ import {
   Mail,
   DollarSign,
   Settings,
+  Bot,
   Shield,
   Activity,
+  BarChart3,
   X,
 } from 'lucide-react'
 import { useSidebar } from './SidebarContext'
@@ -27,6 +29,8 @@ const navItems = [
   { href: '/dashboard/lifecycle', label: 'Lifecycle', icon: Activity,        adminOnly: false },
   { href: '/dashboard/deals',     label: 'Deals',     icon: DollarSign,      adminOnly: false },
   { href: '/dashboard/settings',  label: 'Settings',  icon: Settings,        adminOnly: false },
+  { href: '/dashboard/settings/ai', label: 'AI Settings', icon: Bot,          adminOnly: false },
+  { href: '/dashboard/settings/ai/analytics', label: 'AI Analytics', icon: BarChart3, adminOnly: true },
   { href: '/dashboard/admin',     label: 'Admin',     icon: Shield,          adminOnly: true  },
 ]
 
@@ -83,7 +87,12 @@ export default function Sidebar({ role }: { role: UserRole }) {
         {/* Nav */}
         <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
           {visibleNavItems.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
+            const active = pathname === href || (
+              href !== '/dashboard' &&
+              href !== '/dashboard/settings' &&
+              href !== '/dashboard/settings/ai' &&
+              pathname.startsWith(`${href}/`)
+            )
             return (
               <Link
                 key={href}

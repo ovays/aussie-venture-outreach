@@ -120,7 +120,7 @@ async function testGenerateFollowUpSubject() {
 
   // A throwing legacy stub is also ignored, so generation remains deterministic.
   const failingStub = async (): Promise<{ subject: string; body: string }> => {
-    throw new Error('simulated Claude failure')
+    throw new Error('simulated AI generation failure')
   }
   const template = await generateFollowUpEmail('follow_up_1', context, 'Original Subject', [], failingStub as never)
   assert(template.subject === 'Re: Original Subject', 'template path still keeps "Re: " + original subject', template.subject)
