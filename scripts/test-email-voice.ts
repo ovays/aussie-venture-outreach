@@ -22,12 +22,9 @@ import {
   pickVariant,
   INITIAL_SIGN_OFF,
   FOLLOW_UP_SIGN_OFF,
-  INITIAL_ASKS,
-  REASON_SHAPES,
   VOICE_RULES,
   NO_COMMERCIALS_RULE,
   LENGTH_RULE,
-  PLAIN_DETAIL_RULE,
   FU3_CLOSING_LINES,
   brandReminderOptions,
   reminderFor,
@@ -41,6 +38,7 @@ import {
   buildOutreachEmailPrompt,
   buildFollowUpEmailPrompt,
   buildReactivationEmailPrompt,
+  OUTREACH_EMAIL_SYSTEM_PROMPT,
 } from '@/ai/workflows'
 import type { FollowUpType } from '@/lib/followup-eligibility'
 
@@ -108,8 +106,8 @@ function test1_enforceSignOff(): void {
     'a mid-sentence "Cheers for..." is not treated as the sign-off line', JSON.stringify(inline))
 }
 
-function test2_variantsAreStableAndSpread(): void {
-  console.log('\n[2] Per-lead variants are deterministic but spread across the pool')
+function test2_subjectVariantsAreStableAndSpread(): void {
+  console.log('\n[2] Per-lead subject variants are deterministic but spread across the pool')
 
   const names = [
     'Escape Hunt', 'Zero Latency', 'Sydney Motorsport Karting', 'Holey Moley',
@@ -122,22 +120,12 @@ function test2_variantsAreStableAndSpread(): void {
     names.every((n) => outreachSubjectFor(n) === outreachSubjectFor(n)),
     'outreachSubjectFor is stable for a given business name'
   )
-  assert(
-    names.every((n) => pickVariant(INITIAL_ASKS, n, 'ask') === pickVariant(INITIAL_ASKS, n, 'ask')),
-    'pickVariant is stable for a given seed and salt'
-  )
+  assert(names.every((n) => pickVariant(['a', 'b', 'c'], n, 'test') === pickVariant(['a', 'b', 'c'], n, 'test')),
+    'pickVariant is stable for a given seed and salt')
 
   // Spread: the whole point is that the outbox isn't one template.
   const subjects = new Set(names.map(outreachSubjectFor))
-  const asks = new Set(names.map((n) => pickVariant(INITIAL_ASKS, n, 'ask')))
-  const shapes = new Set(names.map((n) => pickVariant(REASON_SHAPES, n, 'shape')))
   assert(subjects.size >= 4, `12 businesses produce at least 4 distinct subjects (got ${subjects.size})`)
-  assert(asks.size >= 5, `12 businesses produce at least 5 distinct asks (got ${asks.size})`)
-  assert(shapes.size >= 3, `12 businesses produce at least 3 distinct reason shapes (got ${shapes.size})`)
-
-  // Different salts must not collapse onto the same index for a given lead.
-  const salted = new Set(['intro', 'shape', 'connector', 'ask'].map((s) => pickVariant(INITIAL_ASKS, 'Escape Hunt', s)))
-  assert(salted.size > 1, 'different salts pick different options for the same business', `${salted.size}`)
 
   assert(
     !outreachSubjectFor('Test Biz').includes('!'),
@@ -278,6 +266,7 @@ function test4_outreachPromptContract(): void {
     services: 'Bookings for groups of 2-8',
   }
   const prompt = buildOutreachEmailPrompt(params, 'visit')
+  const fullInitialInstructions = `${OUTREACH_EMAIL_SYSTEM_PROMPT}\n${prompt}`
 
   assert(prompt.includes(params.description), 'the business description reaches the prompt')
   assert(prompt.includes(params.services), 'the business services reach the prompt')
@@ -285,33 +274,47 @@ function test4_outreachPromptContract(): void {
   assert(prompt.includes(`"${outreachSubjectFor(params.business_name)}"`),
     'the prompt pins the exact subject line chosen for this lead')
   assert(prompt.includes(INITIAL_SIGN_OFF), 'the canonical initial sign-off is in the prompt')
-  assert(prompt.includes('75 words maximum'), 'the word ceiling is stated')
-  assert(/There is no minimum/.test(prompt), 'the prompt states there is no word floor to pad towards')
-  assert(prompt.includes(LENGTH_RULE), 'the prompt bans padding to a word count')
+  assert(fullInitialInstructions.includes('70 to 120 words'), 'the requested 70-120 word range is stated')
+  assert(/silently recount before returning/i.test(prompt), 'the prompt enforces the word-count check')
+  assert(prompt.includes(`Start with exactly "Hey ${params.business_name},"`), 'the personalised greeting is fixed')
   assert(/Sydney/.test(prompt), 'visit leads get the Sydney framing')
 
-  // The one sentence naming a scraped fact is where the writing most often stops
-  // sounding human ("you do charcoal grill with a catering side").
-  assert(prompt.includes(PLAIN_DETAIL_RULE), 'the prompt rules the detail sentence must read as speech')
-  assert(
-    /charcoal grill with a catering side/.test(prompt),
-    'the prompt names the stitched-together phrasing as a bad example'
-  )
-  assert(
-    /Never join two facts with/.test(prompt),
-    'the prompt forbids crushing two scraped facts into one clause'
-  )
+  assert(/at most one supplied Description or Services detail/.test(prompt), 'research is limited to one meaningful detail')
+  assert(/Paraphrase it/.test(prompt), 'scraped facts must be rewritten naturally')
+  assert(/do not default to biography first/i.test(OUTREACH_EMAIL_SYSTEM_PROMPT),
+    'the model is explicitly told to vary its opening')
+  assert(!/WRITE FOUR PARTS, IN THIS ORDER/.test(prompt),
+    'the old fixed four-part template has been removed')
+  assert(/ASSIGNMENT FOR THIS RECIPIENT/.test(prompt),
+    'each isolated generation receives a per-business structural direction')
+  assert(/silently confirm/.test(OUTREACH_EMAIL_SYSTEM_PROMPT), 'the prompt includes a self-review pass')
+  assert(/Return one final JSON object and nothing else/.test(OUTREACH_EMAIL_SYSTEM_PROMPT),
+    'the prompt forbids visible drafts that break JSON parsing')
+  assert(/NON-NEGOTIABLE PRIORITIES/.test(OUTREACH_EMAIL_SYSTEM_PROMPT),
+    'voice and output rules use the provider system channel')
+  assert(/Never show analysis, a discarded draft or a revision/.test(OUTREACH_EMAIL_SYSTEM_PROMPT),
+    'the system prompt prevents visible self-review from exhausting the output budget')
 
-  // The remote framing must never claim we're local to them.
-  const remote = buildOutreachEmailPrompt({ ...params, city: 'Perth', suburb: 'Fremantle' }, 'remote')
+  for (const phrase of [
+    'you came up', 'yours came up', "thought I'd ask", "thought I'd reach out",
+    "which is why I'm emailing", 'at the moment', "I haven't covered much",
+    'asking a few places directly', "we're covering", "I'm covering", "we're doing more",
+  ]) {
+    assert(fullInitialInstructions.includes(phrase), `the initial prompt strongly avoids "${phrase}"`)
+  }
+
+  // The remote framing can state the true Sydney base, but must never move Owais
+  // to the recipient's city or imply he is local to them.
+  const remote = `${OUTREACH_EMAIL_SYSTEM_PROMPT}\n${buildOutreachEmailPrompt({ ...params, city: 'Perth', suburb: 'Fremantle' }, 'remote')}`
   assert(
-    !/based in Sydney/.test(remote.split('HARD LIMITS')[0]),
-    'remote leads are not told we are based in Sydney'
+    /never relocate him to the recipient's city/.test(remote) &&
+      !/Owais is based in (Perth|Fremantle)/.test(remote),
+    'remote leads cannot be told Owais is local to them'
   )
 
   // The prompt must forbid the things that suppress replies.
-  for (const rule of ['DO NOT SELL', 'BANNED WORDING', 'perfect', 'em dash']) {
-    assert(prompt.toLowerCase().includes(rule.toLowerCase()), `prompt covers "${rule}"`)
+  for (const rule of ['Do not sell', 'is a fit', 'em dash', 'agency', 'AI']) {
+    assert(fullInitialInstructions.toLowerCase().includes(rule.toLowerCase()), `prompt covers "${rule}"`)
   }
 
   // A lead with no scraped facts must be told not to invent one.
@@ -320,8 +323,8 @@ function test4_outreachPromptContract(): void {
     'remote'
   )
   assert(
-    /Do not invent a detail/.test(noFacts),
-    'with no Description/Services facts, the prompt forbids inventing one'
+    /Do not manufacture personalisation/.test(noFacts),
+    'with no Description/Services facts, the prompt forbids fake personalisation'
   )
 }
 
@@ -569,7 +572,7 @@ function main(): void {
   console.log('═'.repeat(62))
 
   test1_enforceSignOff()
-  test2_variantsAreStableAndSpread()
+  test2_subjectVariantsAreStableAndSpread()
   test3_followUpTemplates()
   test4_outreachPromptContract()
   test5_categoryReminder()

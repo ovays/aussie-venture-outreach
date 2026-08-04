@@ -1,6 +1,8 @@
-// Single source of truth for the Aussie Venture outreach VOICE — the style
-// rules, banned wording and sign-offs shared by every email in the sequence
-// (initial pitch + follow-ups 1/2/3).
+// Shared Aussie Venture sequence copy: follow-up/reactivation voice rules plus
+// the deterministic subjects, sign-offs and brand facts used by every stage.
+// The initial AI writer has its own system-level voice contract in
+// ai/email-generation.ts because its personalisation and variation job differs
+// from the threaded stages.
 //
 // Why this file exists: the ban list and style rules used to be copy-pasted
 // into each AI prompt builder, so a new banned phrase had to be added
@@ -101,27 +103,6 @@ export const LENGTH_RULE = `LENGTH — the band is a ceiling with a rough floor,
 - Going under the band is fine. Going under it because the email says everything it needs to in fewer words is good.
 - Never add a sentence to reach a word count. If you're short, you're finished.
 - Padding shows up as a line about why replying helps them, or a line describing their business back to them. Both are banned. Cut instead of filling.`
-
-// The initial email names one scraped fact about the business, and that single
-// sentence is where the writing most often stops sounding human. The model is
-// handed a Description and a Services list and tries to honour both at once, so
-// it compresses them: "you do charcoal grill with a catering side". Every word is
-// accurate and no person has ever said it out loud. The reader's first impression
-// of the sender is a sentence that reads like a directory entry.
-//
-// The fix is not more facts, it's fewer. One fact, said as a sentence.
-export const PLAIN_DETAIL_RULE = `SAYING THE DETAIL ABOUT THEM — this sentence has to sound like speech:
-- ONE fact. Not two. A complete, ordinary sentence with a subject and a verb.
-- Say it the way you'd say it to someone standing next to you.
-- Good: "You're a Lebanese charcoal grill place in Lakemba."
-- Good: "You roast your own beans on site."
-- Good: "You've got four rooms running at once."
-- Bad: "you do charcoal grill with a catering side" (two facts crushed together, nobody talks like this)
-- Bad: "you offer dine-in, takeaway and catering" (a services list, not a sentence)
-- Bad: "you're a family-run Lebanese charcoal grill restaurant serving mixed plates and mezze" (the description copied out)
-- Never join two facts with "with a ... side", "with a ... arm", "plus", "as well as", "and also", or a slash. Pick one and stop.
-- Never turn a noun into a verb to save words. "You do charcoal grill" is not English. "You're a charcoal grill place" is.
-- If the only fact you have reads awkwardly in a sentence, drop it. Naming the kind of business and the suburb is always better than an odd sentence.`
 
 // ─── Brand intro ─────────────────────────────────────────────────────────────
 
@@ -263,39 +244,6 @@ function stableHash(seed: string): number {
 export function pickVariant<T>(options: readonly T[], seed: string, salt = ''): T {
   return options[stableHash(`${seed}${salt}`) % options.length]
 }
-
-// Shapes for the "why I'm emailing you" paragraph. The rhythm being identical
-// every time is a stronger template tell than any individual word choice.
-export const REASON_SHAPES: readonly string[] = [
-  `Lead with the fact about them, then say what you're working on. Two short sentences.
-   Like this: "You've got four rooms going at once. We're covering more escape rooms this year so I thought I'd ask."`,
-  `One sentence only, with the connection left implicit. No "so" and no "which is why".
-   Like this: "I'm doing a few cafes over the next month and you roast your own on site."`,
-  `Lead with what you're working on, then the fact about them. Two short sentences, no connector joining them.
-   Like this: "We're doing more hotel stays this year. Yours is right on the wharf at Woolloomooloo."`,
-  `One sentence saying what you're working on, then a short second sentence naming the detail.
-   Like this: "We post a lot of Sydney food and I haven't covered much Lebanese. Yours came up."`,
-]
-
-export const REASON_CONNECTORS: readonly string[] = [
-  'so I thought I\'d ask',
-  'which is why I\'m emailing',
-  'so yours came up',
-  'so I\'m asking a few places directly',
-  'so I thought I\'d start with you',
-  'so I thought I\'d ask you directly',
-]
-
-export const INITIAL_ASKS: readonly string[] = [
-  'Would you be interested in doing something together?',
-  'Would you be interested in a collab?',
-  'Any interest in working together?',
-  'Would you be open to a collab?',
-  'Would a collab be of interest?',
-  'Would you be up for a collab?',
-  'Any interest in a collab?',
-  'Would you be interested in working together on something?',
-]
 
 // The opening line of the last email. Shared with the static template so the
 // fallback and the generated version close a thread the same way.

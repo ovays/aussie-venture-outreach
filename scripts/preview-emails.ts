@@ -4,7 +4,7 @@ import { resolve } from 'path'
 dotenv.config({ path: resolve(__dirname, '../.env.local') })
 
 import { aiRegistry } from '@/ai/AIRuntime'
-import { buildOutreachEmailPrompt } from '@/ai/workflows'
+import { buildOutreachEmailPrompt, OUTREACH_EMAIL_SYSTEM_PROMPT } from '@/ai/workflows'
 import { resolveContentType } from '@/lib/content-type'
 
 const SAMPLES = [
@@ -103,6 +103,7 @@ async function main() {
     try {
       const response = await aiRegistry.generate('outreach_email_generation', {
         maxTokens: 400,
+        system: OUTREACH_EMAIL_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: buildPrompt(sample) }],
       })
 

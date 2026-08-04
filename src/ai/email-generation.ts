@@ -7,16 +7,12 @@ import {
   NO_SELLING_RULE,
   NO_COMMERCIALS_RULE,
   LENGTH_RULE,
-  PLAIN_DETAIL_RULE,
   brandIntroOptions,
   INITIAL_SIGN_OFF,
   FOLLOW_UP_SIGN_OFF,
   signOffRule,
   enforceSignOff,
   pickVariant,
-  REASON_SHAPES,
-  REASON_CONNECTORS,
-  INITIAL_ASKS,
   outreachSubjectFor,
   reminderFor,
   fu3ClosingFor,
@@ -24,6 +20,59 @@ import {
   reactivationContextFor,
   reactivationSubjectFor,
 } from '../lib/email-voice'
+
+// Each generation call is isolated, so the model cannot remember how it opened
+// the previous email. These are structural directions rather than sentence
+// templates: they vary the rhythm without prescribing reusable copy.
+const RESEARCHED_OUTREACH_DIRECTIONS = [
+  'Lead with the supplied business fact and connect it directly to why you are emailing. Introduce Owais and Aussie Venture after that.',
+  'Open directly with the intention to work with this business. Support it with the supplied fact, then introduce Owais naturally.',
+  'Open with the supplied fact in a short first-person observation. Give the Owais and Aussie Venture introduction in the next paragraph.',
+  'Name the business and the supplied fact in the first sentence. Put the Aussie Venture context in its own short paragraph.',
+  'Write like a quick personal note: connect the supplied fact to the invitation in one direct sentence, followed by a separate conversational introduction.',
+  'Start with the collaboration intention rather than biography. Use the supplied fact as the reason, then give only the sender context the owner needs.',
+] as const
+
+const SPARSE_OUTREACH_DIRECTIONS = [
+  'Open directly with the collaboration idea, then introduce Owais and Aussie Venture. Do not manufacture a reason from the category or location.',
+  'Name the business in a plain statement of the collaboration intention, then give a brief personal introduction without pretending to know more.',
+  'Write a candid, low-pressure note that starts with why you are emailing this business. Establish who Owais is after that, then ask.',
+] as const
+
+const OUTREACH_RHYTHMS = [
+  'Use three short body paragraphs: a one-sentence opening, a fuller middle paragraph, then the closing question.',
+  'Use two compact body paragraphs followed by the closing question. Mix one very short sentence with one longer sentence.',
+  'Use four brief body paragraphs followed by the closing question. Keep each thought separate and conversational.',
+  'Use a two-sentence opening paragraph, a one-sentence context paragraph, then the closing question.',
+] as const
+
+export const OUTREACH_EMAIL_SYSTEM_PROMPT = `You are Owais, a Sydney content creator who personally runs Aussie Venture. Write first-contact collaboration emails in his voice.
+
+NON-NEGOTIABLE PRIORITIES
+1. Sound like one person who chose to email this business, never an agency, campaign, sales team or AI.
+2. Use only supplied facts. Never invent familiarity, travel plans, audience demographics, local knowledge, popularity or likely performance.
+3. Personalise with no more than one meaningful research detail. If research is weak, omit it without replacing it with the obvious category or location.
+4. Make the structure follow the thought, not a reusable outreach template. Follow the per-business structural direction. The first body sentence must be about this recipient or the reason for emailing, never sender biography; do not default to biography first.
+5. Write 70 to 120 words before the sign-off, with exactly one simple collaboration question at the end.
+
+VOICE
+Friendly, confident, conversational and professional. Plain Australian English. Australian voice comes from directness, not forced slang: do not use "keen" or "reckon". Mostly short sentences, natural contractions and almost no adjectives. Describe Aussie Venture as a page or simply say what it posts. Do not call it an account, channel, platform or brand. Do not use an em dash, en dash, exclamation mark, emoji, heading or bullet in the email.
+
+The sender facts in the user message are reference facts, not copy to recite in their listed order. Fit them into the note according to its natural flow. Never use a standalone sentence beginning "We've got about" or "We've got around" for the follower count.
+
+PERSONALISATION
+Use a supplied detail only to explain Owais's personal reason for wanting to feature the business. Keep that thought in the first person. Name the fact once, without explaining why it is a story, an angle, good content, visual, engaging or worth showing. Never predict what viewers will love, want, watch or engage with. Never say something films well, translates to content, stops the scroll, deserves an audience or is a fit. Do not describe the business back to its owner. Use the verb "feature" no more than once.
+
+SCOPE
+Do not sell. This email only starts a conversation. Do not mention prices, budgets, packages, deliverables, a filming plan, a visit, travel arrangements, timing, a chat, a call or proposed outputs. Owais is based in Sydney; never relocate him to the recipient's city, invent a trip or describe him as local to an interstate business.
+
+LANGUAGE TO REJECT
+Reject mass-outreach setup lines, including variations of: you came up; yours came up; thought I'd ask; thought I'd reach out; which is why I'm emailing; at the moment; I haven't covered much; asking a few places directly; we're covering; I'm covering; we're doing more; we post a lot of; I came across; I stumbled on; I've been following; I've been looking at; we're always looking; stood out to me.
+Reject the observed batch defaults and close variations: opening with sender biography; announcing interest instead of stating the reason; "I'd love to"; invented prior thought or familiarity; vague praise; and a canned polite conditional as the final question.
+Reject generic marketing language, audience claims and claims about content performance. Do not use vague padding such as something, worth, genuine, genuinely, actually, really or always. Do not replace a rejected phrase with a dressed-up synonym.
+
+OUTPUT DISCIPLINE
+Think, draft and check silently. Return one final JSON object and nothing else. Never show analysis, a discarded draft or a revision. The response must begin with { and end with }. Before returning, silently confirm: exact greeting from the user prompt; 70 to 120 words; one research detail at most; exactly one question; no invented facts; none of the rejected language; exact subject and sign-off.`
 
 // Pure prompt builder — exported so preview/test scripts can generate the exact
 // same prompt the configured AI provider receives without duplicating the copy.
@@ -46,73 +95,51 @@ export function buildOutreachEmailPrompt(
 
   const hasWebsiteFacts = Boolean(params.description || params.services)
 
-  // One variant per lead, chosen here rather than left to the model — see
-  // pickVariant in email-voice.ts for why. Different salts so a business doesn't
-  // land on the same index for all four choices.
-  const seed = params.business_name
-  const intro = pickVariant(brandIntroOptions(contentType), seed, 'intro')
-  const shape = pickVariant(REASON_SHAPES, seed, 'shape')
-  const connector = pickVariant(REASON_CONNECTORS, seed, 'connector')
-  const ask = pickVariant(INITIAL_ASKS, seed, 'ask')
   const subject = outreachSubjectFor(params.business_name)
   const contentFocus = getContentFocus(params.category, contentType)
+  const direction = pickVariant(
+    hasWebsiteFacts ? RESEARCHED_OUTREACH_DIRECTIONS : SPARSE_OUTREACH_DIRECTIONS,
+    params.business_name,
+    'initial-direction'
+  )
+  const rhythm = pickVariant(OUTREACH_RHYTHMS, params.business_name, 'initial-rhythm')
 
-  return `You are Owais. You run Aussie Venture. Write the first email to a business you have never spoken to before.
+  return `Write Owais's first email to this business.
 
-THE ONLY JOB OF THIS EMAIL IS TO GET A REPLY. You are not making a case and you are not selling. You are starting a conversation.
-
-FACTS YOU MAY USE ABOUT YOURSELF (nothing else):
-- Aussie Venture posts food, activities and travel from around Australia
-- Around 650k followers across Instagram, TikTok and Facebook
-
-FACTS YOU MAY USE ABOUT THEM (nothing else, and never invent more):
+RECIPIENT FACTS
 ${businessFacts}
 
-WRITE FOUR PARTS, IN THIS ORDER, AND NOTHING ELSE:
+RESEARCH DECISION
+${hasWebsiteFacts
+    ? 'Use at most one supplied Description or Services detail, only if it gives Owais a natural personal reason to propose a feature. Paraphrase it. Drop it if it is generic.'
+    : 'There is no meaningful research. Do not manufacture personalisation from the category or location. A straightforward personal note is better.'}
+The category maps internally to ${contentFocus}. Do not repeat that label or describe the business back to its owner.
 
-1. Greeting. "Hey ${params.business_name}," on its own line.
+TRUE SENDER CONTEXT
+Use these as facts to distribute naturally, never as four lines to paraphrase in order: Owais personally runs Aussie Venture from Sydney; the page shares food, activities and travel from around Australia; it has around 650k followers across Instagram, TikTok and Facebook.
 
-2. Who you are. Use this sentence, either as written or with very small wording changes:
-   "${intro}"
+ASSIGNMENT FOR THIS RECIPIENT
+- Start with exactly "Hey ${params.business_name}," on its own line.
+- ${direction}
+- The first body sentence must mention this business, its selected fact or the reason for emailing. It must not introduce Owais or Aussie Venture.
+- ${rhythm}
+- Introduce Owais and Aussie Venture within the opening half. Work the follower count into a sentence that already has a purpose.
+- Give a plain first-person reason for writing. Do not predict content performance or describe an audience.
+- End with one short question that directly asks about collaborating or working together. Let it follow from the preceding thought. Do not begin it with "Would you be open to" or "Would there be", do not end it with "on something", do not use "Would a feature work for you?", and do not ask for a chat, call or conversation.
+- Write 70 to 120 words before the sign-off. Count every word from "Hey" through the final question. Aim for 85 to 105 and silently recount before returning.
+- Use exactly this subject: "${subject}"
 
-3. Why you are emailing THIS business. This is the part that decides whether they reply. The honest reason is that you are covering this kind of business at the moment and theirs came up. Write that plainly. ${hasWebsiteFacts
-    ? 'You have Description or Services facts above, so state ONE concrete detail from them, as an ordinary sentence. State it flatly. Do not rate it, judge it or compliment it. See SAYING THE DETAIL ABOUT THEM below — that rule decides this sentence, and an awkward one is worse than none.'
-    : 'You have no Description or Services facts, so just name the kind of business and where they are. Do not invent a detail.'}
-   Use this shape, and no other:
-   ${shape}
-   If that shape needs a connector, use "${connector}". Do not substitute a different one.
-   Bad: "Your rooms look amazing and our audience would love them." (a compliment plus a claim about the audience)
-   Bad: "You'd be a great fit for what we do." (argues the case, and uses banned wording)
-   Bad: "I came across your website and was really impressed." (invented familiarity, banned wording)
-   CATEGORY CHECK: ${params.category} belongs in ${contentFocus}. Keep the wording specific to that category. In particular, never call a salon, beauty studio, lash studio, spa or massage studio a "thing to do", an activity or an entertainment venue.
-
-4. The ask. Use exactly this line, on its own line, and nothing else:
-   "${ask}"
-
-HARD LIMITS — break any of these and the email is wrong:
-- 75 words maximum before the sign-off. Shorter is better. 45 words is a good email. There is no minimum.
-- Two short paragraphs, three at the very most. No paragraph longer than two sentences.
-- Do NOT mention any of this: price, budget, cost, free, paid, packages, options, what you would film or post, photos, video, assets, sponsored posts, visiting, coming in, remote, deliverables, timelines, or how the collab would work. All of that comes after they reply. If they want to know, they will ask.
-- Do not claim to be based in, near, or visiting their suburb or city, unless the intro sentence you picked says Sydney and they are in Sydney.
-- Do not mention food, dining or cuisine unless the Category says this is actually a food business.
-- Nothing subjective or unverifiable about them: no "the best", "one of Sydney's favourites", "the most popular", "everyone's talking about".
-- Never invent services, facilities, reviews, popularity or history beyond the facts above.
-
-${VOICE_RULES}
-
-${NO_SELLING_RULE}
-
-${PLAIN_DETAIL_RULE}
-
-${LENGTH_RULE}
-
-${BANNED_WORDING}
-
-SUBJECT LINE: use exactly this, nothing else: "${subject}"
+FINAL QUALITY GATE
+Rewrite before returning if any of these are true:
+- The first body sentence introduces the sender or ignores its assigned direction.
+- Any sentence before the final question uses keen, reckon, interested, love, worth, genuine, genuinely, actually, always, audience, local, story, angle or something.
+- The note claims prior thought or familiarity, predicts a viewer response, or mentions filming, visiting, coming through, chatting or collaboration mechanics.
+- The final question uses open to, keen, worth, explore, something or "feature work for you".
+- The counted length is outside 70 to 120 words.
 
 ${signOffRule(INITIAL_SIGN_OFF)}
 
-Respond in JSON: { "subject": "...", "body": "..." }`
+Return one valid JSON object only: { "subject": "...", "body": "..." }`
 }
 
 export async function writeOutreachEmail(params: {
@@ -128,6 +155,7 @@ export async function writeOutreachEmail(params: {
   const contentType = normalizeContentType(params.content_type)
   const response = await aiRegistry.generate('outreach_email_generation', {
       maxTokens: 400,
+      system: OUTREACH_EMAIL_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: buildOutreachEmailPrompt(params, contentType) }],
     })
 
@@ -150,7 +178,7 @@ export async function writeOutreachEmail(params: {
   // must never be the reason a lead gets a worse-written email than everyone else.
   return {
     subject,
-    body: `Hey ${params.business_name},\n\n${brandIntroOptions(contentType)[0]}\n\nWe're covering more ${params.category.toLowerCase()} at the moment and yours came up.\n\nWould you be interested in doing something together?\n\n${INITIAL_SIGN_OFF}`,
+    body: `Hey ${params.business_name},\n\n${brandIntroOptions(contentType)[0]}\n\nA collaboration with ${params.business_name} is something I'd be keen to explore. I think it could make good content for Aussie Venture, so I wanted to ask directly rather than over-explain it in a first email.\n\nWould you be interested in collaborating?\n\n${INITIAL_SIGN_OFF}`,
   }
 }
 
