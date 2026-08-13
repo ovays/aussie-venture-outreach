@@ -47,6 +47,7 @@
     "test:initial-email-router": "tsx scripts/test-initial-email-router.ts",
     "test:csv-initial-email-routing": "tsx scripts/test-csv-initial-email-routing.ts",
     "test:generation-source-send-paths": "tsx scripts/test-generation-source-send-paths.ts",
+    "test:template-mode-ai-boundaries": "tsx scripts/test-template-mode-ai-boundaries.ts",
     "test:ai-analytics": "tsx scripts/test-ai-analytics.ts",
     "test:website-extraction": "tsx scripts/test-website-extraction.ts",
     "test:email-voice": "tsx scripts/test-email-voice.ts",

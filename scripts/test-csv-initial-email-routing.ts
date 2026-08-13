@@ -48,9 +48,23 @@ async function main() {
   assert.match(writer, /loadInitialEmailModeSnapshots[\s\S]*importedModeSnapshots\.get\(lead\.id\) \?\? mode[\s\S]*writeOneLead\(supabase, lead, dedupeIndex, leadMode\)/, 'Writer consumes each imported lead snapshot instead of rereading settings')
   assert.match(router, /if \(mode === 'template'\)[\s\S]*generateInitialEmailFromTemplate[\s\S]*const writer = aiWriter \?\? \(await import\('@\/ai\/workflows'\)\)/, 'Template branch completes before the lazy AI import')
   assert.match(importer, /if \(result\.ok\) \{\s*imported\+\+[\s\S]*result\.generationError[\s\S]*continue/, 'a Template row failure preserves the imported lead, reports the row, and continues')
+  assert.match(importer, /try \{\s*result = await createLead[\s\S]*catch \(error\)[\s\S]*failed\.push[\s\S]*continue/, 'an unexpected per-row failure is reported without stopping later CSV rows')
   assert.match(importer, /if \(result\.status === 409\) \{\s*duplicates\+\+\s*continue/, 'duplicate accounting remains unchanged')
   assert.match(importer, /Invalid email address/)
   assert.match(importer, /Unknown category/)
+
+  const dailyPipeline = readFileSync(resolve(root, 'trigger/daily-pipeline.ts'), 'utf8')
+  const modeRead = dailyPipeline.indexOf('const initialEmailMode = await readInitialEmailMode')
+  assert.ok(modeRead >= 0 && modeRead < dailyPipeline.indexOf('runResearcherAgent(initialEmailMode)'), 'automatic batches capture mode once before Researcher')
+  assert.ok(modeRead < dailyPipeline.indexOf('runWriterAgent(initialEmailMode)'), 'the same automatic batch snapshot reaches Writer')
+
+  const manualRoute = readFileSync(resolve(root, 'src/app/api/leads/route.ts'), 'utf8')
+  assert.ok(manualRoute.indexOf('const initialEmailMode = await readInitialEmailMode') < manualRoute.indexOf('await createLead'), 'Manual Add captures its request mode before lead creation')
+
+  const regenerationRoute = readFileSync(resolve(root, 'src/app/api/leads/regenerate-emails/route.ts'), 'utf8')
+  assert.match(regenerationRoute, /mode: z\.enum\(INITIAL_EMAIL_MODES\)/, 'regeneration accepts the mode captured by its confirmation')
+  assert.match(regenerationRoute, /const mode = parsed\.data\.mode/, 'regeneration uses the confirmed snapshot for the complete batch')
+  assert.match(regenerationRoute, /for \(const id[\s\S]*try \{[\s\S]*routeInitialEmail[\s\S]*catch \(error\)/, 'regeneration continues after an individual thrown generation failure')
 
   console.log('CSV Initial Email routing and mode snapshot checks passed')
 }

@@ -1,7 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { logger } from '@/lib/logger'
 import { fetchRawHtml, extractMailtoEmail } from '@/lib/email-extraction'
-import { researchOneLead } from '@/lib/research-lead'
+import { researchOneLead, researchPurposeForInitialEmailMode } from '@/lib/research-lead'
 import type { InitialEmailMode } from '@/lib/settingsDefaults'
 
 // ── Bounced email fixer ──────────────────────────────────────────────────────
@@ -55,6 +55,7 @@ async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>
 
 export async function runResearcherAgent(mode: InitialEmailMode = 'ai_personalised'): Promise<number> {
   const supabase = createServiceClient()
+  const researchPurpose = researchPurposeForInitialEmailMode(mode)
 
   try {
     const { data: systemSetting } = await supabase
@@ -93,7 +94,7 @@ export async function runResearcherAgent(mode: InitialEmailMode = 'ai_personalis
         website: lead.website ?? 'NONE',
       })
 
-      const result = await researchOneLead(supabase, lead, mode)
+      const result = await researchOneLead(supabase, lead, researchPurpose)
       if (result.success) {
         if (result.emailFound) emailsFound++
         methodCounts[result.emailMethod] = (methodCounts[result.emailMethod] ?? 0) + 1

@@ -73,13 +73,15 @@ async function main() {
     assert(releaseInFinally, 'bulk/route.ts releases the per-lead lock inside a finally block using its own acquired token', releaseInFinally ? undefined : 'pattern not found')
   }
 
-  console.log('\n  4. The recovery-row insert error is no longer silently discarded')
+  console.log('\n  4. A missing draft is created only through the central router')
   {
-    const recoveryIdx = src.indexOf("status: 'email_sync_failed', resend_id: result.id")
-    assert(recoveryIdx !== -1, 'The recovery-row insert for a delivered-but-unrecorded email still exists')
-    const nearbyBody = src.slice(recoveryIdx, recoveryIdx + 400)
-    assert(/recoveryErr/.test(nearbyBody), 'The recovery insert error is captured (recoveryErr) rather than discarded')
-    assert(/logger\.error\(/.test(nearbyBody), 'A discarded recovery-insert failure is now logged so a fully-untracked duplicate delivery is not silent')
+    const routeIdx = src.indexOf('await routeInitialEmail(supabase, lead, initialEmailMode!)')
+    const reloadIdx = src.indexOf("from('emails').select('id, subject, body_html, body_text, generation_source')", routeIdx)
+    const missingGuardIdx = src.indexOf("reason: 'No pending Initial Email could be prepared'", reloadIdx)
+    const sendIdx = src.indexOf('await sendEmail({', missingGuardIdx)
+    assert(routeIdx !== -1, 'Bulk Send routes missing-draft creation through the central router')
+    assert(reloadIdx > routeIdx && missingGuardIdx > reloadIdx && sendIdx > missingGuardIdx, 'Bulk Send reloads and requires the router-created pending row before delivery')
+    assert(!/from\('emails'\)\.insert\([\s\S]*?type:\s*'initial_pitch'/.test(src.slice(routeIdx, sendIdx + 1500)), 'Bulk Send has no direct Initial Email insert bypass')
   }
 
   console.log('\n' + SEP)

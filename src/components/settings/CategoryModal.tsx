@@ -226,7 +226,7 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
           </div>
         </section>
 
-        <p className="text-xs" style={{ color: '#64748b' }}>Template edits do not regenerate existing emails. They apply only when future generation or regeneration is connected to templates in Prompt 3.</p>
+        <p className="text-xs" style={{ color: '#64748b' }}>Template edits do not change existing emails. They apply to future generation or explicit regeneration.</p>
         {error && <div className="text-sm text-red-400 bg-red-500/10 px-4 py-3 rounded-lg"><p>{error}</p>{serverReasons.length > 0 && <ul className="list-disc ml-5 mt-1">{serverReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}</div>}
         <div className="flex gap-2 justify-end"><Button variant="ghost" onClick={close}>Cancel</Button><Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : isNew ? 'Add Category' : 'Save Changes'}</Button></div>
       </div>

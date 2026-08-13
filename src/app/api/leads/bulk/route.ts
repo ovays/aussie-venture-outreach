@@ -3,11 +3,10 @@ import { z } from 'zod'
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
-import { researchOneLead } from '@/lib/research-lead'
+import { researchOneLead, researchPurposeForInitialEmailMode } from '@/lib/research-lead'
 import { writeOneLead } from '@/lib/write-lead'
 import { handleEmailSyncFailure } from '@/lib/email-status'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
-import { logger } from '@/lib/logger'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 
 // Same protection agents/sender.ts (idempotency re-check) and
@@ -122,42 +121,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
         const sentAt = new Date().toISOString()
 
-        if (pendingEmail?.id) {
-          const { error: emailUpdateErr } = await supabase.from('emails').update({
-            status: 'sent', resend_id: result.id, message_id: result.messageId, sent_at: sentAt,
-          }).eq('id', pendingEmail.id)
-          if (emailUpdateErr) {
-            await handleEmailSyncFailure(supabase, {
-              agent:    'bulk-send',
-              emailId:  pendingEmail.id,
-              leadId:   lead_id,
-              resendId: result.id,
-              sentAt,
-              context: { original_db_error: emailUpdateErr.message, business_name: lead.business_name },
-            })
-            failed.push({ lead_id, business_name: lead.business_name, reason: `Email delivered but DB update failed — marked Sync Failed` })
-            continue
-          }
-        } else {
-          const { error: insertErr } = await supabase.from('emails').insert({
-            lead_id, type: 'initial_pitch', subject, body_html: bodyHtml, body_text: bodyText,
-            status: 'sent', resend_id: result.id, message_id: result.messageId, sent_at: sentAt,
+        const { error: emailUpdateErr } = await supabase.from('emails').update({
+          status: 'sent', resend_id: result.id, message_id: result.messageId, sent_at: sentAt,
+        }).eq('id', pendingEmail.id)
+        if (emailUpdateErr) {
+          await handleEmailSyncFailure(supabase, {
+            agent:    'bulk-send',
+            emailId:  pendingEmail.id,
+            leadId:   lead_id,
+            resendId: result.id,
+            sentAt,
+            context: { original_db_error: emailUpdateErr.message, business_name: lead.business_name },
           })
-          if (insertErr) {
-            // No pre-existing row — insert a recovery row directly.
-            const { error: recoveryErr } = await supabase.from('emails').insert({
-              lead_id, type: 'initial_pitch', subject, body_html: bodyHtml, body_text: bodyText,
-              status: 'email_sync_failed', resend_id: result.id, message_id: result.messageId, sent_at: sentAt,
-            })
-            if (recoveryErr) {
-              logger.error('bulk-send', 'Recovery row insert also failed — delivered email has no DB record', {
-                lead_id, error: recoveryErr.message, resend_id: result.id,
-              })
-            }
-            await supabase.from('leads').update({ status: 'contacted', updated_at: sentAt }).eq('id', lead_id)
-            failed.push({ lead_id, business_name: lead.business_name, reason: `Email delivered but DB insert failed — marked Sync Failed` })
-            continue
-          }
+          failed.push({ lead_id, business_name: lead.business_name, reason: `Email delivered but DB update failed — marked Sync Failed` })
+          continue
         }
 
         await supabase.from('leads').update({ status: 'contacted', updated_at: sentAt }).eq('id', lead_id)
@@ -229,7 +206,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         continue
       }
 
-      const researchResult = await researchOneLead(supabase, lead, initialEmailMode!)
+      const researchResult = await researchOneLead(
+        supabase,
+        lead,
+        researchPurposeForInitialEmailMode(initialEmailMode!),
+      )
       if (!researchResult.success) {
         failed.push({ lead_id, business_name: lead.business_name, reason: `Research failed: ${researchResult.error}` })
         continue

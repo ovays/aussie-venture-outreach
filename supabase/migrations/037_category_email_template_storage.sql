@@ -174,8 +174,9 @@ END $$;
 
 -- pending_send is the repository's only draft/queued status. Failed and bounced
 -- rows remain retryable history and delivered rows are protected separately by
--- migration 027. Do not mutate duplicates: skip enforcement if deployment data
--- contains more than one pending initial pitch for a lead.
+-- migration 027. Do not mutate duplicates. Abort safely if the read-only
+-- pre-deployment check was missed, rather than silently deploying without the
+-- concurrency backstop.
 DO $$
 BEGIN
   IF EXISTS (
@@ -186,10 +187,10 @@ BEGIN
     GROUP BY lead_id
     HAVING count(*) > 1
   ) THEN
-    RAISE NOTICE 'migration 037: duplicate pending initial emails found; emails_one_pending_initial_per_lead_key was not created';
-  ELSE
-    CREATE UNIQUE INDEX emails_one_pending_initial_per_lead_key
-      ON emails (lead_id)
-      WHERE type = 'initial_pitch' AND status = 'pending_send';
+    RAISE EXCEPTION 'migration 037: duplicate pending initial emails found; resolve them before rerunning so the uniqueness constraint is never skipped';
   END IF;
 END $$;
+
+CREATE UNIQUE INDEX emails_one_pending_initial_per_lead_key
+  ON emails (lead_id)
+  WHERE type = 'initial_pitch' AND status = 'pending_send';

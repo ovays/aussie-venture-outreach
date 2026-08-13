@@ -1,5 +1,4 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { extractWebsiteData, agenticEmailSearch } from '@/ai/workflows'
 import { logger } from '@/lib/logger'
 import {
   HALAL_QUALIFICATION_THRESHOLD,
@@ -38,21 +37,55 @@ export type ResearchOneLeadResult =
     }
   | { success: false; error: string }
 
+type ResearchDependencies = {
+  fetchRawHtml?: typeof fetchRawHtml
+  extractMailtoEmail?: typeof extractMailtoEmail
+  agenticEmailSearch?: (params: {
+    business_name: string
+    website_url: string
+    category: string
+    homepage_content: string
+  }) => Promise<{ email: string | null; method: string; rounds: number }>
+  extractWebsiteData?: (websiteText: string) => Promise<{
+    description: string
+    services: string
+    instagram_handle: string | null
+    facebook_url: string | null
+    other_social: string | null
+  }>
+}
+
+export type ResearchPurpose =
+  | 'full_personalisation'
+  | 'contact_discovery_only'
+
+export function researchPurposeForInitialEmailMode(mode: InitialEmailMode): ResearchPurpose {
+  return mode === 'template' ? 'contact_discovery_only' : 'full_personalisation'
+}
+
 export async function researchOneLead(
   supabase: ReturnType<typeof createServiceClient>,
   lead: ResearchableLeadRow,
-  mode: InitialEmailMode = 'ai_personalised',
+  purpose: ResearchPurpose = 'full_personalisation',
+  dependencies: ResearchDependencies = {},
 ): Promise<ResearchOneLeadResult> {
   try {
+    const fetchHtml = dependencies.fetchRawHtml ?? fetchRawHtml
+    const extractMailto = dependencies.extractMailtoEmail ?? extractMailtoEmail
     let websiteText = ''
     let rawHtml = ''
     let foundEmail: string | null = lead.email ?? null
     let emailMethod = 'outscraper'
     let emailRounds = 0
 
-    if (lead.website) {
+    const needsSharedHalalWebsiteContent =
+      isHalalFilterCategory(lead.category_name) && lead.halal_confidence_score == null
+    const shouldFetchWebsite =
+      purpose === 'full_personalisation' || !foundEmail || needsSharedHalalWebsiteContent
+
+    if (lead.website && shouldFetchWebsite) {
       try {
-        rawHtml = await fetchRawHtml(lead.website)
+        rawHtml = await fetchHtml(lead.website)
         websiteText = rawHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 5000)
       } catch {
         logger.info('researcher', `Could not fetch website for "${lead.business_name}"`)
@@ -60,7 +93,7 @@ export async function researchOneLead(
     }
 
     if (!foundEmail && rawHtml) {
-      const mailtoEmail = extractMailtoEmail(rawHtml)
+      const mailtoEmail = extractMailto(rawHtml)
       if (mailtoEmail) {
         foundEmail = mailtoEmail
         emailMethod = 'mailto_link'
@@ -115,7 +148,9 @@ export async function researchOneLead(
 
     if (!foundEmail && lead.website && websiteText) {
       logger.info('researcher', `Starting agentic email search for "${lead.business_name}"`)
-      const result = await agenticEmailSearch({
+      const agenticSearch = dependencies.agenticEmailSearch
+        ?? (await import('@/ai/workflows')).agenticEmailSearch
+      const result = await agenticSearch({
         business_name: lead.business_name,
         website_url: lead.website,
         category: lead.category_name ?? '',
@@ -142,8 +177,10 @@ export async function researchOneLead(
       facebook_url: null as string | null,
       other_social: null as string | null,
     }
-    if (websiteText && mode === 'ai_personalised') {
-      enriched = await extractWebsiteData(websiteText)
+    if (websiteText && purpose === 'full_personalisation') {
+      const extractData = dependencies.extractWebsiteData
+        ?? (await import('@/ai/workflows')).extractWebsiteData
+      enriched = await extractData(websiteText)
     }
     if (!enriched.instagram_handle && lead.business_name) {
       const cleanName = lead.business_name.toLowerCase().replace(/[^a-z0-9]/g, '')

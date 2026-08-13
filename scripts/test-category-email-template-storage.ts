@@ -35,7 +35,8 @@ assert.doesNotMatch(migration, /UPDATE emails[\s\S]*generation_source/i)
 
 assert.match(migration, /lower\(btrim\(name\)\)/)
 assert.match(migration, /WHERE type = 'initial_pitch' AND status = 'pending_send'/)
-assert.match(migration, /IF EXISTS \([\s\S]*HAVING count\(\*\) > 1[\s\S]*RAISE NOTICE/)
+assert.match(migration, /IF EXISTS \([\s\S]*HAVING count\(\*\) > 1[\s\S]*RAISE EXCEPTION/, 'pending duplicates abort safely instead of silently skipping the index')
+assert.match(migration, /CREATE UNIQUE INDEX emails_one_pending_initial_per_lead_key\s+ON emails \(lead_id\)\s+WHERE type = 'initial_pitch' AND status = 'pending_send'/)
 
 for (const wording of [
   'I emailed you last week but it may not have reached you.',

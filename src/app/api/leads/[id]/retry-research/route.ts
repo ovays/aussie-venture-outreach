@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { researchOneLead } from '@/lib/research-lead'
+import { researchOneLead, researchPurposeForInitialEmailMode } from '@/lib/research-lead'
 import { writeOneLead } from '@/lib/write-lead'
 import { readInitialEmailMode } from '@/lib/initial-email-router'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
@@ -53,7 +53,11 @@ export async function POST(
   // Re-run research. researchOneLead handles its own error logging and sets
   // status='researched' on both success and failure paths.
   const mode = await readInitialEmailMode(supabase)
-  const researchResult = await researchOneLead(supabase, lead, mode)
+  const researchResult = await researchOneLead(
+    supabase,
+    lead,
+    researchPurposeForInitialEmailMode(mode),
+  )
 
   if (!researchResult.success) {
     return NextResponse.json({ error: `Research failed: ${researchResult.error}` }, { status: 500 })

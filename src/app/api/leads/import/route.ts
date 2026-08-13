@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createServiceClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/lib/rateLimit'
-import { createLead } from '@/lib/create-lead'
+import { createLead, type CreateLeadResult } from '@/lib/create-lead'
 import { STAGE_VALUES } from '@/lib/stage-import'
 import { readInitialEmailMode } from '@/lib/initial-email-router'
 import { initialEmailPolicyForCsvImport } from '@/lib/initial-email-mode-snapshot'
@@ -71,20 +71,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       continue
     }
 
-    const result = await createLead(supabase, {
-      business_name: row.business_name,
-      email: row.email,
-      website: row.website || undefined,
-      suburb: row.suburb || '',
-      city: row.city,
-      category_id: category.id,
-      category_name: category.name,
-      force: true,
-      current_stage: row.current_stage,
-      stage_completed_date: row.stage_completed_date,
-      source: 'manual',
-      initialEmail: initialEmailPolicyForCsvImport(initialEmailMode),
-    })
+    let result: CreateLeadResult
+    try {
+      result = await createLead(supabase, {
+        business_name: row.business_name,
+        email: row.email,
+        website: row.website || undefined,
+        suburb: row.suburb || '',
+        city: row.city,
+        category_id: category.id,
+        category_name: category.name,
+        force: true,
+        current_stage: row.current_stage,
+        stage_completed_date: row.stage_completed_date,
+        source: 'manual',
+        initialEmail: initialEmailPolicyForCsvImport(initialEmailMode),
+      })
+    } catch (error) {
+      failed.push({
+        row_num: row.row_num,
+        business_name: row.business_name,
+        email: row.email,
+        reason: error instanceof Error ? error.message : String(error),
+      })
+      continue
+    }
 
     if (result.ok) {
       imported++

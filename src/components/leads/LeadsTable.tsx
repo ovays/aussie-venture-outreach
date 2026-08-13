@@ -349,7 +349,7 @@ function RegenerateEmailsModal({
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={onClose}>Cancel</Button>
-              <Button onClick={onConfirm} disabled={targetCount === 0}>
+              <Button onClick={onConfirm} disabled={targetCount === 0 || mode === null}>
                 Regenerate Initial Emails
               </Button>
             </div>
@@ -553,14 +553,14 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
       ? filteredEligible
       : selectedEmailReadyLeads.map((l) => ({ id: l.id, business_name: l.business_name }))
 
-    if (targets.length === 0) return
+    if (targets.length === 0 || !regenerateMode) return
 
     setRegenerateRunning(true)
     setRegenerateProgress({ done: 0, total: targets.length })
     try {
       const res = await fetch('/api/leads/regenerate-emails', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_ids: targets.map((lead) => lead.id) }),
+        body: JSON.stringify({ lead_ids: targets.map((lead) => lead.id), mode: regenerateMode }),
       })
       const json = await res.json() as { mode?: 'ai_personalised' | 'template'; regenerated?: number; skipped?: number; failed?: RegenerateFailure[]; error?: string }
       setRegenerateResult({
