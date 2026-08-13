@@ -5,6 +5,8 @@ import { runWriterAgent } from "../agents/writer"
 import { runSenderAgent } from "../agents/sender"
 import { runFollowUpAgent } from "../agents/followup"
 import { runReactivationAgent } from "../agents/reactivation"
+import { createServiceClient } from "../src/lib/supabase/server"
+import { readInitialEmailMode } from "../src/lib/initial-email-router"
 
 export const dailyPipelineJob = schedules.task({
   id: "daily-pipeline",
@@ -24,6 +26,8 @@ export const dailyPipelineJob = schedules.task({
   maxDuration: 3600,
   run: async () => {
     console.log("Starting scheduled daily pipeline...")
+    const initialEmailMode = await readInitialEmailMode(createServiceClient())
+    console.log("[INITIAL_EMAIL_MODE] Batch snapshot captured", { initial_email_mode: initialEmailMode })
 
     let leadsFound = 0
     let runtimeLimitHit = false
@@ -60,7 +64,7 @@ export const dailyPipelineJob = schedules.task({
     } else {
       try {
         console.log("[PIPELINE_STAGE] Researcher starting", { leadsFound })
-        const researched = await runResearcherAgent()
+        const researched = await runResearcherAgent(initialEmailMode)
         console.log("[PIPELINE_STAGE] Researcher complete", { researched })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -69,7 +73,7 @@ export const dailyPipelineJob = schedules.task({
 
       try {
         console.log("[PIPELINE_STAGE] Writer starting")
-        await runWriterAgent()
+        await runWriterAgent(initialEmailMode)
         console.log("[PIPELINE_STAGE] Writer complete")
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -114,6 +118,6 @@ export const dailyPipelineJob = schedules.task({
     }
 
     console.log("[PIPELINE_STAGE] Pipeline complete", { reason: "all_stages_finished", leadsFound })
-    return { leadsFound }
+    return { leadsFound, initial_email_mode: initialEmailMode }
   }
 })

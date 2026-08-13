@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { writeOutreachEmail } from '@/ai/workflows'
-import { emailBodyToHtml } from '@/lib/utils'
+import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 
 export async function POST(
   _request: NextRequest,
@@ -12,7 +11,7 @@ export async function POST(
 
   const { data: lead, error: leadErr } = await supabase
     .from('leads')
-    .select('id, business_name, category_name, suburb, city, website, description, services, status, content_type')
+    .select('id, business_name, category_id, category_name, suburb, city, website, description, services, status, content_type')
     .eq('id', id)
     .single()
 
@@ -37,35 +36,8 @@ export async function POST(
     return NextResponse.json({ error: 'No pending email found for this lead' }, { status: 404 })
   }
 
-  const contentType = lead.content_type ?? 'remote'
-
-  const result = await writeOutreachEmail({
-    business_name: lead.business_name,
-    category: lead.category_name,
-    suburb: lead.suburb ?? '',
-    city: lead.city,
-    website: lead.website ?? '',
-    description: lead.description ?? '',
-    services: lead.services ?? '',
-    content_type: contentType,
-  })
-
-  const { data: updated, error: updateErr } = await supabase
-    .from('emails')
-    .update({
-      subject: result.subject,
-      body_text: result.body,
-      body_html: emailBodyToHtml(result.body),
-      edited_at: null,
-      edited_by_user: false,
-    })
-    .eq('id', pending.id)
-    .select()
-    .single()
-
-  if (updateErr) {
-    return NextResponse.json({ error: updateErr.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ data: updated })
+  const mode = await readInitialEmailMode(supabase)
+  const result = await routeInitialEmail(supabase, lead, mode, { operation: 'regenerate', pendingEmailId: pending.id })
+  if (!result.ok) return NextResponse.json({ error: result.error.reason, details: result.error, mode }, { status: 422 })
+  return NextResponse.json({ data: { id: result.emailId }, mode, outcome: result.outcome })
 }

@@ -152,8 +152,8 @@ console.log('\n  2. Static source check — resend/route.ts consults the decisio
   // The insert()/final email row must use the decided type, not a hardcoded
   // 'initial_pitch' literal — this was the exact bug (three call sites
   // hardcoded 'initial_pitch' regardless of what was actually generated).
-  const insertBlockMatches = routeSrc.match(/\.from\('emails'\)\.insert\(\{[^}]*\}\)/g) ?? []
-  assert(insertBlockMatches.length >= 2, 'route.ts still has its emails-insert call sites (sent row + sync-failed recovery row)', `found ${insertBlockMatches.length}`)
+  const insertBlockMatches = routeSrc.match(/\.from\('emails'\)\.insert\(\{[\s\S]*?\}\)\.select\('id'\)/g) ?? []
+  assert(insertBlockMatches.length >= 1, 'route.ts still has its sent-email insert call site', `found ${insertBlockMatches.length}`)
   for (const block of insertBlockMatches) {
     assert(!/type:\s*'initial_pitch'/.test(block), 'An emails insert block does not hardcode type: \'initial_pitch\'', block.slice(0, 80))
     assert(/type:\s*emailType/.test(block), 'An emails insert block uses the decided `emailType` variable', block.slice(0, 80))

@@ -52,6 +52,8 @@ interface RegenerateFailure {
 
 interface RegenerateResult {
   succeeded: number
+  mode: 'ai_personalised' | 'template'
+  skipped: number
   failed: RegenerateFailure[]
 }
 
@@ -234,13 +236,14 @@ interface RegenerateEmailsModalProps {
   running: boolean
   progress: { done: number; total: number }
   result: RegenerateResult | null
+  mode: 'ai_personalised' | 'template' | null
   onConfirm: () => void
   onClose: () => void
 }
 
 function RegenerateEmailsModal({
   open, selectedCount, filteredCount, filteredLoading, scope, onScopeChange,
-  running, progress, result, onConfirm, onClose,
+  running, progress, result, mode, onConfirm, onClose,
 }: RegenerateEmailsModalProps) {
   if (!open) return null
 
@@ -342,7 +345,7 @@ function RegenerateEmailsModal({
             </div>
 
             <p className="text-sm mb-6" style={{ color: '#94a3b8' }}>
-              Regenerates the subject and body of the initial outreach email for {targetCount} lead{targetCount === 1 ? '' : 's'} using the latest email prompt. Status, follow-ups, notes, tags and enrichment data are left untouched.
+              Regenerate {targetCount} initial email{targetCount === 1 ? '' : 's'} using {mode === 'template' ? 'Template' : mode === 'ai_personalised' ? 'AI Personalised' : 'the saved'} mode? Existing unsent Initial Emails will be replaced. Sent emails and follow-ups are left untouched.
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -396,6 +399,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   const [regenerateRunning, setRegenerateRunning] = useState(false)
   const [regenerateProgress, setRegenerateProgress] = useState({ done: 0, total: 0 })
   const [regenerateResult, setRegenerateResult] = useState<RegenerateResult | null>(null)
+  const [regenerateMode, setRegenerateMode] = useState<'ai_personalised' | 'template' | null>(null)
 
   const fetchLeads = useCallback(async () => {
     setLoading(true)
@@ -510,6 +514,10 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
     setFilteredEligible(null)
     setRegenerateResult(null)
     setRegenerateOpen(true)
+    fetch('/api/leads/regenerate-emails')
+      .then((response) => response.json())
+      .then((json: { mode?: 'ai_personalised' | 'template' }) => setRegenerateMode(json.mode ?? null))
+      .catch(() => setRegenerateMode(null))
 
     // "All filtered" is only unambiguous when the page is scoped to email_ready —
     // fetch the true eligible count/ids across every page (not just this one).
@@ -522,7 +530,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
       fetch(`/api/leads?${params}`)
         .then((r) => r.json())
         .then((json: { data?: Array<{ id: string; business_name: string; source: string | null }> }) => {
-          const eligible = (json.data ?? []).filter((l) => l.source !== 'manual')
+          const eligible = json.data ?? []
           setFilteredEligible(eligible.map((l) => ({ id: l.id, business_name: l.business_name })))
         })
         .catch(() => setFilteredEligible([]))
@@ -549,25 +557,21 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
 
     setRegenerateRunning(true)
     setRegenerateProgress({ done: 0, total: targets.length })
-    const failed: RegenerateFailure[] = []
-    let succeeded = 0
-
-    for (const lead of targets) {
-      try {
-        const res = await fetch(`/api/leads/${lead.id}/regenerate-email`, { method: 'POST' })
-        if (!res.ok) {
-          const json = await res.json().catch(() => ({} as { error?: string }))
-          failed.push({ lead_id: lead.id, business_name: lead.business_name, reason: json.error ?? `Request failed (${res.status})` })
-        } else {
-          succeeded++
-        }
-      } catch {
-        failed.push({ lead_id: lead.id, business_name: lead.business_name, reason: 'Network error — please try again' })
-      }
-      setRegenerateProgress((p) => ({ ...p, done: p.done + 1 }))
+    try {
+      const res = await fetch('/api/leads/regenerate-emails', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_ids: targets.map((lead) => lead.id) }),
+      })
+      const json = await res.json() as { mode?: 'ai_personalised' | 'template'; regenerated?: number; skipped?: number; failed?: RegenerateFailure[]; error?: string }
+      setRegenerateResult({
+        succeeded: json.regenerated ?? 0, skipped: json.skipped ?? 0,
+        mode: json.mode ?? regenerateMode ?? 'ai_personalised',
+        failed: json.failed ?? (json.error ? [{ lead_id: '', business_name: 'Batch', reason: json.error }] : []),
+      })
+    } catch {
+      setRegenerateResult({ succeeded: 0, skipped: 0, mode: regenerateMode ?? 'ai_personalised', failed: [{ lead_id: '', business_name: 'Batch', reason: 'Network error — please try again' }] })
     }
-
-    setRegenerateResult({ succeeded, failed })
+    setRegenerateProgress({ done: targets.length, total: targets.length })
     setRegenerateRunning(false)
     fetchLeads()
   }
@@ -873,6 +877,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
         running={regenerateRunning}
         progress={regenerateProgress}
         result={regenerateResult}
+        mode={regenerateMode}
         onConfirm={runRegenerate}
         onClose={closeRegenerateDialog}
       />

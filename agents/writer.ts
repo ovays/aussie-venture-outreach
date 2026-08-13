@@ -2,16 +2,21 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { logger } from '@/lib/logger'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
 import { writeOneLead } from '@/lib/write-lead'
+import { readInitialEmailMode } from '@/lib/initial-email-router'
+import type { InitialEmailMode } from '@/lib/settingsDefaults'
+import { loadInitialEmailModeSnapshots } from '@/lib/initial-email-mode-snapshot'
 
 type CategoryStatusRow = {
   name: string
   status: string | null
 }
 
-export async function runWriterAgent(): Promise<void> {
+export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<void> {
   logger.info('writer', 'Writer agent starting')
 
   const supabase = createServiceClient()
+  const mode = modeSnapshot ?? await readInitialEmailMode(supabase)
+  logger.info('writer', 'Initial Email Mode captured', { initial_email_mode: mode })
 
   try {
     const { data: systemSetting, error: settingErr } = await supabase
@@ -85,6 +90,7 @@ export async function runWriterAgent(): Promise<void> {
     })
 
     const dedupeIndex = await fetchPipelineDedupeIndex(supabase)
+    const importedModeSnapshots = await loadInitialEmailModeSnapshots(supabase, leads.map((lead) => lead.id))
     logger.info('writer', '[DEBUG_DEDUPLICATION] Pipeline dedupe index loaded', {
       emails: dedupeIndex.byEmail.size,
       root_domains: dedupeIndex.byRootDomain.size,
@@ -121,7 +127,8 @@ export async function runWriterAgent(): Promise<void> {
     let duplicateSkipped = 0
 
     for (const lead of leads) {
-      const result = await writeOneLead(supabase, lead, dedupeIndex)
+      const leadMode = importedModeSnapshots.get(lead.id) ?? mode
+      const result = await writeOneLead(supabase, lead, dedupeIndex, leadMode)
       if (result.success) {
         if (result.channel === 'email') {
           emailsQueued++
@@ -139,6 +146,7 @@ export async function runWriterAgent(): Promise<void> {
       deadCount,
       duplicateSkipped,
       totalProcessed: processed,
+      initial_email_mode: mode,
     })
 
     await supabase.from('activity_log').insert({
@@ -149,6 +157,7 @@ export async function runWriterAgent(): Promise<void> {
         dead_count: deadCount,
         duplicate_skipped: duplicateSkipped,
         total_processed: processed,
+        initial_email_mode: mode,
       },
     })
   } catch (error) {

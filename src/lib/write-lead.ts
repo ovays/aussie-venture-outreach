@@ -1,12 +1,13 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { writeOutreachEmail } from '@/ai/workflows'
-import { emailBodyToHtml } from '@/lib/utils'
 import { logger } from '@/lib/logger'
 import { addLeadToDedupeIndex, checkLeadDedupe, type LeadDedupeIndex } from '@/lib/deduplication'
+import { routeInitialEmail } from '@/lib/initial-email-router'
+import type { InitialEmailMode } from '@/lib/settingsDefaults'
 
 export type WriteableLeadRow = {
   id: string
   business_name: string
+  category_id: string | null
   category_name: string | null
   suburb: string | null
   city: string | null
@@ -26,6 +27,7 @@ export async function writeOneLead(
   supabase: ReturnType<typeof createServiceClient>,
   lead: WriteableLeadRow,
   dedupeIndex: LeadDedupeIndex,
+  mode: InitialEmailMode,
 ): Promise<WriteOneLeadResult> {
   logger.info('writer', `"${lead.business_name}"`, {
     email: lead.email ?? 'NONE',
@@ -50,8 +52,6 @@ export async function writeOneLead(
   }
 
   try {
-    const contentType = lead.content_type ?? 'remote'
-
     const dedupeDecision = checkLeadDedupe(lead.email, dedupeIndex, lead.id)
     if (dedupeDecision.duplicate) {
       const duplicateMeta = {
@@ -81,35 +81,11 @@ export async function writeOneLead(
       return { success: true, channel: 'duplicate' }
     }
 
-    const emailResult = await writeOutreachEmail({
-      business_name: lead.business_name,
-      category: lead.category_name as string,
-      suburb: lead.suburb ?? '',
-      city: lead.city as string,
-      website: lead.website ?? '',
-      description: lead.description ?? '',
-      services: lead.services ?? '',
-      content_type: contentType,
-    })
+    const emailResult = await routeInitialEmail(supabase, lead, mode)
+    if (!emailResult.ok) return { success: false, error: `${emailResult.error.code}: ${emailResult.error.reason}` }
+    if (emailResult.outcome === 'existing') return { success: true, channel: 'email' }
 
-    logger.info('writer', `Email written for "${lead.business_name}"`, { subject: emailResult.subject })
-
-    const { error: insertErr } = await supabase.from('emails').insert({
-      lead_id: lead.id,
-      type: 'initial_pitch',
-      subject: emailResult.subject,
-      body_html: emailBodyToHtml(emailResult.body),
-      body_text: emailResult.body,
-      status: 'pending_send',
-    })
-
-    if (insertErr) {
-      logger.error('writer', `Email insert failed for "${lead.business_name}"`, {
-        error: insertErr.message,
-        code: insertErr.code,
-      })
-      return { success: false, error: `Email insert failed: ${insertErr.message}` }
-    }
+    logger.info('writer', `Email written for "${lead.business_name}"`, { subject: emailResult.subject, initial_email_mode: mode })
 
     logger.info('writer', `Email queued for "${lead.business_name}" (${lead.email})`)
     // Register this lead in the shared dedupe index immediately so any later
@@ -123,12 +99,11 @@ export async function writeOneLead(
       email: lead.email,
       status: 'email_ready',
     })
-    await supabase.from('leads').update({ status: 'email_ready' }).eq('id', lead.id)
     await supabase.from('activity_log').insert({
       event_type: 'outreach_written',
       lead_id: lead.id,
       description: `Outreach written: ${lead.business_name} (email)`,
-      metadata: { channel: 'email' },
+      metadata: { channel: 'email', initial_email_mode: mode, generation_source: emailResult.generationSource },
     })
     return { success: true, channel: 'email' }
   } catch (error) {

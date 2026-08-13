@@ -5,6 +5,8 @@
 
 import { buildFollowUpEmail } from '@/lib/followup-email-templates'
 import type { FollowUpType } from '@/lib/followup-eligibility'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { generateStoredFollowUp } from '@/lib/stored-sequence-templates'
 
 export interface FollowUpThreadEmail {
   type: string
@@ -53,8 +55,10 @@ export async function generateFollowUpEmail(
   business: FollowUpBusinessContext,
   initialSubject: string,
   _history: FollowUpThreadEmail[],
-  _aiGenerator?: FollowUpAiGenerator
+  _aiGenerator?: FollowUpAiGenerator,
+  storage?: { supabase: SupabaseClient; categoryId: string | null },
 ): Promise<GeneratedFollowUpEmail> {
+  if (storage) return generateStoredFollowUp(storage.supabase, storage.categoryId, type, business.businessName, initialSubject, business.category, business.contentType)
   const template = buildFollowUpEmail(
     type,
     business.businessName,

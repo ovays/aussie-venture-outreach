@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { researchOneLead } from '@/lib/research-lead'
 import { writeOneLead } from '@/lib/write-lead'
+import { readInitialEmailMode } from '@/lib/initial-email-router'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
 
 export async function POST(
@@ -51,7 +52,8 @@ export async function POST(
 
   // Re-run research. researchOneLead handles its own error logging and sets
   // status='researched' on both success and failure paths.
-  const researchResult = await researchOneLead(supabase, lead)
+  const mode = await readInitialEmailMode(supabase)
+  const researchResult = await researchOneLead(supabase, lead, mode)
 
   if (!researchResult.success) {
     return NextResponse.json({ error: `Research failed: ${researchResult.error}` }, { status: 500 })
@@ -70,7 +72,7 @@ export async function POST(
 
   const dedupeIndex = await fetchPipelineDedupeIndex(supabase)
 
-  const writeResult = await writeOneLead(supabase, enrichedLead, dedupeIndex)
+  const writeResult = await writeOneLead(supabase, enrichedLead, dedupeIndex, mode)
 
   if (!writeResult.success) {
     return NextResponse.json({ error: `Draft generation failed: ${writeResult.error}` }, { status: 500 })

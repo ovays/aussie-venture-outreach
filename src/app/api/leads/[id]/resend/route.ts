@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { writeOutreachEmail } from '@/ai/workflows'
 import { sendEmail } from '@/lib/resend'
 import { emailBodyToHtml } from '@/lib/utils'
 import { handleEmailSyncFailure } from '@/lib/email-status'
@@ -8,6 +7,7 @@ import { acquireLock, releaseLock } from '@/lib/distributed-lock'
 import { generateFollowUpEmail } from '@/lib/followup-generation'
 import { determineNextEmailType, buildEmailHistory, buildReferenceChain } from '@/lib/email-sequence'
 import { FOLLOW_UP_NUMBER } from '@/lib/stage-import'
+import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 
 // Generation + send + DB write normally completes in a few seconds; 3 minutes
 // gives ample headroom before a stale lock is reclaimed from a crashed request.
@@ -95,12 +95,13 @@ export async function POST(
   let bodyHtml: string
   let bodyText: string
   let references: string[] = []
+  let initialGenerationSource: 'ai' | 'template' | undefined
 
   if (decision.kind === 'initial') {
     // Look for the existing pending_send draft — the same record we will mark sent.
     const { data: pendingEmail } = await supabase
       .from('emails')
-      .select('id, subject, body_html, body_text')
+      .select('id, subject, body_html, body_text, generation_source')
       .eq('lead_id', id)
       .eq('type', 'initial_pitch')
       .eq('status', 'pending_send')
@@ -115,22 +116,13 @@ export async function POST(
       bodyText = pendingEmail.body_text ?? ''
     } else {
       // No draft yet (lead is new/researched) — generate content on the fly.
-      const contentType = lead.content_type ?? 'remote'
-
-      const emailResult = await writeOutreachEmail({
-        business_name: lead.business_name,
-        category:      lead.category_name,
-        suburb:        lead.suburb ?? '',
-        city:          lead.city,
-        website:       lead.website ?? '',
-        description:   lead.description ?? '',
-        services:      lead.services ?? '',
-        content_type:  contentType,
-      })
-
-      subject  = emailResult.subject
-      bodyText = emailResult.body
-      bodyHtml = emailBodyToHtml(emailResult.body)
+      const mode = await readInitialEmailMode(supabase)
+      const generated = await routeInitialEmail(supabase, lead, mode, { operation: 'content_only' })
+      if (!generated.ok) return NextResponse.json({ error: generated.error.reason, details: generated.error, mode }, { status: 422 })
+      subject = generated.subject!
+      bodyText = generated.body!
+      bodyHtml = generated.html!
+      initialGenerationSource = generated.generationSource
     }
   } else {
     // Next stage is a follow-up — generate it from the full thread history,
@@ -154,7 +146,9 @@ export async function POST(
         contentType,
       },
       decision.initialEmail.subject,
-      history
+      history,
+      undefined,
+      { supabase, categoryId: lead.category_id ?? null },
     )
 
     subject  = generated.subject
@@ -184,6 +178,7 @@ export async function POST(
       resend_id:  result.id,
       message_id: result.messageId,
       sent_at:    sentAt,
+      ...(emailType === 'initial_pitch' && initialGenerationSource ? { generation_source: initialGenerationSource } : {}),
     }).eq('id', emailRowId)
 
     if (emailUpdateErr) {
@@ -212,6 +207,7 @@ export async function POST(
       resend_id:  result.id,
       message_id: result.messageId,
       sent_at:    sentAt,
+      ...(emailType === 'initial_pitch' && initialGenerationSource ? { generation_source: initialGenerationSource } : {}),
     }).select('id').single()
 
     if (insertErr) {
@@ -227,6 +223,7 @@ export async function POST(
         resend_id:  result.id,
         message_id: result.messageId,
         sent_at:    sentAt,
+        ...(emailType === 'initial_pitch' && initialGenerationSource ? { generation_source: initialGenerationSource } : {}),
       })
       await supabase.from('leads').update({ status: 'contacted', updated_at: sentAt }).eq('id', id)
       return NextResponse.json(

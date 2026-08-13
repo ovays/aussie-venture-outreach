@@ -2,7 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
 import { emailBodyToHtml } from '@/lib/utils'
 import { logger } from '@/lib/logger'
-import { writeReactivationEmail } from '@/ai/workflows'
+import { generateStoredReactivation } from '@/lib/stored-sequence-templates'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
 import { getAnalyticsDayRange } from '@/lib/analytics'
 
@@ -19,6 +19,7 @@ interface ContactedLead {
   email: string | null
   reactivation_sent_at: string | null
   category_name: string | null
+  category_id: string | null
   suburb: string | null
   city: string | null
   content_type: string | null
@@ -93,7 +94,7 @@ export async function runReactivationAgent(): Promise<void> {
 
     const { data: contactedLeads } = await supabase
       .from('leads')
-      .select('id, business_name, email, reactivation_sent_at, category_name, suburb, city, content_type, emails(id, type, subject, sent_at)')
+      .select('id, business_name, email, reactivation_sent_at, category_id, category_name, suburb, city, content_type, emails(id, type, subject, sent_at)')
       .eq('status', 'contacted')
 
     if (!contactedLeads?.length) {
@@ -185,13 +186,10 @@ export async function runReactivationAgent(): Promise<void> {
       if (!lead.email) continue // already guaranteed by the phase-1 filter; narrows the type for sendEmail() below
 
       try {
-      const emailResult = await writeReactivationEmail({
-        business_name: lead.business_name,
-        category: lead.category_name ?? 'local business',
-        suburb: lead.suburb ?? '',
-        city: lead.city ?? 'Sydney',
-        content_type: lead.content_type ?? 'remote',
-      })
+      const emailResult = await generateStoredReactivation(
+        supabase, lead.category_id, lead.business_name,
+        lead.category_name ?? 'local business', lead.content_type ?? 'remote',
+      )
 
       console.log(`[REACTIVATION_EMAIL_GENERATED] lead=${lead.business_name} category=${lead.category_name ?? 'unknown'}`)
       console.log(`[REACTIVATION_SUBJECT] subject="${emailResult.subject}"`)

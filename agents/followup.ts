@@ -25,6 +25,7 @@ interface ContactedLead {
   id: string
   business_name: string
   email: string | null
+  category_id?: string | null
   category_name: string | null
   content_type: string | null
   suburb: string | null
@@ -121,7 +122,8 @@ export async function sendFollowUp(
     },
     candidate.initialEmail.subject,
     history,
-    aiGenerator
+    aiGenerator,
+    { supabase, categoryId: candidate.lead.category_id ?? null },
   )
 
   logger.info('followup', `Follow-up ${followUpNumber} content generated`, {

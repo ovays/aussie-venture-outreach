@@ -107,14 +107,14 @@ async function main() {
     assert(src.includes("addLeadToDedupeIndex, checkLeadDedupe") || /import\s*{[^}]*addLeadToDedupeIndex[^}]*}\s*from\s*'@\/lib\/deduplication'/.test(src),
       'write-lead.ts imports addLeadToDedupeIndex from @/lib/deduplication')
 
-    const insertIdx = src.indexOf("await supabase.from('emails').insert(")
+    const routeIdx = src.indexOf('await routeInitialEmail(')
     const addToIndexIdx = src.indexOf('addLeadToDedupeIndex(dedupeIndex,')
-    const returnEmailIdx = src.indexOf("return { success: true, channel: 'email' }")
+    const returnEmailIdx = src.lastIndexOf("return { success: true, channel: 'email' }")
 
-    assert(insertIdx !== -1, 'write-lead.ts still inserts the queued email row')
+    assert(routeIdx !== -1, 'write-lead.ts routes the queued email through the central router')
     assert(addToIndexIdx !== -1, 'write-lead.ts calls addLeadToDedupeIndex(dedupeIndex, ...)')
     assert(returnEmailIdx !== -1, "write-lead.ts still returns { success: true, channel: 'email' }")
-    assert(insertIdx < addToIndexIdx, 'The index is updated only after the email insert (so a failed insert never falsely marks the email as claimed)')
+    assert(routeIdx < addToIndexIdx, 'The index is updated only after the router saves the email')
     assert(addToIndexIdx < returnEmailIdx, 'The index is updated before writeOneLead returns, so the very next loop iteration sees it')
   }
 

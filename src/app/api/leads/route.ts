@@ -5,6 +5,7 @@ import { checkRateLimit } from '@/lib/rateLimit'
 import { STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
 import { STAGE_VALUES } from '@/lib/stage-import'
 import { createLead } from '@/lib/create-lead'
+import { readInitialEmailMode } from '@/lib/initial-email-router'
 
 const patchLeadSchema = z.object({
   id: z.string().uuid(),
@@ -52,6 +53,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
   const supabase = await createClient()
+  const initialEmailMode = await readInitialEmailMode(supabase)
   const raw = await request.json()
 
   const parsed = createLeadSchema.safeParse(raw)
@@ -67,6 +69,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const result = await createLead(supabase, {
     business_name, email, website, suburb, city, category_id, category_name, force,
     current_stage, stage_completed_date,
+    initialEmail: { mode: initialEmailMode, action: 'generate_now' },
   })
 
   if (!result.ok) {
@@ -81,7 +84,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: result.error }, { status: result.status })
   }
 
-  return NextResponse.json({ data: result.lead }, { status: 201 })
+  return NextResponse.json({ data: result.lead, generation_error: result.generationError ?? null, mode: initialEmailMode }, { status: 201 })
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {

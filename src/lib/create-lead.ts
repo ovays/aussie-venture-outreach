@@ -6,7 +6,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeEmail, extractRootDomainFromEmail, PERSONAL_EMAIL_PROVIDER_DOMAINS } from '@/lib/deduplication'
 import { resolveContentType } from '@/lib/content-type'
-import { writeOutreachEmail } from '@/ai/workflows'
 import { emailBodyToHtml } from '@/lib/utils'
 import { generateFollowUpEmail, type FollowUpThreadEmail } from '@/lib/followup-generation'
 import { logger } from '@/lib/logger'
@@ -17,6 +16,13 @@ import {
   type LeadImportStage,
 } from '@/lib/stage-import'
 import type { FollowUpType } from '@/lib/followup-eligibility'
+import { routeInitialEmail } from '@/lib/initial-email-router'
+import type { InitialEmailMode } from '@/lib/settingsDefaults'
+import { saveInitialEmailModeSnapshot } from '@/lib/initial-email-mode-snapshot'
+
+export type InitialEmailCreationPolicy =
+  | { mode: InitialEmailMode; action: 'generate_now' }
+  | { mode: InitialEmailMode; action: 'defer_to_writer'; snapshotSource: 'csv_import' }
 
 export interface CreateLeadInput {
   business_name: string
@@ -30,10 +36,11 @@ export interface CreateLeadInput {
   current_stage: LeadImportStage
   stage_completed_date?: string
   source?: string
+  initialEmail?: InitialEmailCreationPolicy
 }
 
 export type CreateLeadResult =
-  | { ok: true; status: 201; lead: Record<string, unknown> }
+  | { ok: true; status: 201; lead: Record<string, unknown>; generationError?: string }
   | {
       ok: false
       status: 409
@@ -47,7 +54,7 @@ export type CreateLeadResult =
 export async function createLead(supabase: SupabaseClient, input: CreateLeadInput): Promise<CreateLeadResult> {
   const {
     business_name, email, website, suburb, city, category_id, category_name, force,
-    current_stage, stage_completed_date, source,
+    current_stage, stage_completed_date, source, initialEmail,
   } = input
 
   const normalizedEmail = normalizeEmail(email)
@@ -146,9 +153,11 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
         suburb,
         city,
         categoryName: category_name,
+        categoryId: category_id,
         contentType:  (lead.content_type as string | null) ?? 'remote',
         stage:        current_stage,
         completedDate: new Date(`${stage_completed_date}T00:00:00.000Z`),
+        initialEmailMode: initialEmail?.mode ?? 'ai_personalised',
       })
 
       if (!backfillResult.ok) {
@@ -164,7 +173,26 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
     }
   }
 
-  return { ok: true, status: 201, lead: lead as Record<string, unknown> }
+  if (!initialEmail) {
+    return { ok: true, status: 201, lead: lead as Record<string, unknown> }
+  }
+
+  if (initialEmail.action === 'defer_to_writer') {
+    const snapshot = await saveInitialEmailModeSnapshot(supabase, lead.id, initialEmail.mode, initialEmail.snapshotSource)
+    if (!snapshot.ok) {
+      await rollbackStagedLead(supabase, lead.id, snapshot.error)
+      return { ok: false, status: 500, error: `Failed to stage Initial Email generation: ${snapshot.error}` }
+    }
+    return { ok: true, status: 201, lead: lead as Record<string, unknown> }
+  }
+
+  const generated = await routeInitialEmail(supabase, {
+    id: lead.id, business_name, category_id, category_name, suburb: suburb ?? null, city,
+    website: website ?? null, description: null, services: null, content_type: (lead.content_type as string | null) ?? 'remote',
+  }, initialEmail.mode)
+  return generated.ok
+    ? { ok: true, status: 201, lead: lead as Record<string, unknown> }
+    : { ok: true, status: 201, lead: lead as Record<string, unknown>, generationError: `${generated.error.code}: ${generated.error.reason}` }
 }
 
 // Deletes the lead created just before the staged-import backfill so a
@@ -199,12 +227,14 @@ async function backfillLeadStageHistory(
     suburb?: string
     city: string
     categoryName: string
+    categoryId: string
     contentType: string
     stage: LeadImportStage
     completedDate: Date
+    initialEmailMode: InitialEmailMode
   }
 ): Promise<{ ok: true; lead: unknown } | { ok: false; error: string }> {
-  const { leadId, businessName, website, suburb, city, categoryName, contentType, stage, completedDate } = params
+  const { leadId, businessName, website, suburb, city, categoryName, categoryId, contentType, stage, completedDate, initialEmailMode } = params
 
   const { data: settingsRows } = await supabase
     .from('settings')
@@ -222,16 +252,12 @@ async function backfillLeadStageHistory(
 
   const stageEmails = computeBackdatedStageEmails(stage, completedDate, followUpSettings)
 
-  const emailResult = await writeOutreachEmail({
-    business_name: businessName,
-    category:      categoryName,
-    suburb:        suburb ?? '',
-    city,
-    website:       website ?? '',
-    description:   '',
-    services:      '',
-    content_type:  contentType,
-  })
+  const generatedInitial = await routeInitialEmail(supabase, {
+    id: leadId, business_name: businessName, category_id: categoryId, category_name: categoryName,
+    suburb: suburb ?? null, city, website: website ?? null, description: null, services: null, content_type: contentType,
+  }, initialEmailMode, { operation: 'content_only' })
+  if (!generatedInitial.ok) return { ok: false, error: `${generatedInitial.error.code}: ${generatedInitial.error.reason}` }
+  const emailResult = { subject: generatedInitial.subject!, body: generatedInitial.body! }
 
   // Built sequentially (not .map()) because each follow-up's AI prompt needs
   // the full thread up to that point, including any earlier follow-ups
@@ -245,7 +271,8 @@ async function backfillLeadStageHistory(
     body_html: string
     body_text: string
     status: string
-    sent_at: string
+      sent_at: string
+      generation_source?: 'ai' | 'template'
   }> = []
   const history: FollowUpThreadEmail[] = [{ type: 'initial_pitch', subject: emailResult.subject, body: emailResult.body }]
 
@@ -259,6 +286,7 @@ async function backfillLeadStageHistory(
         body_text: emailResult.body,
         status:    'sent',
         sent_at:   stageEmail.sentAt.toISOString(),
+        generation_source: generatedInitial.generationSource,
       })
       continue
     }
@@ -277,7 +305,9 @@ async function backfillLeadStageHistory(
         contentType,
       },
       emailResult.subject,
-      history
+      history,
+      undefined,
+      { supabase, categoryId },
     )
 
     emailRows.push({

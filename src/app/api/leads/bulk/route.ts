@@ -8,6 +8,7 @@ import { writeOneLead } from '@/lib/write-lead'
 import { handleEmailSyncFailure } from '@/lib/email-status'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
 import { logger } from '@/lib/logger'
+import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 
 // Same protection agents/sender.ts (idempotency re-check) and
 // resend/route.ts (per-lead lock) already apply to their send paths — this
@@ -35,6 +36,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const { action, lead_ids } = parsed.data
+  const initialEmailMode = action === 'research_leads' || action === 'send_initial_emails' ? await readInitialEmailMode(supabase) : null
 
   // ── Send Initial Emails ──────────────────────────────────────────────────────
   if (action === 'send_initial_emails') {
@@ -44,7 +46,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     for (const lead_id of lead_ids) {
       const { data: lead } = await supabase
         .from('leads')
-        .select('id, business_name, email, status, source, city, category_name, suburb, website, description, services')
+        .select('id, business_name, email, status, source, city, category_id, category_name, suburb, website, description, services, content_type')
         .eq('id', lead_id)
         .single()
 
@@ -85,18 +87,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           continue
         }
 
-        const { data: pendingEmail } = await supabase
+        let { data: pendingEmail } = await supabase
           .from('emails')
-          .select('id, subject, body_html, body_text')
+          .select('id, subject, body_html, body_text, generation_source')
           .eq('lead_id', lead_id)
           .eq('type', 'initial_pitch')
           .eq('status', 'pending_send')
           .limit(1)
           .maybeSingle()
 
-        const subject   = pendingEmail?.subject   ?? `Partnership opportunity — ${lead.business_name}`
-        const bodyHtml  = pendingEmail?.body_html  ?? `<p>Hi,</p><p>We would love to work with ${lead.business_name}.</p>`
-        const bodyText  = pendingEmail?.body_text  ?? `Hi,\n\nWe would love to work with ${lead.business_name}.\n\nBest,\nOwais`
+        if (!pendingEmail) {
+          const generated = await routeInitialEmail(supabase, lead, initialEmailMode!)
+          if (!generated.ok) {
+            failed.push({ lead_id, business_name: lead.business_name, reason: generated.error.reason })
+            continue
+          }
+          const reload = await supabase.from('emails').select('id, subject, body_html, body_text, generation_source').eq('lead_id', lead_id).eq('type', 'initial_pitch').eq('status', 'pending_send').limit(1).maybeSingle()
+          pendingEmail = reload.data
+        }
+        if (!pendingEmail) {
+          failed.push({ lead_id, business_name: lead.business_name, reason: 'No pending Initial Email could be prepared' })
+          continue
+        }
+        const subject = pendingEmail.subject
+        const bodyHtml = pendingEmail.body_html
+        const bodyText = pendingEmail.body_text ?? ''
 
         const result = await sendEmail({ to: lead.email, subject, html: bodyHtml, text: bodyText, leadId: lead_id })
 
@@ -214,7 +229,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         continue
       }
 
-      const researchResult = await researchOneLead(supabase, lead)
+      const researchResult = await researchOneLead(supabase, lead, initialEmailMode!)
       if (!researchResult.success) {
         failed.push({ lead_id, business_name: lead.business_name, reason: `Research failed: ${researchResult.error}` })
         continue
@@ -223,7 +238,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // Merge enriched fields so writeOneLead sees the updated email/description/services/instagram
       const enrichedLead = { ...lead, ...researchResult.updatedFields }
 
-      const writeResult = await writeOneLead(supabase, enrichedLead, dedupeIndex)
+      const writeResult = await writeOneLead(supabase, enrichedLead, dedupeIndex, initialEmailMode!)
       if (!writeResult.success) {
         failed.push({ lead_id, business_name: lead.business_name, reason: `Draft generation failed: ${writeResult.error}` })
         continue
@@ -240,7 +255,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       researched++
     }
 
-    return NextResponse.json({ researched, failed })
+    return NextResponse.json({ researched, failed, mode: initialEmailMode })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

@@ -4,6 +4,8 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { createLead } from '@/lib/create-lead'
 import { STAGE_VALUES } from '@/lib/stage-import'
+import { readInitialEmailMode } from '@/lib/initial-email-router'
+import { initialEmailPolicyForCsvImport } from '@/lib/initial-email-mode-snapshot'
 
 // Rows are already normalized/defaulted client-side (blank rows dropped,
 // stage labels resolved, city/category defaults applied) — this schema is a
@@ -40,6 +42,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const { rows } = parsed.data
+  const initialEmailMode = await readInitialEmailMode(supabase)
 
   const { data: categories, error: categoriesErr } = await supabase
     .from('categories')
@@ -80,10 +83,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       current_stage: row.current_stage,
       stage_completed_date: row.stage_completed_date,
       source: 'manual',
+      initialEmail: initialEmailPolicyForCsvImport(initialEmailMode),
     })
 
     if (result.ok) {
       imported++
+      if (result.generationError) failed.push({ row_num: row.row_num, business_name: row.business_name, email: row.email, reason: result.generationError })
       continue
     }
 
@@ -95,5 +100,5 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     failed.push({ row_num: row.row_num, business_name: row.business_name, email: row.email, reason: result.error })
   }
 
-  return NextResponse.json({ total: rows.length, imported, duplicates, failed })
+  return NextResponse.json({ total: rows.length, imported, duplicates, failed, mode: initialEmailMode })
 }

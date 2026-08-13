@@ -85,7 +85,7 @@ async function main() {
 
     const loopIdx = reactivationSrc.indexOf('for (const lead of contactedLeads as ContactedLead[]) {')
     const tryIdx = reactivationSrc.indexOf('try {', loopIdx)
-    const sendIdx = reactivationSrc.indexOf('await writeReactivationEmail(', loopIdx)
+    const sendIdx = reactivationSrc.indexOf('await generateStoredReactivation(', loopIdx)
     const catchIdx = reactivationSrc.indexOf('} catch (error) {', sendIdx)
 
     assert(loopIdx !== -1, 'The per-lead reactivation loop still exists')

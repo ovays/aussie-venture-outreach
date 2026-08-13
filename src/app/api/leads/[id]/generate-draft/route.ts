@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { writeOutreachEmail } from '@/ai/workflows'
-import { emailBodyToHtml } from '@/lib/utils'
+import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 
 export async function POST(
   _request: NextRequest,
@@ -12,7 +11,7 @@ export async function POST(
 
   const { data: lead, error: leadErr } = await supabase
     .from('leads')
-    .select('id, business_name, category_name, suburb, city, website, description, services, email, status, source, content_type')
+    .select('id, business_name, category_id, category_name, suburb, city, website, description, services, email, status, source, content_type')
     .eq('id', id)
     .single()
 
@@ -28,50 +27,12 @@ export async function POST(
     return NextResponse.json({ error: 'Lead has no email address' }, { status: 400 })
   }
 
-  if (lead.status !== 'researched') {
+  if (!['researched', 'email_ready'].includes(lead.status)) {
     return NextResponse.json({ error: `Lead is already ${lead.status}` }, { status: 400 })
   }
 
-  // Idempotency: if a pending draft already exists, return success without re-generating
-  const { data: existing } = await supabase
-    .from('emails')
-    .select('id')
-    .eq('lead_id', id)
-    .eq('type', 'initial_pitch')
-    .eq('status', 'pending_send')
-    .maybeSingle()
-
-  if (existing) {
-    return NextResponse.json({ success: true })
-  }
-
-  const contentType = lead.content_type ?? 'remote'
-
-  const emailResult = await writeOutreachEmail({
-    business_name: lead.business_name,
-    category:      lead.category_name,
-    suburb:        lead.suburb ?? '',
-    city:          lead.city,
-    website:       lead.website ?? '',
-    description:   lead.description ?? '',
-    services:      lead.services ?? '',
-    content_type:  contentType,
-  })
-
-  const { error: insertErr } = await supabase.from('emails').insert({
-    lead_id:   id,
-    type:      'initial_pitch',
-    subject:   emailResult.subject,
-    body_html: emailBodyToHtml(emailResult.body),
-    body_text: emailResult.body,
-    status:    'pending_send',
-  })
-
-  if (insertErr) {
-    return NextResponse.json({ error: 'Failed to save draft' }, { status: 500 })
-  }
-
-  await supabase.from('leads').update({ status: 'email_ready' }).eq('id', id)
-
-  return NextResponse.json({ success: true })
+  const mode = await readInitialEmailMode(supabase)
+  const result = await routeInitialEmail(supabase, lead, mode)
+  if (!result.ok) return NextResponse.json({ error: result.error.reason, details: result.error, mode }, { status: 422 })
+  return NextResponse.json({ success: true, mode, outcome: result.outcome })
 }

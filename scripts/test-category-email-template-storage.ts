@@ -53,15 +53,15 @@ for (const path of [
   'src/ai/email-generation.ts',
   'src/ai/workflows.ts',
   'src/lib/followup-email-templates.ts',
-  'src/lib/followup-generation.ts',
-  'src/lib/write-lead.ts',
-  'agents/writer.ts',
-  'trigger/daily-pipeline.ts',
 ]) {
   const source = readFileSync(resolve(root, path), 'utf8')
-  assert.equal(source.includes('category_email_templates'), false, `${path} must not read new template storage yet`)
-  assert.equal(source.includes('initial_email_mode'), false, `${path} must not route on Initial Email Mode yet`)
-  assert.equal(source.includes('generation_source'), false, `${path} must not populate generation_source yet`)
+  assert.equal(source.includes('category_email_templates'), false, `${path} remains independent of template storage`)
+  assert.equal(source.includes('initial_email_mode'), false, `${path} does not select Initial Email Mode`)
+  assert.equal(source.includes('generation_source'), false, `${path} does not mutate email records`)
 }
+
+const router = readFileSync(resolve(root, 'src/lib/initial-email-router.ts'), 'utf8')
+assert.match(router, /initial_email_mode/)
+assert.match(router, /generation_source/)
 
 console.log('Category email template storage checks passed')

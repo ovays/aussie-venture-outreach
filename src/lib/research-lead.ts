@@ -7,6 +7,7 @@ import {
   scoreHalalQualification,
 } from '@/lib/halalQualification'
 import type { HalalQualificationResult } from '@/lib/halalQualification'
+import type { InitialEmailMode } from '@/lib/settingsDefaults'
 import { fetchRawHtml, extractMailtoEmail } from '@/lib/email-extraction'
 
 export type ResearchableLeadRow = {
@@ -40,6 +41,7 @@ export type ResearchOneLeadResult =
 export async function researchOneLead(
   supabase: ReturnType<typeof createServiceClient>,
   lead: ResearchableLeadRow,
+  mode: InitialEmailMode = 'ai_personalised',
 ): Promise<ResearchOneLeadResult> {
   try {
     let websiteText = ''
@@ -140,7 +142,7 @@ export async function researchOneLead(
       facebook_url: null as string | null,
       other_social: null as string | null,
     }
-    if (websiteText) {
+    if (websiteText && mode === 'ai_personalised') {
       enriched = await extractWebsiteData(websiteText)
     }
     if (!enriched.instagram_handle && lead.business_name) {
