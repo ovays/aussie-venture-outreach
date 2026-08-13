@@ -6,30 +6,17 @@ import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
 import { CategoryModal } from './CategoryModal'
 import { resolveContentType } from '@/lib/content-type'
-
-interface Category {
-  id: string
-  name: string
-  halal_filter: boolean
-  cities: 'sydney_only' | 'all' | 'custom'
-  custom_cities: string[] | null
-  content_type: 'visit' | 'remote' | 'both'
-  city_content_types: Record<string, 'visit' | 'remote'> | null
-  pitch_template: string | null
-  dm_template: string | null
-  search_keywords: string[] | null
-  use_priority_suburbs: boolean
-  status: 'active' | 'paused'
-}
+import type { ManagedCategory } from '@/lib/email-template-types'
 
 interface CategoriesTableProps {
-  initialCategories: Category[]
+  initialCategories: ManagedCategory[]
 }
 
 export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
   const [categories, setCategories] = useState(initialCategories)
   const [modalOpen, setModalOpen] = useState(false)
-  const [editingCategory, setEditingCategory] = useState<Category | null>(null)
+  const [editingCategory, setEditingCategory] = useState<ManagedCategory | null>(null)
+  const [error, setError] = useState('')
   const [cityOptions, setCityOptions] = useState<string[]>([])
 
   useEffect(() => {
@@ -41,18 +28,26 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
 
   async function toggleStatus(id: string, current: 'active' | 'paused') {
     const newStatus = current === 'active' ? 'paused' : 'active'
-    await fetch('/api/categories', {
+    setError('')
+    const res = await fetch('/api/categories', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, status: newStatus }),
     })
-    setCategories((prev) => prev.map((c) => c.id === id ? { ...c, status: newStatus } : c))
+    const json = await res.json() as { error?: string }
+    if (!res.ok) { setError(json.error ?? 'Unable to change category status.'); return }
+    await refreshCategories()
   }
 
   async function refreshCategories() {
     const res = await fetch('/api/categories')
-    const json = await res.json() as { data: Category[] }
+    const json = await res.json() as { data?: ManagedCategory[]; error?: string }
+    if (!res.ok) {
+      setError(json.error ?? 'Unable to refresh categories.')
+      return
+    }
     setCategories(json.data ?? [])
+    window.dispatchEvent(new Event('category-readiness-changed'))
   }
 
   function openNew() {
@@ -60,7 +55,7 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
     setModalOpen(true)
   }
 
-  function openEdit(cat: Category) {
+  function openEdit(cat: ManagedCategory) {
     setEditingCategory(cat)
     setModalOpen(true)
   }
@@ -74,7 +69,7 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
   // Effective per-city behaviour, computed via the actual resolver: city_content_types
   // override, then the category's own content_type default, then (only for categories
   // with no fixed default) the legacy Sydney + VISIT_ELIGIBLE_CATEGORIES rule.
-  function effectiveContentTypeLabel(cat: Category): string {
+  function effectiveContentTypeLabel(cat: ManagedCategory): string {
     if (cityOptions.length === 0) return 'Loading…'
     const visitCities = cityOptions.filter((city) => resolveContentType(cat, city) === 'visit')
     const remoteCities = cityOptions.filter((city) => resolveContentType(cat, city) === 'remote')
@@ -101,7 +96,7 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e', background: '#0f1117' }}>
-              {['Name', 'Cities', 'Effective Content Type', 'Keywords', 'Status', 'Actions'].map((h) => (
+              {['Name', 'Cities', 'Effective Content Type', 'Initial Template', 'Sequence', 'Status', 'Actions'].map((h) => (
                 <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>
                   {h}
                 </th>
@@ -126,14 +121,19 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
                 <td className="px-4 py-3 text-xs" style={{ color: '#94a3b8' }}>
                   {effectiveContentTypeLabel(cat)}
                 </td>
+                <td className="px-4 py-3 text-xs">
+                  <span style={{ color: cat.initialTemplateReadiness.ready ? '#4ade80' : cat.initialTemplateReadiness.status === 'missing' ? '#fbbf24' : '#f87171' }}>
+                    {cat.initialTemplateReadiness.ready ? 'Ready' : cat.initialTemplateReadiness.status === 'missing' ? 'Missing' : 'Invalid'}
+                  </span>
+                </td>
                 <td className="px-4 py-3 text-xs" style={{ color: '#94a3b8' }}>
-                  {(cat.search_keywords ?? []).length} keyword{(cat.search_keywords ?? []).length !== 1 ? 's' : ''}
+                  {Object.values(cat.templateCompleteness).filter(Boolean).length}/5 complete
                 </td>
                 <td className="px-4 py-3">
-                  <Toggle
+                  <div className="flex items-center gap-2"><Toggle
                     checked={cat.status === 'active'}
                     onChange={() => toggleStatus(cat.id, cat.status)}
-                  />
+                  /><span className="text-xs" style={{ color: '#94a3b8' }}>{cat.status === 'active' ? 'Active' : 'Inactive'}</span></div>
                 </td>
                 <td className="px-4 py-3">
                   <Button size="sm" variant="ghost" onClick={() => openEdit(cat)}>
@@ -147,13 +147,17 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
         </table>
       </div>
 
-      <CategoryModal
-        key={editingCategory?.id ?? 'new'}
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        category={editingCategory}
-        onSaved={refreshCategories}
-      />
+      {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+
+      {modalOpen && (
+        <CategoryModal
+          key={editingCategory?.id ?? 'new'}
+          open
+          onClose={() => setModalOpen(false)}
+          category={editingCategory}
+          onSaved={refreshCategories}
+        />
+      )}
     </div>
   )
 }

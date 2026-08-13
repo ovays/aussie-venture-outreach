@@ -6,6 +6,7 @@ import { CitySuburbs } from '@/components/settings/CitySuburbs'
 import { LeadFiltering } from '@/components/settings/LeadFiltering'
 import { Card } from '@/components/ui/Card'
 import { withDefaultSettings } from '@/lib/settingsDefaults'
+import { getTemplateModeBlockers, hydrateCategoryTemplates } from '@/lib/category-email-templates'
 
 export const revalidate = 0
 
@@ -37,9 +38,10 @@ export default async function SettingsPage() {
 
   const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
 
-  const [{ data: settings }, { data: categories }, { data: usageEvents }, { data: suburbRows }, { count: dlqCount }, { count: searchCacheCount }] = await Promise.all([
+  const [{ data: settings }, { data: categories }, { data: categoryTemplates }, { data: usageEvents }, { data: suburbRows }, { count: dlqCount }, { count: searchCacheCount }] = await Promise.all([
     supabase.from('settings').select('*').order('key'),
     supabase.from('categories').select('*').order('name'),
+    supabase.from('category_email_templates').select('category_id, template_type, subject_template, body_template'),
     supabase
       .from('activity_log')
       .select('created_at, metadata')
@@ -123,6 +125,12 @@ export default async function SettingsPage() {
   const settingsWithDefaults = withDefaultSettings(settings ?? [])
 
   const settingsByKey = Object.fromEntries(settingsWithDefaults.map((s) => [s.key, s.value]))
+  const categoriesWithTemplates = hydrateCategoryTemplates(categories ?? [], categoryTemplates ?? [])
+  const templateModeBlockers = getTemplateModeBlockers(categoriesWithTemplates.map((category) => ({
+    name: category.name,
+    status: category.status as 'active' | 'paused',
+    initialTemplate: category.initialTemplateReadiness.status === 'missing' ? null : category.templates.initial_pitch,
+  })))
 
   function parseJsonArray(raw: string): string[] {
     try { return JSON.parse(raw) as string[] } catch { return [] }
@@ -148,7 +156,7 @@ export default async function SettingsPage() {
           </Card>
         )}
         <Card>
-          <SystemSettings initialSettings={settingsWithDefaults} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} cities={Object.keys(suburbsByCity).sort()} />
+          <SystemSettings initialSettings={settingsWithDefaults} initialTemplateModeBlockers={templateModeBlockers} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} cities={Object.keys(suburbsByCity).sort()} />
         </Card>
 
         <Card>
@@ -163,7 +171,9 @@ export default async function SettingsPage() {
         </Card>
 
         <Card>
-          <CategoriesTable initialCategories={categories ?? []} />
+          <div id="categories">
+            <CategoriesTable initialCategories={categoriesWithTemplates} />
+          </div>
         </Card>
       </div>
     </div>

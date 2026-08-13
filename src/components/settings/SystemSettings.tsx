@@ -1,10 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Toggle } from '@/components/ui/Toggle'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import type { OutscraperUsageData } from '@/app/dashboard/settings/page'
+import type { TemplateModeBlocker } from '@/lib/category-email-templates'
+import type { ManagedCategory } from '@/lib/email-template-types'
 
 interface Setting {
   key: string
@@ -14,18 +16,39 @@ interface Setting {
 
 interface SystemSettingsProps {
   initialSettings: Setting[]
+  initialTemplateModeBlockers: TemplateModeBlocker[]
   usageData: OutscraperUsageData
   hasGoogleMapsKey: boolean
   searchCacheCount: number
   cities: string[]
 }
 
-export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, searchCacheCount, cities }: SystemSettingsProps) {
+export function SystemSettings({ initialSettings, initialTemplateModeBlockers, usageData, hasGoogleMapsKey, searchCacheCount, cities }: SystemSettingsProps) {
   const [settings, setSettings] = useState<Record<string, string>>(
     Object.fromEntries(initialSettings.map((s) => [s.key, s.value]))
   )
   const [saving, setSaving] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
+  const [modeError, setModeError] = useState<string | null>(null)
+  const [modeBlockers, setModeBlockers] = useState<TemplateModeBlocker[]>(initialTemplateModeBlockers)
+
+  useEffect(() => {
+    async function refreshTemplateModeBlockers() {
+      try {
+        const response = await fetch('/api/categories')
+        const json = await response.json() as { data?: ManagedCategory[] }
+        if (!response.ok) return
+        setModeBlockers((json.data ?? [])
+          .filter((category) => category.status === 'active' && !category.initialTemplateReadiness.ready)
+          .map((category) => ({ name: category.name, reasons: category.initialTemplateReadiness.reasons })))
+      } catch {
+        // The Settings save endpoint remains authoritative if a background refresh fails.
+      }
+    }
+
+    window.addEventListener('category-readiness-changed', refreshTemplateModeBlockers)
+    return () => window.removeEventListener('category-readiness-changed', refreshTemplateModeBlockers)
+  }, [])
 
   // Danger Zone — reset state
   const [showResetModal, setShowResetModal] = useState(false)
@@ -67,10 +90,15 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value }),
       })
-      const json = await res.json() as { data?: Setting; error?: string }
+      const json = await res.json() as { data?: Setting; error?: string; blockers?: TemplateModeBlocker[] }
+      if (key === 'initial_email_mode') {
+        setModeError(res.ok ? null : (json.error ?? 'Unable to save Initial Email Mode.'))
+        if (json.blockers) setModeBlockers(json.blockers)
+      }
       if (!res.ok) throw new Error(json.error ?? `Settings save failed (${res.status})`)
 
       setSettings((prev) => ({ ...prev, [key]: json.data?.value ?? value }))
+      if (key === 'initial_email_mode') setModeBlockers([])
       setSaved(key)
       setTimeout(() => setSaved(null), 2000)
     } catch (error) {
@@ -230,6 +258,43 @@ export function SystemSettings({ initialSettings, usageData, hasGoogleMapsKey, s
       <section>
         <h3 className="text-base font-semibold text-white mb-4">System Settings</h3>
         <div className="space-y-4">
+          <div className="py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+            <div className="flex items-start justify-between gap-6">
+              <div>
+                <p className="text-sm text-white">Initial Email Mode</p>
+                <p className="text-xs mt-1 max-w-xl" style={{ color: '#64748b' }}>
+                  Affects initial emails only. Existing generated emails are unchanged; Follow-up 1, 2, 3 and Reactivation are not controlled by this setting.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 shrink-0">
+                {([['ai_personalised', 'AI Personalised'], ['template', 'Template']] as const).map(([value, label]) => (
+                  <label key={value} className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: '#e2e8f0' }}>
+                    <input
+                      type="radio"
+                      name="initial-email-mode"
+                      value={value}
+                      checked={(settings.initial_email_mode ?? 'ai_personalised') === value}
+                      disabled={saving === 'initial_email_mode'}
+                      onChange={() => updateSetting('initial_email_mode', value)}
+                    />
+                    {label}
+                  </label>
+                ))}
+                <SaveIndicator k="initial_email_mode" />
+              </div>
+            </div>
+            {(modeError || ((settings.initial_email_mode ?? 'ai_personalised') === 'template' && modeBlockers.length > 0)) && (
+              <div className="mt-3 rounded-lg px-4 py-3 text-sm" style={{ background: '#7f1d1d30', border: '1px solid #7f1d1d', color: '#fca5a5' }}>
+                <p>{modeError ?? 'Template mode is selected, but some active categories are not ready.'}</p>
+                {modeBlockers.length > 0 && (
+                  <ul className="list-disc ml-5 mt-2 space-y-1">
+                    {modeBlockers.map((blocker) => <li key={blocker.name}><span className="font-medium">{blocker.name}:</span> {blocker.reasons.join(' ')}</li>)}
+                  </ul>
+                )}
+                <a href="#categories" className="inline-block mt-2 underline text-sky-300">Edit affected categories</a>
+              </div>
+            )}
+          </div>
           <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
             <div>
               <p className="text-sm text-white">System Active</p>
