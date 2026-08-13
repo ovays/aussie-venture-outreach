@@ -1,4 +1,8 @@
 export const SETTINGS_DEFAULTS = {
+  initial_email_mode: {
+    value: 'ai_personalised',
+    description: 'Controls whether initial emails use AI personalisation or category templates',
+  },
   active_cities: {
     value: 'Sydney',
     description: 'Comma separated list of active cities',
@@ -102,6 +106,13 @@ export const SETTINGS_DEFAULTS = {
 } as const
 
 export type SettingKey = keyof typeof SETTINGS_DEFAULTS
+
+export const INITIAL_EMAIL_MODES = ['ai_personalised', 'template'] as const
+export type InitialEmailMode = (typeof INITIAL_EMAIL_MODES)[number]
+
+export function isInitialEmailMode(value: string): value is InitialEmailMode {
+  return (INITIAL_EMAIL_MODES as readonly string[]).includes(value)
+}
 
 export function isSettingKey(key: string): key is SettingKey {
   return key in SETTINGS_DEFAULTS

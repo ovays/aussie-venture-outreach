@@ -2,11 +2,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/lib/rateLimit'
-import { SETTINGS_DEFAULTS, isSettingKey } from '@/lib/settingsDefaults'
+import { SETTINGS_DEFAULTS, isInitialEmailMode, isSettingKey } from '@/lib/settingsDefaults'
 
 const patchSettingSchema = z.object({
   key: z.string().min(1).refine(isSettingKey, 'Unsupported setting key'),
   value: z.string(),
+}).superRefine(({ key, value }, ctx) => {
+  if (key === 'initial_email_mode' && !isInitialEmailMode(value)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['value'],
+      message: 'Initial email mode must be ai_personalised or template',
+    })
+  }
 })
 
 export async function GET(request: NextRequest): Promise<NextResponse> {

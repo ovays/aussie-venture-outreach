@@ -41,6 +41,7 @@
     "test:reactivation-daily-limit": "tsx scripts/test-reactivation-daily-limit.ts",
     "test:ai-configuration": "tsx scripts/test-ai-configuration.ts",
     "test:ai-settings": "dotenv -e .env.local -- tsx scripts/test-ai-settings.ts",
+    "test:category-email-template-storage": "tsx scripts/test-category-email-template-storage.ts",
     "test:ai-analytics": "tsx scripts/test-ai-analytics.ts",
     "test:website-extraction": "tsx scripts/test-website-extraction.ts",
     "test:email-voice": "tsx scripts/test-email-voice.ts",
