@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { emailBodyToHtml } from '@/lib/utils'
+import { emailBodyToHtml, textToHtml } from '@/lib/utils'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
 import { generateInitialEmailFromTemplate } from '@/lib/initial-email-template'
 import { isInitialEmailMode, type InitialEmailMode } from '@/lib/settingsDefaults'
@@ -31,11 +31,41 @@ function failure(lead: InitialEmailLead, mode: InitialEmailMode, code: string, r
 
 type AiInitialWriter = (params: { business_name: string; category: string; suburb: string; city: string; website: string; description: string; services: string; content_type: string }) => Promise<{ subject: string; body: string }>
 
+const PLAIN_TEXT_SIGNOFF = `Cheers,
+Owais
+Aussie Venture
+
+hello@aussieventure.com
+https://aussieventure.com
+Instagram: https://instagram.com/aussie.venture
+TikTok: https://tiktok.com/@aussie.venture
+Facebook: https://facebook.com/AussieVenture
+Sydney Venture: https://facebook.com/Sydneyventure`
+
+const HTML_SIGNOFF = `<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:15px;">
+  <p style="margin:0 0 2px;color:#374151;">Cheers,</p>
+  <p style="margin:0 0 2px;font-weight:600;color:#111827;">Owais</p>
+  <p style="margin:0 0 12px;color:#374151;">Aussie Venture</p>
+  <p style="margin:0 0 3px;font-size:13px;"><a href="mailto:hello@aussieventure.com" style="color:#0ea5e9;text-decoration:none;">hello@aussieventure.com</a></p>
+  <p style="margin:0 0 8px;font-size:13px;"><a href="https://aussieventure.com" style="color:#0ea5e9;text-decoration:none;">aussieventure.com</a></p>
+  <p style="margin:0;font-size:13px;color:#6b7280;">
+    <a href="https://instagram.com/aussie.venture" style="color:#0ea5e9;text-decoration:none;">Instagram</a>&nbsp;&middot;&nbsp;<a href="https://tiktok.com/@aussie.venture" style="color:#0ea5e9;text-decoration:none;">TikTok</a>&nbsp;&middot;&nbsp;<a href="https://facebook.com/AussieVenture" style="color:#0ea5e9;text-decoration:none;">Facebook</a>&nbsp;&middot;&nbsp;<a href="https://facebook.com/Sydneyventure" style="color:#0ea5e9;text-decoration:none;">Sydney Venture</a>
+  </p>
+</div>`
+
 async function generateContent(supabase: SupabaseClient, lead: InitialEmailLead, mode: InitialEmailMode, aiWriter?: AiInitialWriter): Promise<InitialEmailResult> {
   if (mode === 'template') {
     const result = await generateInitialEmailFromTemplate(supabase, lead)
     if (!result.ok) return failure(lead, mode, result.code, result.reason, result.categoryName)
-    return { ok: true, mode, outcome: 'generated', subject: result.subject, body: result.body, html: emailBodyToHtml(result.body), generationSource: 'template' }
+    return {
+      ok: true,
+      mode,
+      outcome: 'generated',
+      subject: result.subject,
+      body: `${result.body}\n\n${PLAIN_TEXT_SIGNOFF}`,
+      html: `${textToHtml(result.body)}\n${HTML_SIGNOFF}`,
+      generationSource: 'template',
+    }
   }
   const writer = aiWriter ?? (await import('@/ai/workflows')).writeOutreachEmail
   const result = await writer({
