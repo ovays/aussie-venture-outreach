@@ -8,6 +8,14 @@ import { useLeadDrawer } from '@/lib/lead-drawer-context'
 import { formatDate } from '@/lib/utils'
 import { AddLeadModal } from '@/components/leads/AddLeadModal'
 import { ImportLeadsModal } from '@/components/leads/ImportLeadsModal'
+import {
+  createLeadsFilterSearchParams,
+  createLeadsFilterSnapshot,
+  createUniqueIdBatches,
+  FILTERED_IDS_PAGE_SIZE,
+  LEADS_PAGE_SIZE,
+  normalizeLeadsSearch,
+} from '@/lib/leads-list'
 
 interface Lead {
   id: string
@@ -16,23 +24,12 @@ interface Lead {
   city: string
   suburb: string | null
   email: string | null
-  phone: string | null
-  website: string | null
   instagram_handle: string | null
   google_rating: number | null
   halal_confidence_score: number | null
-  halal_reasons: string[] | null
   status: string
-  deal_value: number | null
-  deal_type: string | null
-  content_created: boolean
-  payment_received: boolean
-  notes: string | null
   created_at: string
   halal: boolean
-  description: string | null
-  services: string | null
-  source: string | null
 }
 
 type BulkAction = 'send' | 'delete' | 'research'
@@ -58,6 +55,7 @@ interface RegenerateResult {
 }
 
 const STATUS_OPTIONS = ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual', 'dead']
+const SEARCH_DEBOUNCE_MS = 300
 
 interface LeadsTableProps {
   initialStatus?: string
@@ -369,10 +367,12 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [importModalOpen, setImportModalOpen] = useState(false)
 
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [status, setStatus] = useState(initialStatus ?? '')
   const [city, setCity] = useState('')
   const [cities, setCities] = useState<string[]>([])
@@ -394,33 +394,105 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   // Regenerate Initial Emails state
   const [regenerateOpen, setRegenerateOpen] = useState(false)
   const [regenerateScope, setRegenerateScope] = useState<'selected' | 'filtered'>('selected')
-  const [filteredEligible, setFilteredEligible] = useState<{ id: string; business_name: string }[] | null>(null)
+  const [filteredEligible, setFilteredEligible] = useState<{ id: string }[] | null>(null)
   const [filteredEligibleLoading, setFilteredEligibleLoading] = useState(false)
   const [regenerateRunning, setRegenerateRunning] = useState(false)
   const [regenerateProgress, setRegenerateProgress] = useState({ done: 0, total: 0 })
   const [regenerateResult, setRegenerateResult] = useState<RegenerateResult | null>(null)
   const [regenerateMode, setRegenerateMode] = useState<'ai_personalised' | 'template' | null>(null)
+  const leadsRequestRef = useRef<AbortController | null>(null)
+  const leadsRequestSequenceRef = useRef(0)
+  const filteredIdsRequestRef = useRef<AbortController | null>(null)
+  const filteredIdsRequestSequenceRef = useRef(0)
+  const filterControlsKey = JSON.stringify([normalizeLeadsSearch(search), status, city, initialStage ?? ''])
+  const previousFilterControlsKeyRef = useRef(filterControlsKey)
+
+  useEffect(() => {
+    if (search === '') {
+      setDebouncedSearch('')
+      return
+    }
+
+    const timeout = window.setTimeout(
+      () => setDebouncedSearch(normalizeLeadsSearch(search)),
+      SEARCH_DEBOUNCE_MS,
+    )
+    return () => window.clearTimeout(timeout)
+  }, [search])
 
   const fetchLeads = useCallback(async () => {
+    const requestSequence = ++leadsRequestSequenceRef.current
+    leadsRequestRef.current?.abort()
+    const controller = new AbortController()
+    leadsRequestRef.current = controller
     setLoading(true)
-    const params = new URLSearchParams({ page: String(page) })
-    if (search) params.set('search', search)
-    if (initialStage && !status) {
-      params.set('stage', initialStage)
-    } else if (status) {
-      params.set('status', status)
+    setLoadError(null)
+    const filterSnapshot = createLeadsFilterSnapshot({
+      rawSearch: debouncedSearch,
+      status,
+      stage: initialStage,
+      city,
+    })
+    const params = createLeadsFilterSearchParams(filterSnapshot)
+    params.set('page', String(page))
+
+    try {
+      const res = await fetch(`/api/leads?${params}`, { signal: controller.signal })
+      const json = await res.json() as { data?: Lead[]; count?: number }
+      if (!res.ok) throw new Error('Failed to load leads')
+      if (requestSequence !== leadsRequestSequenceRef.current) return
+
+      const nextTotal = json.count ?? 0
+      const lastValidPage = Math.max(1, Math.ceil(nextTotal / LEADS_PAGE_SIZE))
+      if (page > lastValidPage) {
+        setPage(lastValidPage)
+        return
+      }
+
+      setLeads(json.data ?? [])
+      setTotal(nextTotal)
+      setLoadError(null)
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      if (requestSequence !== leadsRequestSequenceRef.current) return
+      setLeads([])
+      setTotal(0)
+      setSelectedIds(new Set())
+      setLoadError('Unable to load leads. Please try again.')
+    } finally {
+      if (requestSequence === leadsRequestSequenceRef.current) setLoading(false)
     }
-    if (city) params.set('city', city)
+  }, [page, debouncedSearch, status, city, initialStage])
 
-    const res = await fetch(`/api/leads?${params}`)
-    const json = await res.json() as { data: Lead[]; count: number }
-    setLeads(json.data ?? [])
-    setTotal(json.count ?? 0)
-    setLoading(false)
-  }, [page, search, status, city, initialStage])
+  useEffect(() => {
+    void fetchLeads()
+    return () => leadsRequestRef.current?.abort()
+  }, [fetchLeads, refreshKey])
 
-  useEffect(() => { fetchLeads() }, [fetchLeads])
-  useEffect(() => { if (refreshKey > 0) fetchLeads() }, [refreshKey, fetchLeads])
+  useEffect(() => {
+    const filtersChanged = previousFilterControlsKeyRef.current !== filterControlsKey
+    previousFilterControlsKeyRef.current = filterControlsKey
+    if (!filtersChanged || !regenerateOpen) return
+
+    filteredIdsRequestSequenceRef.current += 1
+    filteredIdsRequestRef.current?.abort()
+    setFilteredEligible(null)
+    setFilteredEligibleLoading(false)
+  }, [filterControlsKey, regenerateOpen])
+
+  useEffect(() => () => {
+    filteredIdsRequestSequenceRef.current += 1
+    filteredIdsRequestRef.current?.abort()
+  }, [])
+
+  function invalidateFilteredIdsLookup() {
+    filteredIdsRequestSequenceRef.current += 1
+    filteredIdsRequestRef.current?.abort()
+    if (regenerateOpen) {
+      setFilteredEligible(null)
+      setFilteredEligibleLoading(false)
+    }
+  }
 
   // Clear selection when page changes
   useEffect(() => { setSelectedIds(new Set()) }, [page])
@@ -510,8 +582,24 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   }
 
   function openRegenerateDialog() {
+    const filteredIdsRequestSequence = ++filteredIdsRequestSequenceRef.current
+    filteredIdsRequestRef.current?.abort()
+    const filteredIdsController = new AbortController()
+    filteredIdsRequestRef.current = filteredIdsController
+    const filterSnapshot = createLeadsFilterSnapshot({
+      rawSearch: search,
+      status,
+      stage: initialStage,
+      city,
+    })
+    const isCurrentFilteredIdsRequest = () => (
+      filteredIdsRequestSequence === filteredIdsRequestSequenceRef.current
+      && !filteredIdsController.signal.aborted
+    )
+
     setRegenerateScope('selected')
     setFilteredEligible(null)
+    setFilteredEligibleLoading(false)
     setRegenerateResult(null)
     setRegenerateOpen(true)
     fetch('/api/leads/regenerate-emails')
@@ -521,25 +609,50 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
 
     // "All filtered" is only unambiguous when the page is scoped to email_ready —
     // fetch the true eligible count/ids across every page (not just this one).
-    if (status === 'email_ready') {
+    if (filterSnapshot.status === 'email_ready') {
       setFilteredEligibleLoading(true)
-      const params = new URLSearchParams({ status: 'email_ready', ids_only: 'true' })
-      if (search) params.set('search', search)
-      if (city) params.set('city', city)
+      const snapshotParams = createLeadsFilterSearchParams(filterSnapshot)
+      snapshotParams.set('ids_only', 'true')
 
-      fetch(`/api/leads?${params}`)
-        .then((r) => r.json())
-        .then((json: { data?: Array<{ id: string; business_name: string; source: string | null }> }) => {
-          const eligible = json.data ?? []
-          setFilteredEligible(eligible.map((l) => ({ id: l.id, business_name: l.business_name })))
-        })
-        .catch(() => setFilteredEligible([]))
-        .finally(() => setFilteredEligibleLoading(false))
+      void (async () => {
+        const eligibleById = new Map<string, { id: string }>()
+        let idsPage = 1
+        let filteredTotal = Number.POSITIVE_INFINITY
+
+        try {
+          while (eligibleById.size < filteredTotal) {
+            const params = new URLSearchParams(snapshotParams)
+            params.set('page', String(idsPage))
+            params.set('page_size', String(FILTERED_IDS_PAGE_SIZE))
+            const response = await fetch(`/api/leads?${params}`, { signal: filteredIdsController.signal })
+            const json = await response.json() as { data?: Array<{ id: string }>; count?: number; limit?: number }
+            if (!response.ok) throw new Error('Failed to load filtered lead IDs')
+            if (!isCurrentFilteredIdsRequest()) return
+
+            const ids = json.data ?? []
+            filteredTotal = json.count ?? 0
+            ids.forEach((lead) => eligibleById.set(lead.id, lead))
+            if (ids.length < (json.limit ?? FILTERED_IDS_PAGE_SIZE)) break
+            idsPage += 1
+          }
+          if (!isCurrentFilteredIdsRequest()) return
+          setFilteredEligible(Array.from(eligibleById.values()))
+        } catch (error) {
+          if (!isCurrentFilteredIdsRequest()) return
+          if (error instanceof DOMException && error.name === 'AbortError') return
+          setFilteredEligible([])
+        } finally {
+          if (isCurrentFilteredIdsRequest()) setFilteredEligibleLoading(false)
+        }
+      })()
     }
   }
 
   function closeRegenerateDialog() {
     if (regenerateRunning) return
+    filteredIdsRequestSequenceRef.current += 1
+    filteredIdsRequestRef.current?.abort()
+    setFilteredEligibleLoading(false)
     setRegenerateOpen(false)
     if (regenerateResult !== null) {
       setSelectedIds(new Set())
@@ -551,32 +664,44 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
 
     const targets = regenerateScope === 'filtered' && filteredEligible
       ? filteredEligible
-      : selectedEmailReadyLeads.map((l) => ({ id: l.id, business_name: l.business_name }))
+      : selectedEmailReadyLeads.map((l) => ({ id: l.id }))
 
-    if (targets.length === 0 || !regenerateMode) return
+    const targetBatches = createUniqueIdBatches(targets.map((lead) => lead.id))
+    const targetCount = targetBatches.reduce((count, batch) => count + batch.length, 0)
+
+    if (targetCount === 0 || !regenerateMode) return
 
     setRegenerateRunning(true)
-    setRegenerateProgress({ done: 0, total: targets.length })
-    try {
-      const res = await fetch('/api/leads/regenerate-emails', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_ids: targets.map((lead) => lead.id), mode: regenerateMode }),
-      })
-      const json = await res.json() as { mode?: 'ai_personalised' | 'template'; regenerated?: number; skipped?: number; failed?: RegenerateFailure[]; error?: string }
-      setRegenerateResult({
-        succeeded: json.regenerated ?? 0, skipped: json.skipped ?? 0,
-        mode: json.mode ?? regenerateMode ?? 'ai_personalised',
-        failed: json.failed ?? (json.error ? [{ lead_id: '', business_name: 'Batch', reason: json.error }] : []),
-      })
-    } catch {
-      setRegenerateResult({ succeeded: 0, skipped: 0, mode: regenerateMode ?? 'ai_personalised', failed: [{ lead_id: '', business_name: 'Batch', reason: 'Network error — please try again' }] })
+    setRegenerateProgress({ done: 0, total: targetCount })
+    let succeeded = 0
+    let skipped = 0
+    const failed: RegenerateFailure[] = []
+
+    let processed = 0
+    for (const [batchIndex, batch] of targetBatches.entries()) {
+      try {
+        const res = await fetch('/api/leads/regenerate-emails', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lead_ids: batch, mode: regenerateMode }),
+        })
+        const json = await res.json() as { regenerated?: number; skipped?: number; failed?: RegenerateFailure[]; error?: string }
+        succeeded += json.regenerated ?? 0
+        skipped += json.skipped ?? 0
+        if (json.failed) failed.push(...json.failed)
+        else if (!res.ok || json.error) failed.push({ lead_id: '', business_name: `Batch ${batchIndex + 1}`, reason: json.error ?? 'Regeneration failed' })
+      } catch {
+        failed.push({ lead_id: '', business_name: `Batch ${batchIndex + 1}`, reason: 'Network error — please try again' })
+      }
+      processed += batch.length
+      setRegenerateProgress({ done: processed, total: targetCount })
     }
-    setRegenerateProgress({ done: targets.length, total: targets.length })
+
+    setRegenerateResult({ succeeded, skipped, mode: regenerateMode, failed })
     setRegenerateRunning(false)
     fetchLeads()
   }
 
-  const totalPages = Math.ceil(total / 50)
+  const totalPages = Math.ceil(total / LEADS_PAGE_SIZE)
 
   return (
     <div className="relative">
@@ -591,7 +716,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
             type="text"
             placeholder="Search business name..."
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+            onChange={(e) => { invalidateFilteredIdsLookup(); setSearch(e.target.value); setPage(1) }}
             className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none min-w-0"
           />
         </div>
@@ -599,7 +724,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
         <div className="flex flex-wrap gap-2 items-center">
           <select
             value={status}
-            onChange={(e) => { setStatus(e.target.value); setPage(1) }}
+            onChange={(e) => { invalidateFilteredIdsLookup(); setStatus(e.target.value); setPage(1) }}
             className="px-3 py-2 rounded-lg text-sm text-white outline-none"
             style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
           >
@@ -611,7 +736,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
 
           <select
             value={city}
-            onChange={(e) => { setCity(e.target.value); setPage(1) }}
+            onChange={(e) => { invalidateFilteredIdsLookup(); setCity(e.target.value); setPage(1) }}
             className="px-3 py-2 rounded-lg text-sm text-white outline-none"
             style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
           >
@@ -622,7 +747,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
           </select>
 
           {(search || status || city) && (
-            <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setStatus(''); setCity(''); setPage(1) }}>
+            <Button variant="ghost" size="sm" onClick={() => { invalidateFilteredIdsLookup(); setSearch(''); setStatus(''); setCity(''); setPage(1) }}>
               Clear
             </Button>
           )}
@@ -762,6 +887,17 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
             {loading ? (
               <tr>
                 <td colSpan={10} className="px-4 py-12 text-center" style={{ color: '#64748b' }}>Loading...</td>
+              </tr>
+            ) : loadError ? (
+              <tr>
+                <td colSpan={10} className="px-4 py-8 text-center">
+                  <div className="inline-flex items-center gap-2 text-sm" style={{ color: '#f87171' }}>
+                    <span>{loadError}</span>
+                    <Button size="sm" variant="ghost" onClick={() => void fetchLeads()}>
+                      Retry
+                    </Button>
+                  </div>
+                </td>
               </tr>
             ) : leads.length === 0 ? (
               <tr>

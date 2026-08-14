@@ -6,6 +6,13 @@ import { STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
 import { STAGE_VALUES } from '@/lib/stage-import'
 import { createLead } from '@/lib/create-lead'
 import { readInitialEmailMode } from '@/lib/initial-email-router'
+import { resolvePagination, toSupabaseRange } from '@/lib/pagination'
+import {
+  FILTERED_IDS_PAGE_SIZE,
+  LEADS_LIST_PROJECTION,
+  LEADS_MAX_PAGE_SIZE,
+  LEADS_PAGE_SIZE,
+} from '@/lib/leads-list'
 
 const patchLeadSchema = z.object({
   id: z.string().uuid(),
@@ -100,14 +107,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const category = searchParams.get('category')
   const city = searchParams.get('city')
   const search = searchParams.get('search')
-  const page = parseInt(searchParams.get('page') ?? '1', 10)
   const idsOnly = searchParams.get('ids_only') === 'true'
-  const limit = 50
-  const offset = (page - 1) * limit
+  const pagination = resolvePagination(
+    {
+      page: searchParams.get('page'),
+      pageSize: searchParams.get('page_size'),
+    },
+    idsOnly
+      ? { defaultPageSize: FILTERED_IDS_PAGE_SIZE, maxPageSize: FILTERED_IDS_PAGE_SIZE }
+      : { defaultPageSize: LEADS_PAGE_SIZE, maxPageSize: LEADS_MAX_PAGE_SIZE },
+  )
+  const { from, to } = toSupabaseRange(pagination)
 
   let query = supabase
     .from('leads')
-    .select(idsOnly ? 'id, business_name, status, source' : '*', { count: 'exact' })
+    .select(idsOnly ? 'id' : LEADS_LIST_PROJECTION, { count: 'exact' })
 
   // `stage` expands to all canonical statuses for that stage (e.g. negotiating → negotiating+interested)
   // `status` is an exact single-status match (backward compat)
@@ -120,12 +134,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (city) query = query.eq('city', city)
   if (search) query = query.ilike('business_name', `%${search}%`)
 
-  // `ids_only` is used by bulk-action UI to target every lead matching the
-  // current filters (not just the current page) — capped well above realistic
-  // filtered-result sizes rather than paginated.
-  query = idsOnly
-    ? query.order('created_at', { ascending: false }).limit(1000)
-    : query.order('created_at', { ascending: false }).range(offset, offset + limit - 1)
+  // Stable ordering is required for both visible pages and the separately
+  // paginated ID-only regeneration lookup.
+  query = query
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true })
+    .range(from, to)
 
   const { data, error, count } = await query
 
@@ -133,7 +147,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ data, count, page, limit })
+  return NextResponse.json({
+    data,
+    count,
+    page: pagination.page,
+    limit: pagination.pageSize,
+  })
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
