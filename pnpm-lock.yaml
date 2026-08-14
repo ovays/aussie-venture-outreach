@@ -24,8 +24,8 @@ importers:
         specifier: ^2.105.1
         version: 2.108.2
       '@trigger.dev/sdk':
-        specifier: 4.5.9
-        version: 4.5.9(react@19.2.4)(zod@3.25.76)
+        specifier: 4.5.11
+        version: 4.5.11(react@19.2.4)(zod@3.25.76)
       lucide-react:
         specifier: ^1.14.0
         version: 1.20.0(react@19.2.4)
@@ -663,8 +663,8 @@ packages:
     cpu: [arm64]
     os: [darwin]
 
-  '@s2-dev/streamstore@0.22.10':
-    resolution: {integrity: sha512-dtm+oFHVE8szINwOUoNQdx9xpGSJOrcAEvsxspPFvomjYKGnmhIRmU4OX8o6kxcPoiK76S1tPeU0smjZdmOngA==}
+  '@s2-dev/streamstore@0.25.0':
+    resolution: {integrity: sha512-oB8OJObT/s2Q68Tr01NLfDnQPFJp/Kn2pP3seWybgP7VrjQ+j1efXReOsyVCDsUBVMxkyPlzt75o/+GuL5Q3vg==}
 
   '@socket.io/component-emitter@3.1.2':
     resolution: {integrity: sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA==}
@@ -805,12 +805,12 @@ packages:
   '@tailwindcss/postcss@4.3.1':
     resolution: {integrity: sha512-dNJuNbdEJT/SWRuXTYP1WSamelsz3ztkUsdtWQPjrexysrTpaEPM40P/71knXiXLYEojqPOEGitVLLpPMS5T6A==}
 
-  '@trigger.dev/core@4.5.9':
-    resolution: {integrity: sha512-tXmIxg31Z5cPAXZozvTxLhHY8r8dbDNIFsaKZAcPYLSnaPMCK7uwJufYDLpvLmfNStPvs9x4DNAD4UW3ClyUIA==}
+  '@trigger.dev/core@4.5.11':
+    resolution: {integrity: sha512-usuGIn8R7tq6rTzyStomvJXqM9lIg6N8Iu//4xRC6OFlqocpph0C2lyP/NaGH27QsQSU9OQqirHar9JxjN1gNA==}
     engines: {node: '>=18.20.0'}
 
-  '@trigger.dev/sdk@4.5.9':
-    resolution: {integrity: sha512-YZ7Re6ys6E52Pt0siWtDw5rJodUbSl0DieChHH57Wtvqx/UF6dm2v6cf2wzCbtFAHxkNg33kPiAmz+FI74ZrJg==}
+  '@trigger.dev/sdk@4.5.11':
+    resolution: {integrity: sha512-uYdAo3GJEfDoetYJ55zpBUiFvjTkuKsTBu1v3uZbgPXfFiynCGS7MybvfdcCKf+Jc/x4B7pzMRHwj2vEYInh6Q==}
     engines: {node: '>=18.20.0'}
     peerDependencies:
       '@ai-sdk/otel': '>=1.0.0-0 <2'
@@ -2082,7 +2082,7 @@ snapshots:
   '@rollup/rollup-darwin-arm64@4.62.0':
     optional: true
 
-  '@s2-dev/streamstore@0.22.10':
+  '@s2-dev/streamstore@0.25.0':
     dependencies:
       '@protobuf-ts/runtime': 2.11.1
       debug: 4.4.3
@@ -2207,7 +2207,7 @@ snapshots:
       postcss: 8.5.15
       tailwindcss: 4.3.1
 
-  '@trigger.dev/core@4.5.9':
+  '@trigger.dev/core@4.5.11':
     dependencies:
       '@bugsnag/cuid': 3.2.2
       '@electric-sql/client': 1.0.14
@@ -2227,7 +2227,7 @@ snapshots:
       '@opentelemetry/sdk-trace-base': 2.7.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-trace-node': 2.7.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/semantic-conventions': 1.41.1
-      '@s2-dev/streamstore': 0.22.10
+      '@s2-dev/streamstore': 0.25.0
       dequal: 2.0.3
       eventsource: 3.0.7
       eventsource-parser: 3.1.0
@@ -2249,11 +2249,11 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@trigger.dev/sdk@4.5.9(react@19.2.4)(zod@3.25.76)':
+  '@trigger.dev/sdk@4.5.11(react@19.2.4)(zod@3.25.76)':
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/semantic-conventions': 1.41.1
-      '@trigger.dev/core': 4.5.9
+      '@trigger.dev/core': 4.5.11
       chalk: 5.6.2
       cronstrue: 2.59.0
       debug: 4.4.3
