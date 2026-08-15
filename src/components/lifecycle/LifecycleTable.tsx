@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { LifecycleLead } from '@/types/lifecycle'
 import { useLeadDrawer } from '@/lib/lead-drawer-context'
 
@@ -13,6 +13,16 @@ interface Summary {
   reactivation_due: number
   awaiting_dead: number
   dead_today: number
+}
+
+interface LifecycleResponse {
+  data: LifecycleLead[]
+  total: number
+  page: number
+  page_size: number
+  counts: Record<FilterKey, number>
+  summary: Summary
+  error?: string
 }
 
 type FilterKey = 'all' | 'fu1_due' | 'fu2_due' | 'fu3_due' | 'fu1' | 'fu2' | 'fu3' | 'fu_due' | 'overdue' | 'reactivation' | 'awaiting_dead' | 'dead'
@@ -269,19 +279,62 @@ export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [filter, setFilter] = useState<FilterKey>(() => toFilterKey(initialFilter))
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('next_action_date')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [pillCounts, setPillCounts] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const asOf = useRef(new Date().toISOString())
 
   useEffect(() => {
-    fetch('/api/lifecycle')
-      .then((r) => r.json())
-      .then((json: { leads: LifecycleLead[]; summary: Summary }) => {
-        setLeads(json.leads ?? [])
-        setSummary(json.summary ?? null)
-        setLoading(false)
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  useEffect(() => {
+    setPage(1)
+  }, [filter, debouncedSearch, sortKey, sortDir])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const params = new URLSearchParams({
+      filter,
+      sort: sortKey,
+      dir: sortDir,
+      page: String(page),
+      page_size: '50',
+      as_of: asOf.current,
+    })
+    if (debouncedSearch) params.set('search', debouncedSearch)
+
+    setLoading(true)
+    setError(null)
+    fetch(`/api/lifecycle?${params}`, { signal: controller.signal })
+      .then(async (response) => {
+        const json = await response.json() as LifecycleResponse
+        if (!response.ok) throw new Error(json.error ?? 'Lifecycle request failed')
+        return json
       })
-  }, [])
+      .then((json) => {
+        setLeads((current) => page === 1 ? (json.data ?? []) : [...current, ...(json.data ?? [])])
+        setSummary(json.summary ?? null)
+        setPillCounts(json.counts ?? {})
+        setTotal(json.total ?? 0)
+      })
+      .catch((requestError: unknown) => {
+        if (requestError instanceof DOMException && requestError.name === 'AbortError') return
+        setError(requestError instanceof Error ? requestError.message : 'Lifecycle request failed')
+        if (page === 1) setLeads([])
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [filter, debouncedSearch, sortKey, sortDir, page])
 
   function selectFilter(key: FilterKey) {
     setFilter(key)
@@ -292,23 +345,6 @@ export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(key); setSortDir('asc') }
   }
-
-  const displayed = useMemo(() => {
-    const pill = PILLS.find((p) => p.key === filter)!
-    let rows = leads.filter(pill.fn)
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      rows = rows.filter(
-        (l) => l.business_name.toLowerCase().includes(q) || l.email.toLowerCase().includes(q),
-      )
-    }
-    return sortLeads(rows, sortKey, sortDir)
-  }, [leads, filter, search, sortKey, sortDir])
-
-  const pillCounts = useMemo(
-    () => Object.fromEntries(PILLS.map((p) => [p.key, leads.filter(p.fn).length])),
-    [leads],
-  )
 
   return (
     <div>
@@ -404,7 +440,7 @@ export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
           })}
           {!loading && (
             <span className="ml-auto text-xs" style={{ color: '#475569' }}>
-              {displayed.length} lead{displayed.length !== 1 ? 's' : ''}
+              {total} lead{total !== 1 ? 's' : ''}
             </span>
           )}
         </div>
@@ -439,14 +475,20 @@ export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
                   Loading…
                 </td>
               </tr>
-            ) : displayed.length === 0 ? (
+            ) : error ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-14 text-center text-sm" style={{ color: '#f87171' }}>
+                  {error}
+                </td>
+              </tr>
+            ) : leads.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-4 py-14 text-center text-sm" style={{ color: '#475569' }}>
                   {search.trim() ? `No results for "${search}"` : 'No leads in this filter'}
                 </td>
               </tr>
             ) : (
-              displayed.map((lead) => {
+              leads.map((lead) => {
                 const badge = BADGE[lead.stage] ?? BADGE['Unknown']
                 const { label: dateLabel, color: dateColor, highlighted } = resolveDate(
                   lead.next_action_date,
@@ -524,6 +566,19 @@ export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
           </tbody>
         </table>
       </div>
+      {!error && leads.length < total && (
+        <div className="flex justify-center p-4 border-t" style={{ borderColor: '#2a2d3e' }}>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => setPage((current) => current + 1)}
+            className="px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+            style={{ background: '#1e2130', border: '1px solid #2a2d3e', color: '#94a3b8' }}
+          >
+            {loading ? 'Loading…' : `Load more (${leads.length} of ${total})`}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

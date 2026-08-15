@@ -8,6 +8,22 @@ const patchSchema = z.object({
   body_text: z.string().min(1),
 })
 
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('emails')
+    .select('id, type, subject, body_html, body_text, status, sent_at, replied_at, created_at, leads(business_name, category_name, city)')
+    .eq('id', id)
+    .single()
+
+  if (error || !data) return NextResponse.json({ error: 'Email not found' }, { status: 404 })
+  return NextResponse.json({ data })
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

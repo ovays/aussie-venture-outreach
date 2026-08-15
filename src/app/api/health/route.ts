@@ -8,9 +8,18 @@ interface HealthIssue {
   time?: string
 }
 
-function relativeTime(isoString: string): string {
-  const ms = Date.now() - new Date(isoString).getTime()
-  const mins = Math.floor(ms / 60_000)
+interface HealthSummary {
+  system_active: string | null
+  last_pipeline_run: string | null
+  outscraper_error: boolean
+  bounce_count: number
+  cost_guard: { created_at: string; metadata: { limit?: number } | null } | null
+  agent_errors: Array<{ description: string; metadata: { agent?: string; error?: string; is_balance_error?: boolean } | null; created_at: string }>
+  dead_letter_count: number
+}
+
+function relativeTime(isoString: string, asOf: Date): string {
+  const mins = Math.floor((asOf.getTime() - new Date(isoString).getTime()) / 60_000)
   if (mins < 60) return `${mins}m ago`
   const hours = Math.floor(mins / 60)
   if (hours < 24) return `${hours}h ago`
@@ -18,173 +27,54 @@ function relativeTime(isoString: string): string {
 }
 
 export async function GET() {
-  const issues: HealthIssue[] = []
+  const asOf = new Date()
   const supabase = createServiceClient()
+  const { data, error } = await supabase.rpc('get_health_summary', { p_as_of: asOf.toISOString() })
 
-  // 1. Supabase connection
-  try {
-    const { error } = await supabase.from('leads').select('id').limit(1)
-    if (error) issues.push({ type: 'database', message: `Database connection error: ${error.message}`, severity: 'critical' })
-  } catch {
-    issues.push({ type: 'database', message: 'Database connection error', severity: 'critical' })
+  if (error || !data) {
+    return NextResponse.json({
+      healthy: false,
+      issues: [{ type: 'database', message: `Database connection error${error?.message ? `: ${error.message}` : ''}`, severity: 'critical' }],
+      checkedAt: asOf.toISOString(),
+    })
   }
 
-  // 2. System active check
-  try {
-    const { data: systemSetting } = await supabase
-      .from('settings')
-      .select('value')
-      .eq('key', 'system_active')
-      .single()
+  const summary = data as HealthSummary
+  const issues: HealthIssue[] = []
+  if (summary.system_active === 'false') issues.push({ type: 'system_inactive', message: 'System is paused — pipeline will not run automatically. Enable System Active in Settings to resume.', severity: 'warning' })
 
-    if (systemSetting?.value === 'false') {
-      issues.push({
-        type: 'system_inactive',
-        message: 'System is paused — pipeline will not run automatically. Enable System Active in Settings to resume.',
-        severity: 'warning',
-      })
-    }
-  } catch {
-    // skip
+  if (!summary.last_pipeline_run) {
+    issues.push({ type: 'pipeline', message: 'Pipeline has never run', severity: 'warning' })
+  } else {
+    const hoursSince = (asOf.getTime() - new Date(summary.last_pipeline_run).getTime()) / 3_600_000
+    if (hoursSince > 25) issues.push({ type: 'pipeline', message: `Pipeline has not run in ${Math.round(hoursSince)} hours`, severity: 'warning' })
   }
 
-  // 3. Last pipeline run — warn if no finder_complete in 25 hours
-  try {
-    const { data } = await supabase
-      .from('activity_log')
-      .select('created_at')
-      .eq('event_type', 'finder_complete')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+  if (summary.outscraper_error) issues.push({ type: 'outscraper', message: 'Outscraper balance exhausted — top up at outscraper.com', severity: 'critical' })
+  if (summary.bounce_count > 0) issues.push({ type: 'resend', message: `${summary.bounce_count} email bounce${summary.bounce_count === 1 ? '' : 's'} detected in last 24 hours`, severity: 'warning' })
 
-    if (!data) {
-      issues.push({ type: 'pipeline', message: 'Pipeline has never run', severity: 'warning' })
-    } else {
-      const hoursSince = (Date.now() - new Date(data.created_at).getTime()) / 3_600_000
-      if (hoursSince > 25) {
-        issues.push({ type: 'pipeline', message: `Pipeline has not run in ${Math.round(hoursSince)} hours`, severity: 'warning' })
-      }
-    }
-  } catch {
-    // non-critical — skip if activity_log inaccessible
+  if (summary.cost_guard) {
+    issues.push({
+      type: 'cost_guard',
+      message: `Daily Outscraper limit $${summary.cost_guard.metadata?.limit ?? '?'} reached — pipeline stopped to prevent overspending. Adjust limit in Settings or wait until tomorrow.`,
+      severity: 'critical',
+      time: relativeTime(summary.cost_guard.created_at, asOf),
+    })
   }
 
-  // 4. Outscraper 402 / quota errors in last 24h
-  try {
-    const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
-    const { data } = await supabase
-      .from('activity_log')
-      .select('id')
-      .gte('created_at', since24h)
-      .or('description.ilike.%402%,description.ilike.%quota exhausted%,description.ilike.%balance%')
-      .limit(1)
-
-    if (data?.length) {
-      issues.push({ type: 'outscraper', message: 'Outscraper balance exhausted — top up at outscraper.com', severity: 'critical' })
-    }
-  } catch {
-    // skip
+  for (const agentError of summary.agent_errors ?? []) {
+    const agent = agentError.metadata?.agent ?? 'unknown'
+    const errorMessage = (agentError.metadata?.error ?? agentError.description ?? '').slice(0, 120)
+    const isBalance = agentError.metadata?.is_balance_error ?? errorMessage.includes('402')
+    issues.push({
+      type: `agent_error_${agent}`,
+      message: isBalance ? `${agent} agent: Outscraper balance exhausted — top up at outscraper.com` : `${agent} agent failed: ${errorMessage}`,
+      severity: 'critical',
+      time: relativeTime(agentError.created_at, asOf),
+    })
   }
 
-  // 5. Resend bounces in last 24h
-  try {
-    const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
-    const { count } = await supabase
-      .from('emails')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'bounced')
-      .gte('sent_at', since24h)
+  if (summary.dead_letter_count > 0) issues.push({ type: 'dead_letter', message: `${summary.dead_letter_count} failed operation${summary.dead_letter_count === 1 ? '' : 's'} in dead-letter queue — review in Settings`, severity: 'warning' })
 
-    if ((count ?? 0) > 0) {
-      issues.push({
-        type: 'resend',
-        message: `${count} email bounce${count === 1 ? '' : 's'} detected in last 24 hours`,
-        severity: 'warning',
-      })
-    }
-  } catch {
-    // skip
-  }
-
-  // 6. Cost guard triggered in last 2 hours only — avoids stale banners from yesterday's run
-  try {
-    const since2h = new Date(Date.now() - 2 * 3_600_000).toISOString()
-    const { data: costGuard } = await supabase
-      .from('activity_log')
-      .select('created_at, metadata')
-      .eq('event_type', 'cost_guard_triggered')
-      .gte('created_at', since2h)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (costGuard) {
-      const meta = costGuard.metadata as { limit?: number } | null
-      issues.push({
-        type: 'cost_guard',
-        message: `Daily Outscraper limit $${meta?.limit ?? '?'} reached — pipeline stopped to prevent overspending. Adjust limit in Settings or wait until tomorrow.`,
-        severity: 'critical',
-        time: relativeTime(costGuard.created_at),
-      })
-    }
-  } catch {
-    // skip
-  }
-
-  // 7. Recent agent errors (last 25 hours)
-  try {
-    const since25h = new Date(Date.now() - 25 * 3_600_000).toISOString()
-    const { data: agentErrors } = await supabase
-      .from('activity_log')
-      .select('description, metadata, created_at')
-      .eq('event_type', 'agent_error')
-      .gte('created_at', since25h)
-      .order('created_at', { ascending: false })
-      .limit(5)
-
-    for (const err of agentErrors ?? []) {
-      const meta = err.metadata as { agent?: string; error?: string; is_balance_error?: boolean } | null
-      const agent = meta?.agent ?? 'unknown'
-      const errorMsg = (meta?.error ?? err.description ?? '').slice(0, 120)
-      const isBalance = meta?.is_balance_error ?? errorMsg.includes('402')
-      const displayMsg = isBalance
-        ? `${agent} agent: Outscraper balance exhausted — top up at outscraper.com`
-        : `${agent} agent failed: ${errorMsg}`
-      issues.push({
-        type: `agent_error_${agent}`,
-        message: displayMsg,
-        severity: 'critical',
-        time: relativeTime(err.created_at),
-      })
-    }
-  } catch {
-    // skip
-  }
-
-  // 8. Dead letter queue — unresolved failures in last 24h
-  try {
-    const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
-    const { count: dlqCount } = await supabase
-      .from('dead_letter_queue')
-      .select('*', { count: 'exact', head: true })
-      .eq('resolved', false)
-      .gte('created_at', since24h)
-
-    if ((dlqCount ?? 0) > 0) {
-      issues.push({
-        type: 'dead_letter',
-        message: `${dlqCount} failed operation${dlqCount === 1 ? '' : 's'} in dead-letter queue — review in Settings`,
-        severity: 'warning',
-      })
-    }
-  } catch {
-    // skip — table may not exist yet
-  }
-
-  return NextResponse.json({
-    healthy: issues.length === 0,
-    issues,
-    checkedAt: new Date().toISOString(),
-  })
+  return NextResponse.json({ healthy: issues.length === 0, issues, checkedAt: asOf.toISOString() })
 }

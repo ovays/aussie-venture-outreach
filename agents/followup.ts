@@ -11,6 +11,8 @@ import { buildEmailHistory, buildReferenceChain } from '@/lib/email-sequence'
 // function against the live sender's exact behavior.
 export { buildReferenceChain }
 
+export type FollowUpEmailSender = typeof sendEmail
+
 interface LeadEmail {
   id: string
   type: string
@@ -221,7 +223,9 @@ export async function sendFollowUp(
   return !!result
 }
 
-export async function runFollowUpAgent(): Promise<void> {
+export async function runFollowUpAgent(
+  sendEmailFn: FollowUpEmailSender = sendEmail
+): Promise<void> {
   const supabase = createServiceClient()
 
   try {
@@ -555,7 +559,7 @@ export async function runFollowUpAgent(): Promise<void> {
 
       for (const candidate of toSend) {
         try {
-          const wasSent = await sendFollowUp(supabase, candidate, type)
+          const wasSent = await sendFollowUp(supabase, candidate, type, undefined, sendEmailFn)
           if (wasSent) {
             sent[type]++
             globalSentThisRun++
