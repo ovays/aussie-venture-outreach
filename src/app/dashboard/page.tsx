@@ -11,58 +11,24 @@ import { ActivityFeed } from '@/components/dashboard/ActivityFeed'
 import { DailyActivity } from '@/components/dashboard/DailyActivity'
 import { Card } from '@/components/ui/Card'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
-import { getDashboardMetrics, logAnalyticsMetrics } from '@/lib/analytics'
-import { stageCount, buildStageCounts } from '@/lib/lead-status'
-import type { HotLead } from '@/components/dashboard/HotLeadsPanel'
+import { logAnalyticsMetrics } from '@/lib/analytics'
+import { getDashboardSummary } from '@/lib/dashboard-summary'
+import { buildStageCounts } from '@/lib/lead-status'
 import { Send, MessageSquare, TrendingUp, RotateCcw, AlertTriangle, Flame, Zap } from 'lucide-react'
 
 export const revalidate = 60
 
-async function getAllLeadStatuses(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const PAGE = 1000
-  const rows: { status: string }[] = []
-  let from = 0
-  for (;;) {
-    const { data, error } = await supabase
-      .from('leads')
-      .select('status')
-      .range(from, from + PAGE - 1)
-    if (error || !data?.length) break
-    rows.push(...data)
-    if (data.length < PAGE) break
-    from += PAGE
-  }
-  return { data: rows }
-}
-
 export default async function DashboardPage() {
   const supabase = await createClient()
-  const twelveWeeksAgo = new Date(Date.now() - 84 * 86_400_000).toISOString()
-
-  const [
+  const {
     analytics,
-    { data: statusCounts },
-    { data: recentActivity },
-    { data: pendingDMs },
-    { data: dealsThisMonth },
-    { data: weeklyDeals },
-    { data: hotLeadsRaw },
-  ] = await Promise.all([
-    getDashboardMetrics(supabase),
-    getAllLeadStatuses(supabase),
-    supabase.from('activity_log').select('*').order('created_at', { ascending: false }).limit(20),
-    supabase.from('dm_queue').select('id').eq('status', 'pending'),
-    supabase.from('deals').select('deal_value').gte('closed_at', new Date(Date.now() - 30 * 86_400_000).toISOString()),
-    supabase.from('deals').select('deal_value, closed_at').gte('closed_at', twelveWeeksAgo).order('closed_at'),
-    supabase
-      .from('leads')
-      .select('id, business_name, city, status, notes, created_at, emails(id, type, sent_at, replied_at, subject)')
-      .in('status', ['replied', 'negotiating', 'interested'])
-      .order('created_at', { ascending: false })
-      .limit(10),
-  ])
-
-  const hotLeads = (hotLeadsRaw ?? []) as HotLead[]
+    statusMap,
+    recentActivity,
+    pendingDMCount,
+    dealsRolling30DayCount,
+    weeklyRevenue,
+    hotLeads,
+  } = await getDashboardSummary(supabase)
 
   logAnalyticsMetrics('[DASHBOARD_METRICS]', {
     range: analytics.todayEmailStats.range,
@@ -71,10 +37,6 @@ export default async function DashboardPage() {
     replies: analytics.replyStats.repliesToday,
   })
 
-  const statusMap: Record<string, number> = {}
-  for (const { status } of statusCounts ?? []) {
-    statusMap[status] = (statusMap[status] ?? 0) + 1
-  }
   const pipelineCounts = Object.entries(statusMap).map(([status, count]) => ({ status, count }))
 
   // Use canonical stage groupings — matches Pipeline Kanban column counts exactly
@@ -87,23 +49,6 @@ export default async function DashboardPage() {
     stage_counts: stageCounts,
     note: 'negotiating = negotiating+interested, closed = closed+closed_won+closed_manual',
   })
-
-  const weeklyRevenue: Array<{ week: string; revenue: number }> = []
-  for (let i = 11; i >= 0; i--) {
-    const weekStart = new Date(Date.now() - (i + 1) * 7 * 86_400_000)
-    const weekEnd = new Date(Date.now() - i * 7 * 86_400_000)
-    const revenue = (weeklyDeals ?? [])
-      .filter((deal) => {
-        const closed = new Date(deal.closed_at)
-        return closed >= weekStart && closed < weekEnd
-      })
-      .reduce((sum, deal) => sum + (deal.deal_value ?? 0), 0)
-
-    weeklyRevenue.push({
-      week: `W${12 - i}`,
-      revenue,
-    })
-  }
 
   return (
     <div>
@@ -286,7 +231,7 @@ export default async function DashboardPage() {
               {/* Feed */}
               <div className="px-5 py-4 overflow-y-auto flex-1">
                 <LiveActivityFeed
-                  events={(recentActivity ?? []) as Parameters<typeof LiveActivityFeed>[0]['events']}
+                  events={recentActivity}
                 />
               </div>
             </div>
@@ -312,7 +257,7 @@ export default async function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <Card title="Recent Activity">
-              <ActivityFeed events={(recentActivity ?? []) as Parameters<typeof ActivityFeed>[0]['events']} />
+              <ActivityFeed events={recentActivity} />
             </Card>
           </div>
 
@@ -327,8 +272,8 @@ export default async function DashboardPage() {
                 { label: 'Pending follow-ups',         value: analytics.followupStats.pending },
                 { label: 'Pending FU1 / FU2 / FU3',   value: `${analytics.followupStats.pendingFollowUp1} / ${analytics.followupStats.pendingFollowUp2} / ${analytics.followupStats.pendingFollowUp3}` },
                 { label: 'Replies today',              value: analytics.replyStats.repliesToday },
-                { label: 'DMs in queue',               value: pendingDMs?.length ?? 0 },
-                { label: 'Deals this month',           value: dealsThisMonth?.length ?? 0 },
+                { label: 'DMs in queue',               value: pendingDMCount },
+                { label: 'Deals this month',           value: dealsRolling30DayCount },
               ].map(({ label, value }) => (
                 <div key={label} className="flex items-center justify-between gap-2">
                   <span className="text-sm min-w-0 truncate" style={{ color: '#94a3b8' }}>{label}</span>
