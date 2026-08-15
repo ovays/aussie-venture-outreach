@@ -61,10 +61,11 @@ async function main() {
     assert(sendIdx !== -1 && sendIdx > alreadySentIdx, "sendEmail() is only reached after both the lock and the idempotency check pass")
   }
 
-  console.log('\n  2. A failed lock acquisition skips the lead instead of sending')
+  console.log('\n  2. A failed lock acquisition reports a skipped outcome instead of sending')
   {
-    const hasSkip = /if \(!lockToken\) \{\s*failed\.push/.test(src)
-    assert(hasSkip, "bulk/route.ts pushes a 'failed' entry and skips the lead when the lock is already held", hasSkip ? undefined : 'pattern not found')
+    const lockBranch = src.slice(src.indexOf('if (!lockToken)'), src.indexOf('try {', src.indexOf('if (!lockToken)')))
+    const hasSkip = /skipped\.push\(skip\)/.test(lockBranch) && /outcomes\.push\(\{ \.\.\.skip, status: 'skipped' \}\)/.test(lockBranch)
+    assert(hasSkip, "bulk/route.ts reports a 'skipped' outcome when the lock is already held", hasSkip ? undefined : 'pattern not found')
   }
 
   console.log('\n  3. Lock is released in a finally block covering every exit path')
@@ -75,11 +76,14 @@ async function main() {
 
   console.log('\n  4. A missing draft is created only through the central router')
   {
+    const pendingLookupIdx = src.indexOf(".eq('status', 'pending_send')", src.indexOf("if (action === 'send_initial_emails')"))
     const routeIdx = src.indexOf('await routeInitialEmail(supabase, lead, initialEmailMode!)')
+    const missingDraftBranchIdx = src.lastIndexOf('if (!pendingEmail)', routeIdx)
     const reloadIdx = src.indexOf("from('emails').select('id, subject, body_html, body_text, generation_source')", routeIdx)
     const missingGuardIdx = src.indexOf("reason: 'No pending Initial Email could be prepared'", reloadIdx)
     const sendIdx = src.indexOf('await sendEmail({', missingGuardIdx)
     assert(routeIdx !== -1, 'Bulk Send routes missing-draft creation through the central router')
+    assert(pendingLookupIdx !== -1 && missingDraftBranchIdx > pendingLookupIdx && routeIdx > missingDraftBranchIdx, 'An existing pending draft bypasses generation regardless of the supplied mode')
     assert(reloadIdx > routeIdx && missingGuardIdx > reloadIdx && sendIdx > missingGuardIdx, 'Bulk Send reloads and requires the router-created pending row before delivery')
     assert(!/from\('emails'\)\.insert\([\s\S]*?type:\s*'initial_pitch'/.test(src.slice(routeIdx, sendIdx + 1500)), 'Bulk Send has no direct Initial Email insert bypass')
   }

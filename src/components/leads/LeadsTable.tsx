@@ -16,6 +16,15 @@ import {
   LEADS_PAGE_SIZE,
   normalizeLeadsSearch,
 } from '@/lib/leads-list'
+import {
+  createLeadsBulkProgress,
+  runSequentialLeadsBulkOperation,
+  summarizeLeadsBulkOutcomes,
+  type LeadsBulkOperationResponse,
+  type LeadsBulkOutcome,
+  type LeadsBulkProgress,
+} from '@/lib/leads-bulk-progress'
+import { captureInitialEmailModeSnapshot } from '@/lib/initial-email-mode-operation'
 
 interface Lead {
   id: string
@@ -35,23 +44,14 @@ interface Lead {
 type BulkAction = 'send' | 'delete' | 'research'
 
 interface BulkResult {
-  sent?: number
-  deleted?: number
-  researched?: number
-  failed: Array<{ lead_id: string; business_name?: string; reason: string }>
-}
-
-interface RegenerateFailure {
-  lead_id: string
-  business_name: string
-  reason: string
+  progress: LeadsBulkProgress
+  outcomes: LeadsBulkOutcome[]
 }
 
 interface RegenerateResult {
-  succeeded: number
+  progress: LeadsBulkProgress
   mode: 'ai_personalised' | 'template'
-  skipped: number
-  failed: RegenerateFailure[]
+  outcomes: LeadsBulkOutcome[]
 }
 
 const STATUS_OPTIONS = ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual', 'dead']
@@ -97,18 +97,78 @@ function HalalConfidenceBadge({ score }: { score: number | null }) {
 
 // ── Bulk confirmation / result modal ──────────────────────────────────────────
 
+function ProgressStatus({
+  progress,
+  actionLabel,
+  successLabel,
+}: {
+  progress: LeadsBulkProgress
+  actionLabel: string
+  successLabel: string
+}) {
+  const pct = progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0
+
+  return (
+    <div role="status" aria-live="polite">
+      <h3 className="text-base font-semibold mb-4" style={{ color: '#f1f5f9' }}>{actionLabel}</h3>
+      <p className="text-sm mb-2" style={{ color: '#94a3b8' }}>
+        {progress.processed} / {progress.total} processed
+      </p>
+      <div
+        className="w-full h-2 rounded-full overflow-hidden"
+        style={{ background: 'rgba(255,255,255,0.06)' }}
+        role="progressbar"
+        aria-label={`${actionLabel}: ${progress.processed} of ${progress.total} processed`}
+        aria-valuemin={0}
+        aria-valuemax={progress.total}
+        aria-valuenow={progress.processed}
+      >
+        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: '#38bdf8' }} />
+      </div>
+      <p className="text-xs mt-3" style={{ color: '#64748b' }}>
+        {progress.succeeded} {successLabel} · {progress.skipped} skipped · {progress.failed} failed
+      </p>
+    </div>
+  )
+}
+
+function OutcomeDetails({ outcomes }: { outcomes: LeadsBulkOutcome[] }) {
+  const nonSuccess = outcomes.filter((outcome) => outcome.status !== 'succeeded')
+  if (nonSuccess.length === 0) return null
+
+  return (
+    <ul className="space-y-1 max-h-48 overflow-y-auto mt-3">
+      {nonSuccess.map((outcome, index) => (
+        <li
+          key={`${outcome.lead_id}-${index}`}
+          className="text-xs px-2 py-1 rounded"
+          style={{
+            background: outcome.status === 'failed' ? 'rgba(248,113,113,0.08)' : 'rgba(251,191,36,0.08)',
+            color: outcome.status === 'failed' ? '#fca5a5' : '#fcd34d',
+          }}
+        >
+          <span className="font-medium">{(outcome.business_name ?? outcome.lead_id) || 'Request'}</span>
+          {` — ${outcome.status === 'failed' ? 'Failed' : 'Skipped'}${outcome.reason ? `: ${outcome.reason}` : ''}`}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 interface BulkModalProps {
   action: BulkAction
   count: number
   running: boolean
+  progress: LeadsBulkProgress
   result: BulkResult | null
   onConfirm: () => void
   onClose: () => void
 }
 
-function BulkModal({ action, count, running, result, onConfirm, onClose }: BulkModalProps) {
-  const successCount = result?.sent ?? result?.deleted ?? result?.researched ?? 0
-  const failedCount  = result?.failed.length ?? 0
+function BulkModal({ action, count, running, progress, result, onConfirm, onClose }: BulkModalProps) {
+  const successCount = result?.progress.succeeded ?? 0
+  const skippedCount = result?.progress.skipped ?? 0
+  const failedCount = result?.progress.failed ?? 0
 
   const confirmLabel: Record<BulkAction, string> = {
     send:       'Send Initial Emails',
@@ -158,6 +218,10 @@ function BulkModal({ action, count, running, result, onConfirm, onClose }: BulkM
               <button onClick={onClose} style={{ color: '#475569' }}><X size={16} /></button>
             </div>
 
+            <p className="text-sm mb-3" style={{ color: '#94a3b8' }}>
+              {result.progress.processed} / {result.progress.total} processed
+            </p>
+
             {successCount > 0 && (
               <>
                 <p className="text-sm mb-2" style={{ color: '#4ade80' }}>
@@ -169,23 +233,12 @@ function BulkModal({ action, count, running, result, onConfirm, onClose }: BulkM
               </>
             )}
 
-            {failedCount > 0 && (
-              <div className="mt-2">
-                <p className="text-sm mb-2" style={{ color: '#f87171' }}>
-                  {failedCount} failed:
-                </p>
-                <ul className="space-y-1 max-h-48 overflow-y-auto">
-                  {result.failed.map((f, i) => (
-                    <li key={i} className="text-xs px-2 py-1 rounded" style={{ background: 'rgba(248,113,113,0.08)', color: '#fca5a5' }}>
-                      <span className="font-medium">{f.business_name ?? f.lead_id}</span>
-                      {' — '}{f.reason}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <p className="text-sm" style={{ color: '#94a3b8' }}>
+              {successCount} {successVerb[action]} · {skippedCount} skipped · {failedCount} failed
+            </p>
+            <OutcomeDetails outcomes={result.outcomes} />
 
-            {successCount === 0 && failedCount === 0 && (
+            {result.progress.processed === 0 && (
               <p className="text-sm" style={{ color: '#64748b' }}>No leads were processed.</p>
             )}
 
@@ -193,6 +246,12 @@ function BulkModal({ action, count, running, result, onConfirm, onClose }: BulkM
               <Button onClick={onClose}>Done</Button>
             </div>
           </>
+        ) : running ? (
+          <ProgressStatus
+            progress={progress}
+            actionLabel={runningLabel[action]}
+            successLabel={successVerb[action]}
+          />
         ) : (
           // ── Confirmation view ──
           <>
@@ -219,9 +278,9 @@ function BulkModal({ action, count, running, result, onConfirm, onClose }: BulkM
 }
 
 // ── Regenerate Initial Emails modal ───────────────────────────────────────────
-// Bespoke flow (not the generic BulkModal): calls the existing single-lead
-// regenerate-email endpoint once per lead so we get real per-lead progress,
-// and reuses that endpoint's UPDATE-only behavior — subject/body only, every
+// Bespoke scope picker with the shared sequential progress runner. Each request
+// contains one lead so the server can confirm a real per-lead outcome, while
+// the regeneration route keeps its UPDATE-only behavior — subject/body only, every
 // other field (status, follow-ups, notes, tags, enrichment) stays untouched.
 
 interface RegenerateEmailsModalProps {
@@ -232,7 +291,7 @@ interface RegenerateEmailsModalProps {
   scope: 'selected' | 'filtered'
   onScopeChange: (scope: 'selected' | 'filtered') => void
   running: boolean
-  progress: { done: number; total: number }
+  progress: LeadsBulkProgress
   result: RegenerateResult | null
   mode: 'ai_personalised' | 'template' | null
   onConfirm: () => void
@@ -246,8 +305,6 @@ function RegenerateEmailsModal({
   if (!open) return null
 
   const targetCount = scope === 'filtered' ? (filteredCount ?? 0) : selectedCount
-  const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
@@ -265,27 +322,22 @@ function RegenerateEmailsModal({
               <button onClick={onClose} style={{ color: '#475569' }}><X size={16} /></button>
             </div>
 
-            {result.succeeded > 0 && (
+            <p className="text-sm mb-3" style={{ color: '#94a3b8' }}>
+              {result.progress.processed} / {result.progress.total} processed
+            </p>
+
+            {result.progress.succeeded > 0 && (
               <p className="text-sm mb-2" style={{ color: '#4ade80' }}>
-                Successfully regenerated {result.succeeded} email{result.succeeded === 1 ? '' : 's'}. Status, follow-ups, notes, tags and enrichment were left unchanged.
+                Successfully regenerated {result.progress.succeeded} email{result.progress.succeeded === 1 ? '' : 's'}. Status, follow-ups, notes, tags and enrichment were left unchanged.
               </p>
             )}
 
-            {result.failed.length > 0 && (
-              <div className="mt-2">
-                <p className="text-sm mb-2" style={{ color: '#f87171' }}>{result.failed.length} failed:</p>
-                <ul className="space-y-1 max-h-48 overflow-y-auto">
-                  {result.failed.map((f, i) => (
-                    <li key={i} className="text-xs px-2 py-1 rounded" style={{ background: 'rgba(248,113,113,0.08)', color: '#fca5a5' }}>
-                      <span className="font-medium">{f.business_name}</span>
-                      {' — '}{f.reason}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <p className="text-sm" style={{ color: '#94a3b8' }}>
+              {result.progress.succeeded} regenerated · {result.progress.skipped} skipped · {result.progress.failed} failed
+            </p>
+            <OutcomeDetails outcomes={result.outcomes} />
 
-            {result.succeeded === 0 && result.failed.length === 0 && (
+            {result.progress.processed === 0 && (
               <p className="text-sm" style={{ color: '#64748b' }}>No leads were processed.</p>
             )}
 
@@ -294,18 +346,7 @@ function RegenerateEmailsModal({
             </div>
           </>
         ) : running ? (
-          // ── Progress view ──
-          <>
-            <div className="mb-4">
-              <h3 className="text-base font-semibold" style={{ color: '#f1f5f9' }}>Regenerating Initial Emails…</h3>
-            </div>
-            <p className="text-sm mb-3" style={{ color: '#94a3b8' }}>
-              {progress.done} / {progress.total} regenerated
-            </p>
-            <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
-              <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: '#38bdf8' }} />
-            </div>
-          </>
+          <ProgressStatus progress={progress} actionLabel="Regenerating Initial Emails…" successLabel="regenerated" />
         ) : (
           // ── Confirmation view ──
           <>
@@ -388,6 +429,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null)
   const [bulkRunning, setBulkRunning] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState<LeadsBulkProgress>(() => createLeadsBulkProgress(0))
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null)
   const selectAllRef = useRef<HTMLInputElement>(null)
 
@@ -397,13 +439,14 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   const [filteredEligible, setFilteredEligible] = useState<{ id: string }[] | null>(null)
   const [filteredEligibleLoading, setFilteredEligibleLoading] = useState(false)
   const [regenerateRunning, setRegenerateRunning] = useState(false)
-  const [regenerateProgress, setRegenerateProgress] = useState({ done: 0, total: 0 })
+  const [regenerateProgress, setRegenerateProgress] = useState<LeadsBulkProgress>(() => createLeadsBulkProgress(0))
   const [regenerateResult, setRegenerateResult] = useState<RegenerateResult | null>(null)
   const [regenerateMode, setRegenerateMode] = useState<'ai_personalised' | 'template' | null>(null)
   const leadsRequestRef = useRef<AbortController | null>(null)
   const leadsRequestSequenceRef = useRef(0)
   const filteredIdsRequestRef = useRef<AbortController | null>(null)
   const filteredIdsRequestSequenceRef = useRef(0)
+  const operationActiveRef = useRef(false)
   const filterControlsKey = JSON.stringify([normalizeLeadsSearch(search), status, city, initialStage ?? ''])
   const previousFilterControlsKeyRef = useRef(filterControlsKey)
 
@@ -544,36 +587,80 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   }
 
   async function runBulkAction() {
-    if (!bulkAction || bulkRunning) return
-    setBulkRunning(true)
+    if (!bulkAction || bulkRunning || operationActiveRef.current) return
+    const action = bulkAction
     const actionMap: Record<BulkAction, string> = {
       send:       'send_initial_emails',
       delete:     'delete',
       research:   'research_leads',
     }
-    // Each action receives only the leads it can operate on.
-    const leadIds = bulkAction === 'send'
+    const leadIds = action === 'send'
       ? selectedBulkSendLeads.map(l => l.id)
-      : bulkAction === 'research'
+      : action === 'research'
         ? selectedNewLeads.map(l => l.id)
         : Array.from(selectedIds)
+    if (leadIds.length === 0) return
+
+    operationActiveRef.current = true
+    setBulkRunning(true)
+    setBulkResult(null)
+
     try {
-      const res = await fetch('/api/leads/bulk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: actionMap[bulkAction], lead_ids: leadIds }),
+      let initialEmailMode: 'ai_personalised' | 'template' | null = null
+      if (action !== 'delete') {
+        try {
+          initialEmailMode = await captureInitialEmailModeSnapshot()
+        } catch (error) {
+          const reason = `Operation did not start: ${error instanceof Error ? error.message : 'Unable to resolve Initial Email mode'}`
+          const outcomes: LeadsBulkOutcome[] = leadIds.map((leadId) => ({ lead_id: leadId, status: 'failed', reason }))
+          const progress = summarizeLeadsBulkOutcomes(leadIds.length, outcomes)
+          setBulkProgress(progress)
+          setBulkResult({ progress, outcomes })
+          return
+        }
+      }
+      const result = await runSequentialLeadsBulkOperation({
+        targetIds: leadIds,
+        request: async (leadId) => {
+          const res = await fetch('/api/leads/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: actionMap[action],
+              lead_ids: [leadId],
+              ...(initialEmailMode ? { initial_email_mode: initialEmailMode } : {}),
+            }),
+          })
+          const json = await res.json() as LeadsBulkOperationResponse
+          const confirmed = json.outcomes?.find((item) => item.lead_id === leadId)
+          if (!res.ok || !confirmed) throw new Error(json.error ?? 'The server did not confirm an outcome')
+          return confirmed
+        },
+        failureOutcome: (leadId, error) => {
+          const reason = action === 'send'
+            ? 'Delivery outcome could not be confirmed. The request was not retried; verify this lead before sending again.'
+            : error instanceof Error ? error.message : 'The request failed'
+          return { lead_id: leadId, status: 'failed', reason }
+        },
+        onProgress: (nextProgress) => setBulkProgress(nextProgress),
       })
-      const json = await res.json() as BulkResult
-      setBulkResult(json)
-      fetchLeads()
-    } catch {
-      setBulkResult({ failed: [{ lead_id: '', reason: 'Network error — please try again' }] })
+      setBulkResult(result)
     } finally {
       setBulkRunning(false)
+      operationActiveRef.current = false
+      void fetchLeads()
     }
   }
 
+  function openBulkDialog(action: BulkAction) {
+    if (operationActiveRef.current) return
+    setBulkResult(null)
+    setBulkProgress(createLeadsBulkProgress(0))
+    setBulkAction(action)
+  }
+
   function closeBulkModal() {
+    if (bulkRunning) return
     setBulkAction(null)
     setBulkResult(null)
     if (bulkResult !== null) {
@@ -582,6 +669,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   }
 
   function openRegenerateDialog() {
+    if (operationActiveRef.current) return
     const filteredIdsRequestSequence = ++filteredIdsRequestSequenceRef.current
     filteredIdsRequestRef.current?.abort()
     const filteredIdsController = new AbortController()
@@ -601,6 +689,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
     setFilteredEligible(null)
     setFilteredEligibleLoading(false)
     setRegenerateResult(null)
+    setRegenerateProgress(createLeadsBulkProgress(0))
     setRegenerateOpen(true)
     fetch('/api/leads/regenerate-emails')
       .then((response) => response.json())
@@ -660,7 +749,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   }
 
   async function runRegenerate() {
-    if (regenerateRunning) return
+    if (regenerateRunning || operationActiveRef.current) return
 
     const targets = regenerateScope === 'filtered' && filteredEligible
       ? filteredEligible
@@ -671,34 +760,36 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
 
     if (targetCount === 0 || !regenerateMode) return
 
+    operationActiveRef.current = true
     setRegenerateRunning(true)
-    setRegenerateProgress({ done: 0, total: targetCount })
-    let succeeded = 0
-    let skipped = 0
-    const failed: RegenerateFailure[] = []
 
-    let processed = 0
-    for (const [batchIndex, batch] of targetBatches.entries()) {
-      try {
-        const res = await fetch('/api/leads/regenerate-emails', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ lead_ids: batch, mode: regenerateMode }),
-        })
-        const json = await res.json() as { regenerated?: number; skipped?: number; failed?: RegenerateFailure[]; error?: string }
-        succeeded += json.regenerated ?? 0
-        skipped += json.skipped ?? 0
-        if (json.failed) failed.push(...json.failed)
-        else if (!res.ok || json.error) failed.push({ lead_id: '', business_name: `Batch ${batchIndex + 1}`, reason: json.error ?? 'Regeneration failed' })
-      } catch {
-        failed.push({ lead_id: '', business_name: `Batch ${batchIndex + 1}`, reason: 'Network error — please try again' })
-      }
-      processed += batch.length
-      setRegenerateProgress({ done: processed, total: targetCount })
+    try {
+      const targetIds = targetBatches.flat()
+      const result = await runSequentialLeadsBulkOperation({
+        targetIds,
+        request: async (leadId) => {
+          const res = await fetch('/api/leads/regenerate-emails', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lead_ids: [leadId], mode: regenerateMode }),
+          })
+          const json = await res.json() as LeadsBulkOperationResponse
+          const confirmed = json.outcomes?.find((item) => item.lead_id === leadId)
+          if (!res.ok || !confirmed) throw new Error(json.error ?? 'The server did not confirm an outcome')
+          return confirmed
+        },
+        failureOutcome: (leadId, error) => ({
+          lead_id: leadId,
+          status: 'failed',
+          reason: error instanceof Error ? error.message : 'Regeneration failed',
+        }),
+        onProgress: (nextProgress) => setRegenerateProgress(nextProgress),
+      })
+      setRegenerateResult({ ...result, mode: regenerateMode })
+    } finally {
+      setRegenerateRunning(false)
+      operationActiveRef.current = false
+      void fetchLeads()
     }
-
-    setRegenerateResult({ succeeded, skipped, mode: regenerateMode, failed })
-    setRegenerateRunning(false)
-    fetchLeads()
   }
 
   const totalPages = Math.ceil(total / LEADS_PAGE_SIZE)
@@ -812,7 +903,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
             {selectedNewLeads.length > 0 && (
               <Button
                 size="sm"
-                onClick={() => { setBulkResult(null); setBulkAction('research') }}
+                onClick={() => openBulkDialog('research')}
               >
                 <Microscope size={12} />
                 Research Selected ({selectedNewLeads.length})
@@ -823,7 +914,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
                 {selectedBulkSendLeads.length > 0 && (
                   <Button
                     size="sm"
-                    onClick={() => { setBulkResult(null); setBulkAction('send') }}
+                    onClick={() => openBulkDialog('send')}
                   >
                     <Send size={12} />
                     Send Initial Emails
@@ -840,7 +931,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => { setBulkResult(null); setBulkAction('delete') }}
+                  onClick={() => openBulkDialog('delete')}
                   style={{ color: '#f87171' }}
                 >
                   <Trash2 size={12} />
@@ -996,6 +1087,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
           action={bulkAction}
           count={bulkAction === 'send' ? selectedBulkSendLeads.length : bulkAction === 'research' ? selectedNewLeads.length : selectedIds.size}
           running={bulkRunning}
+          progress={bulkProgress}
           result={bulkResult}
           onConfirm={runBulkAction}
           onClose={closeBulkModal}

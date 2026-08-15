@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
@@ -8,6 +7,11 @@ import { writeOneLead } from '@/lib/write-lead'
 import { handleEmailSyncFailure } from '@/lib/email-status'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
+import { leadsBulkRequestSchema } from '@/lib/leads-bulk-request'
+import {
+  summarizeLeadsBulkOutcomes,
+  type LeadsBulkOutcome,
+} from '@/lib/leads-bulk-progress'
 
 // Same protection agents/sender.ts (idempotency re-check) and
 // resend/route.ts (per-lead lock) already apply to their send paths — this
@@ -18,29 +22,34 @@ import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-rou
 // INSERTing (migration 027's unique index only guards INSERTs).
 const BULK_SEND_LOCK_TTL_MS = 3 * 60 * 1000
 
-const bulkSchema = z.object({
-  action: z.enum(['send_initial_emails', 'delete', 'research_leads']),
-  lead_ids: z.array(z.string().uuid()).min(1).max(200),
-})
-
 type FailedItem = { lead_id: string; business_name: string; reason: string }
+
+export async function GET(): Promise<NextResponse> {
+  const supabase = createServiceClient()
+  const initialEmailMode = await readInitialEmailMode(supabase)
+  return NextResponse.json({ initial_email_mode: initialEmailMode })
+}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const supabase = createServiceClient()
   const raw = await request.json()
 
-  const parsed = bulkSchema.safeParse(raw)
+  const parsed = leadsBulkRequestSchema.safeParse(raw)
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
-  const { action, lead_ids } = parsed.data
-  const initialEmailMode = action === 'research_leads' || action === 'send_initial_emails' ? await readInitialEmailMode(supabase) : null
+  const { action, lead_ids, initial_email_mode: suppliedInitialEmailMode } = parsed.data
+  const initialEmailMode = action === 'research_leads' || action === 'send_initial_emails'
+    ? suppliedInitialEmailMode ?? await readInitialEmailMode(supabase)
+    : null
 
   // ── Send Initial Emails ──────────────────────────────────────────────────────
   if (action === 'send_initial_emails') {
     let sent = 0
     const failed: FailedItem[] = []
+    const skipped: FailedItem[] = []
+    const outcomes: LeadsBulkOutcome[] = []
 
     for (const lead_id of lead_ids) {
       const { data: lead } = await supabase
@@ -50,22 +59,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         .single()
 
       if (!lead) {
-        failed.push({ lead_id, business_name: lead_id, reason: 'Lead not found' })
+        const failure = { lead_id, business_name: lead_id, reason: 'Lead not found' }
+        failed.push(failure)
+        outcomes.push({ ...failure, status: 'failed' })
         continue
       }
       if (lead.status !== 'email_ready') {
-        failed.push({ lead_id, business_name: lead.business_name, reason: `Status is ${lead.status}, not email_ready` })
+        const skip = { lead_id, business_name: lead.business_name, reason: `Status is ${lead.status}, not email_ready` }
+        skipped.push(skip)
+        outcomes.push({ ...skip, status: 'skipped' })
         continue
       }
       if (!lead.email) {
-        failed.push({ lead_id, business_name: lead.business_name, reason: 'No email address' })
+        const skip = { lead_id, business_name: lead.business_name, reason: 'No email address' }
+        skipped.push(skip)
+        outcomes.push({ ...skip, status: 'skipped' })
         continue
       }
 
       const lockKey = `resend:${lead_id}`
       const lockToken = await acquireLock(supabase, lockKey, BULK_SEND_LOCK_TTL_MS)
       if (!lockToken) {
-        failed.push({ lead_id, business_name: lead.business_name, reason: 'A send is already in progress for this lead — try again shortly' })
+        const skip = { lead_id, business_name: lead.business_name, reason: 'A send is already in progress for this lead — skipped to avoid duplicate delivery' }
+        skipped.push(skip)
+        outcomes.push({ ...skip, status: 'skipped' })
         continue
       }
 
@@ -82,7 +99,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           .limit(1)
 
         if (alreadySent?.length) {
-          failed.push({ lead_id, business_name: lead.business_name, reason: 'Already sent — skipped to avoid duplicate' })
+          const skip = { lead_id, business_name: lead.business_name, reason: 'Already sent — skipped to avoid duplicate delivery' }
+          skipped.push(skip)
+          outcomes.push({ ...skip, status: 'skipped' })
           continue
         }
 
@@ -98,14 +117,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (!pendingEmail) {
           const generated = await routeInitialEmail(supabase, lead, initialEmailMode!)
           if (!generated.ok) {
-            failed.push({ lead_id, business_name: lead.business_name, reason: generated.error.reason })
+            const failure = { lead_id, business_name: lead.business_name, reason: generated.error.reason }
+            failed.push(failure)
+            outcomes.push({ ...failure, status: 'failed' })
             continue
           }
           const reload = await supabase.from('emails').select('id, subject, body_html, body_text, generation_source').eq('lead_id', lead_id).eq('type', 'initial_pitch').eq('status', 'pending_send').limit(1).maybeSingle()
           pendingEmail = reload.data
         }
         if (!pendingEmail) {
-          failed.push({ lead_id, business_name: lead.business_name, reason: 'No pending Initial Email could be prepared' })
+          const failure = { lead_id, business_name: lead.business_name, reason: 'No pending Initial Email could be prepared' }
+          failed.push(failure)
+          outcomes.push({ ...failure, status: 'failed' })
           continue
         }
         const subject = pendingEmail.subject
@@ -115,7 +138,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const result = await sendEmail({ to: lead.email, subject, html: bodyHtml, text: bodyText, leadId: lead_id })
 
         if (!result) {
-          failed.push({ lead_id, business_name: lead.business_name, reason: 'Email send failed' })
+          const failure = { lead_id, business_name: lead.business_name, reason: 'Email send failed' }
+          failed.push(failure)
+          outcomes.push({ ...failure, status: 'failed' })
           continue
         }
 
@@ -133,7 +158,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             sentAt,
             context: { original_db_error: emailUpdateErr.message, business_name: lead.business_name },
           })
-          failed.push({ lead_id, business_name: lead.business_name, reason: `Email delivered but DB update failed — marked Sync Failed` })
+          const failure = { lead_id, business_name: lead.business_name, reason: 'Email delivered but DB update failed — marked Sync Failed' }
+          failed.push(failure)
+          outcomes.push({ ...failure, status: 'failed' })
           continue
         }
 
@@ -146,24 +173,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         })
 
         sent++
+        outcomes.push({ lead_id, business_name: lead.business_name, status: 'succeeded' })
       } catch (err) {
-        failed.push({
+        const failure = {
           lead_id,
           business_name: lead.business_name,
           reason: err instanceof Error ? err.message : 'Unknown error',
-        })
+        }
+        failed.push(failure)
+        outcomes.push({ ...failure, status: 'failed' })
       } finally {
         await releaseLock(supabase, lockKey, lockToken)
       }
     }
 
-    return NextResponse.json({ sent, failed })
+    return NextResponse.json({
+      sent,
+      skipped: skipped.length,
+      failed,
+      skipped_items: skipped,
+      outcomes,
+      progress: summarizeLeadsBulkOutcomes(lead_ids.length, outcomes),
+    })
   }
 
   // ── Delete ───────────────────────────────────────────────────────────────────
   if (action === 'delete') {
     let deleted = 0
     const failed: Array<{ lead_id: string; reason: string }> = []
+    const outcomes: LeadsBulkOutcome[] = []
 
     for (const lead_id of lead_ids) {
       try {
@@ -173,20 +211,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         await supabase.from('activity_log').delete().eq('lead_id', lead_id)
         await supabase.from('emails').delete().eq('lead_id', lead_id)
         const { error } = await supabase.from('leads').delete().eq('id', lead_id)
-        if (error) failed.push({ lead_id, reason: error.message })
-        else deleted++
+        if (error) {
+          const failure = { lead_id, reason: error.message }
+          failed.push(failure)
+          outcomes.push({ ...failure, status: 'failed' })
+        } else {
+          deleted++
+          outcomes.push({ lead_id, status: 'succeeded' })
+        }
       } catch (err) {
-        failed.push({ lead_id, reason: err instanceof Error ? err.message : 'Unknown error' })
+        const failure = { lead_id, reason: err instanceof Error ? err.message : 'Unknown error' }
+        failed.push(failure)
+        outcomes.push({ ...failure, status: 'failed' })
       }
     }
 
-    return NextResponse.json({ deleted, failed })
+    return NextResponse.json({
+      deleted,
+      skipped: 0,
+      failed,
+      outcomes,
+      progress: summarizeLeadsBulkOutcomes(lead_ids.length, outcomes),
+    })
   }
 
   // ── Research Leads ───────────────────────────────────────────────────────────
   if (action === 'research_leads') {
     let researched = 0
     const failed: FailedItem[] = []
+    const skipped: FailedItem[] = []
+    const outcomes: LeadsBulkOutcome[] = []
 
     const dedupeIndex = await fetchPipelineDedupeIndex(supabase)
 
@@ -198,11 +252,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         .single()
 
       if (!lead) {
-        failed.push({ lead_id, business_name: lead_id, reason: 'Lead not found' })
+        const failure = { lead_id, business_name: lead_id, reason: 'Lead not found' }
+        failed.push(failure)
+        outcomes.push({ ...failure, status: 'failed' })
         continue
       }
       if (lead.status !== 'new') {
-        failed.push({ lead_id, business_name: lead.business_name, reason: `Status is ${lead.status}, not new` })
+        const skip = { lead_id, business_name: lead.business_name, reason: `Status is ${lead.status}, not new` }
+        skipped.push(skip)
+        outcomes.push({ ...skip, status: 'skipped' })
         continue
       }
 
@@ -212,7 +270,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         researchPurposeForInitialEmailMode(initialEmailMode!),
       )
       if (!researchResult.success) {
-        failed.push({ lead_id, business_name: lead.business_name, reason: `Research failed: ${researchResult.error}` })
+        const failure = { lead_id, business_name: lead.business_name, reason: `Research failed: ${researchResult.error}` }
+        failed.push(failure)
+        outcomes.push({ ...failure, status: 'failed' })
         continue
       }
 
@@ -221,22 +281,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
       const writeResult = await writeOneLead(supabase, enrichedLead, dedupeIndex, initialEmailMode!)
       if (!writeResult.success) {
-        failed.push({ lead_id, business_name: lead.business_name, reason: `Draft generation failed: ${writeResult.error}` })
+        const failure = { lead_id, business_name: lead.business_name, reason: `Draft generation failed: ${writeResult.error}` }
+        failed.push(failure)
+        outcomes.push({ ...failure, status: 'failed' })
         continue
       }
       if (writeResult.channel === 'dead') {
-        failed.push({ lead_id, business_name: lead.business_name, reason: 'No email found' })
+        const skip = { lead_id, business_name: lead.business_name, reason: 'No email found' }
+        skipped.push(skip)
+        outcomes.push({ ...skip, status: 'skipped' })
         continue
       }
       if (writeResult.channel === 'duplicate') {
-        failed.push({ lead_id, business_name: lead.business_name, reason: 'Duplicate email — skipped' })
+        const skip = { lead_id, business_name: lead.business_name, reason: 'Duplicate email — skipped' }
+        skipped.push(skip)
+        outcomes.push({ ...skip, status: 'skipped' })
         continue
       }
 
       researched++
+      outcomes.push({ lead_id, business_name: lead.business_name, status: 'succeeded' })
     }
 
-    return NextResponse.json({ researched, failed, mode: initialEmailMode })
+    return NextResponse.json({
+      researched,
+      skipped: skipped.length,
+      failed,
+      skipped_items: skipped,
+      mode: initialEmailMode,
+      outcomes,
+      progress: summarizeLeadsBulkOutcomes(lead_ids.length, outcomes),
+    })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

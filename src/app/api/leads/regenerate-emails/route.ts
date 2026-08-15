@@ -3,6 +3,10 @@ import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 import { INITIAL_EMAIL_MODES } from '@/lib/settingsDefaults'
+import {
+  summarizeLeadsBulkOutcomes,
+  type LeadsBulkOutcome,
+} from '@/lib/leads-bulk-progress'
 
 const schema = z.object({
   lead_ids: z.array(z.string().uuid()).min(1).max(200),
@@ -21,6 +25,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const supabase = await createClient()
   const mode = parsed.data.mode
   const failed: Array<{ lead_id: string; business_name: string; category_id: string | null; category_name: string | null; code: string; reason: string }> = []
+  const outcomes: LeadsBulkOutcome[] = []
   let regenerated = 0
   let skipped = 0
 
@@ -29,19 +34,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const { data: lead } = await supabase.from('leads')
         .select('id, business_name, category_id, category_name, suburb, city, website, description, services, status, content_type')
         .eq('id', id).maybeSingle()
-      if (!lead) { skipped++; failed.push({ lead_id: id, business_name: id, category_id: null, category_name: null, code: 'lead_not_found', reason: 'Lead not found.' }); continue }
-      if (lead.status !== 'email_ready') { skipped++; failed.push({ lead_id: id, business_name: lead.business_name, category_id: lead.category_id, category_name: lead.category_name, code: 'ineligible_status', reason: 'Lead is not email_ready.' }); continue }
+      if (!lead) { skipped++; outcomes.push({ lead_id: id, business_name: id, status: 'skipped', reason: 'Lead not found.' }); continue }
+      if (lead.status !== 'email_ready') { skipped++; outcomes.push({ lead_id: id, business_name: lead.business_name, status: 'skipped', reason: 'Lead is not email_ready.' }); continue }
       const { data: pending } = await supabase.from('emails').select('id').eq('lead_id', id).eq('type', 'initial_pitch').eq('status', 'pending_send').limit(1).maybeSingle()
-      if (!pending) { skipped++; failed.push({ lead_id: id, business_name: lead.business_name, category_id: lead.category_id, category_name: lead.category_name, code: 'no_eligible_email', reason: 'No pending Initial Email exists.' }); continue }
+      if (!pending) { skipped++; outcomes.push({ lead_id: id, business_name: lead.business_name, status: 'skipped', reason: 'No pending Initial Email exists.' }); continue }
       const result = await routeInitialEmail(supabase, lead, mode, { operation: 'regenerate', pendingEmailId: pending.id })
-      if (result.ok) regenerated++
-      else failed.push({ lead_id: result.error.leadId, business_name: result.error.businessName, category_id: result.error.categoryId, category_name: result.error.categoryName, code: result.error.code, reason: result.error.reason })
+      if (result.ok) {
+        regenerated++
+        outcomes.push({ lead_id: id, business_name: lead.business_name, status: 'succeeded' })
+      } else {
+        const failure = { lead_id: result.error.leadId, business_name: result.error.businessName, category_id: result.error.categoryId, category_name: result.error.categoryName, code: result.error.code, reason: result.error.reason }
+        failed.push(failure)
+        outcomes.push({ lead_id: failure.lead_id, business_name: failure.business_name, status: 'failed', reason: failure.reason })
+      }
     } catch (error) {
-      failed.push({
+      const failure = {
         lead_id: id, business_name: id, category_id: null, category_name: null,
         code: 'generation_failed', reason: error instanceof Error ? error.message : String(error),
-      })
+      }
+      failed.push(failure)
+      outcomes.push({ lead_id: id, business_name: id, status: 'failed', reason: failure.reason })
     }
   }
-  return NextResponse.json({ mode, requested: parsed.data.lead_ids.length, regenerated, failed_count: failed.length, skipped, failed })
+  return NextResponse.json({
+    mode,
+    requested: parsed.data.lead_ids.length,
+    regenerated,
+    failed_count: failed.length,
+    skipped,
+    failed,
+    outcomes,
+    progress: summarizeLeadsBulkOutcomes(parsed.data.lead_ids.length, outcomes),
+  })
 }
