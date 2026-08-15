@@ -1,3 +1,5 @@
+import { composeOutreachEmailBody } from './outreach-signature'
+
 export function formatDate(date: string | Date): string {
   return new Intl.DateTimeFormat('en-AU', {
     timeZone: 'Australia/Sydney',
@@ -40,28 +42,8 @@ export function textToHtml(text: string): string {
     .join('')
 }
 
-const HTML_SIGNOFF = `<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:15px;">
-  <p style="margin:0 0 2px;color:#374151;">Cheers,</p>
-  <p style="margin:0 0 2px;font-weight:600;color:#111827;">Owais</p>
-  <p style="margin:0 0 12px;color:#374151;">Aussie Venture</p>
-  <p style="margin:0 0 3px;font-size:13px;"><a href="mailto:hello@aussieventure.com" style="color:#0ea5e9;text-decoration:none;">hello@aussieventure.com</a></p>
-  <p style="margin:0 0 8px;font-size:13px;"><a href="https://aussieventure.com" style="color:#0ea5e9;text-decoration:none;">aussieventure.com</a></p>
-  <p style="margin:0;font-size:13px;color:#6b7280;">
-    <a href="https://instagram.com/aussie.venture" style="color:#0ea5e9;text-decoration:none;">Instagram</a>&nbsp;&middot;&nbsp;<a href="https://tiktok.com/@aussie.venture" style="color:#0ea5e9;text-decoration:none;">TikTok</a>&nbsp;&middot;&nbsp;<a href="https://facebook.com/AussieVenture" style="color:#0ea5e9;text-decoration:none;">Facebook</a>&nbsp;&middot;&nbsp;<a href="https://facebook.com/Sydneyventure" style="color:#0ea5e9;text-decoration:none;">Sydney Venture</a>
-  </p>
-</div>`
-
 export function emailBodyToHtml(plainText: string): string {
-  const signoffIdx = plainText.indexOf('Cheers,')
-  const bodyOnly = (signoffIdx >= 0 ? plainText.slice(0, signoffIdx) : plainText).trim()
-
-  const paragraphs = bodyOnly
-    .split(/\n\n+/)
-    .filter(Boolean)
-    .map((p) => `<p style="margin:0 0 18px;color:#374151;font-size:15px;line-height:1.75;">${p.trim()}</p>`)
-    .join('\n')
-
-  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:600px;">\n${paragraphs}\n${HTML_SIGNOFF}\n</div>`
+  return composeOutreachEmailBody(plainText).bodyHtml
 }
 
 export function cleanBusinessName(name: string): string {

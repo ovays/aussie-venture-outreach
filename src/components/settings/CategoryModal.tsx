@@ -17,6 +17,8 @@ import {
   validateTemplate,
 } from '@/lib/category-email-templates'
 import { EMAIL_TEMPLATE_TYPES, type EmailTemplateType, type ManagedCategory, type TemplateValidationError } from '@/lib/email-template-types'
+import { composeOutreachEmailBody, replaceExactTerminalSignOff } from '@/lib/outreach-signature'
+import { FOLLOW_UP_SIGN_OFF, INITIAL_SIGN_OFF } from '@/lib/email-voice'
 
 type CategoryDraft = Omit<ManagedCategory, 'id' | 'initialTemplateReadiness' | 'templateValidation' | 'templateCompleteness'>
 
@@ -110,6 +112,9 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
     ? getInitialTemplateReadiness(selectedTemplate).errors
     : validateTemplate(selectedTemplate)
   const preview = validationErrors.length === 0 ? renderTemplate(selectedTemplate, SAMPLE_TEMPLATE_VALUES) : null
+  const previewBody = preview?.ok
+    ? composeOutreachEmailBody(replaceExactTerminalSignOff(preview.value.body, INITIAL_SIGN_OFF, FOLLOW_UP_SIGN_OFF)).bodyText
+    : null
   const errorsFor = (field: 'subject_template' | 'body_template'): TemplateValidationError[] => validationErrors.filter((item) => item.field === field)
 
   async function handleSave() {
@@ -203,6 +208,7 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: '#94a3b8' }}>Body</label>
               <textarea value={selectedTemplate.body_template ?? ''} onChange={(event) => setTemplate('body_template', event.target.value)} rows={9} className="w-full px-3 py-2 rounded-lg text-sm text-white resize-y" style={{ background: '#0f1117', border: `1px solid ${errorsFor('body_template').length ? '#dc2626' : '#2a2d3e'}` }} />
+              <p className="text-xs mt-1" style={{ color: '#64748b' }}>The standard Aussie Venture signature is added automatically.</p>
               {errorsFor('body_template').map((item, index) => <p key={`${item.code}-${index}`} className="text-xs text-red-400 mt-1">{item.message}</p>)}
             </div>
 
@@ -220,7 +226,7 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
               {validationErrors.length > 0 || (preview && !preview.ok) ? (
                 <div className="p-3 text-sm text-red-400">Fix the validation errors above before previewing.</div>
               ) : preview?.ok ? (
-                <div className="p-3 space-y-3" style={{ background: '#0f1117' }}><div><span className="text-xs" style={{ color: '#64748b' }}>Subject</span><p className="text-sm text-white">{preview.value.subject || '(empty)'}</p></div><div><span className="text-xs" style={{ color: '#64748b' }}>Body</span><pre className="text-sm whitespace-pre-wrap text-white" style={{ fontFamily: 'inherit' }}>{preview.value.body || '(empty)'}</pre></div></div>
+                <div className="p-3 space-y-3" style={{ background: '#0f1117' }}><div><span className="text-xs" style={{ color: '#64748b' }}>Subject</span><p className="text-sm text-white">{preview.value.subject || '(empty)'}</p></div><div><span className="text-xs" style={{ color: '#64748b' }}>Body</span><pre className="text-sm whitespace-pre-wrap text-white" style={{ fontFamily: 'inherit' }}>{previewBody || '(empty)'}</pre></div></div>
               ) : null}
             </div>
           </div>

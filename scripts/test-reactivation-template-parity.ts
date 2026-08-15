@@ -5,12 +5,13 @@ import { normalizeContentType } from '@/lib/content-type'
 import { generateStoredReactivation } from '@/lib/stored-sequence-templates'
 import {
   brandIntroOptions,
-  INITIAL_SIGN_OFF,
+  FOLLOW_UP_SIGN_OFF,
   pickVariant,
   REACTIVATION_ASKS,
   reactivationContextFor,
   reactivationSubjectFor,
 } from '@/lib/email-voice'
+import { composeOutreachEmailBody, OUTREACH_SIGNATURE_TEXT } from '@/lib/outreach-signature'
 
 type Row = Record<string, unknown>
 class Query {
@@ -44,9 +45,9 @@ function expectedReactivation(item: (typeof cases)[number]) {
     getReactivationFocus(item.category, contentType),
   )
   const ask = pickVariant(REACTIVATION_ASKS, item.business_name, 'reactivation-ask')
-  const body = `Hey ${item.business_name},\n\n${intro}\n\nI emailed you about a collab a few months back and never heard anything. ${context}\n\n${ask}\n\n${INITIAL_SIGN_OFF}`
+  const body = composeOutreachEmailBody(`Hey ${item.business_name},\n\n${intro}\n\nI emailed you about a collab a few months back and never heard anything. ${context}\n\n${ask}\n\n${FOLLOW_UP_SIGN_OFF}`).bodyText
 
-  assert.equal(body.slice(-(`\n\n${INITIAL_SIGN_OFF}`.length)), `\n\n${INITIAL_SIGN_OFF}`, `${item.business_name}: exact full sign-off and preceding spacing are retained`)
+  assert.equal(body.slice(-OUTREACH_SIGNATURE_TEXT.length), OUTREACH_SIGNATURE_TEXT, `${item.business_name}: exact canonical signature is retained`)
   return { subject, body }
 }
 
@@ -62,7 +63,7 @@ async function main() {
     const legacy = await writeReactivationEmail(item)
     const stored = await generateStoredReactivation(client([validTemplate]), 'cat-valid', item.business_name, item.category, item.content_type)
     assert.deepEqual(legacy, expected, `${item.business_name}: writeReactivationEmail matches the independent Prompt 2 formula`)
-    assert.deepEqual(stored, expected, `${item.business_name}: stored subject and complete body match the independent Prompt 2 formula`)
+    assert.deepEqual({ subject: stored.subject, body: stored.body }, expected, `${item.business_name}: stored subject and complete body match the independent Prompt 2 formula`)
   }
 
   for (const [label, rows, categoryId] of [
@@ -72,7 +73,7 @@ async function main() {
     for (const item of cases) {
       const expected = expectedReactivation(item)
       const fallback = await generateStoredReactivation(client([...rows]), categoryId, item.business_name, item.category, item.content_type)
-      assert.deepEqual(fallback, expected, `${label} template fallback preserves exact ${item.content_type} Prompt 2 output`)
+      assert.deepEqual({ subject: fallback.subject, body: fallback.body }, expected, `${label} template fallback preserves exact ${item.content_type} Prompt 2 output`)
     }
   }
 

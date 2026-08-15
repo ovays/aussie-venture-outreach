@@ -7,6 +7,7 @@ import { buildFollowUpEmail } from '@/lib/followup-email-templates'
 import type { FollowUpType } from '@/lib/followup-eligibility'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { generateStoredFollowUp } from '@/lib/stored-sequence-templates'
+import { composeOutreachEmailBody } from '@/lib/outreach-signature'
 
 export interface FollowUpThreadEmail {
   type: string
@@ -58,13 +59,18 @@ export async function generateFollowUpEmail(
   _aiGenerator?: FollowUpAiGenerator,
   storage?: { supabase: SupabaseClient; categoryId: string | null },
 ): Promise<GeneratedFollowUpEmail> {
-  if (storage) return generateStoredFollowUp(storage.supabase, storage.categoryId, type, business.businessName, initialSubject, business.category, business.contentType)
-  const template = buildFollowUpEmail(
-    type,
-    business.businessName,
-    initialSubject,
-    business.category,
-    business.contentType
-  )
-  return { ...template, source: 'template' }
+  const generated = storage
+    ? await generateStoredFollowUp(storage.supabase, storage.categoryId, type, business.businessName, initialSubject, business.category, business.contentType)
+    : {
+        ...buildFollowUpEmail(
+          type,
+          business.businessName,
+          initialSubject,
+          business.category,
+          business.contentType,
+        ),
+        source: 'template' as const,
+      }
+  const composed = composeOutreachEmailBody(generated.body)
+  return { ...generated, body: composed.bodyText, html: composed.bodyHtml }
 }

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { routeInitialEmail, type InitialEmailLead } from '@/lib/initial-email-router'
 import { emailBodyToHtml } from '@/lib/utils'
+import { OUTREACH_SIGNATURE_TEXT } from '@/lib/outreach-signature'
 
 type Row = Record<string, any>
 type Failure = { table: string; operation: string; message: string; code?: string }
@@ -74,16 +75,6 @@ const signoffLinks = [
   'https://facebook.com/AussieVenture',
   'https://facebook.com/Sydneyventure',
 ]
-const htmlSignoff = `<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:15px;">
-  <p style="margin:0 0 2px;color:#374151;">Cheers,</p>
-  <p style="margin:0 0 2px;font-weight:600;color:#111827;">Owais</p>
-  <p style="margin:0 0 12px;color:#374151;">Aussie Venture</p>
-  <p style="margin:0 0 3px;font-size:13px;"><a href="mailto:hello@aussieventure.com" style="color:#0ea5e9;text-decoration:none;">hello@aussieventure.com</a></p>
-  <p style="margin:0 0 8px;font-size:13px;"><a href="https://aussieventure.com" style="color:#0ea5e9;text-decoration:none;">aussieventure.com</a></p>
-  <p style="margin:0;font-size:13px;color:#6b7280;">
-    <a href="https://instagram.com/aussie.venture" style="color:#0ea5e9;text-decoration:none;">Instagram</a>&nbsp;&middot;&nbsp;<a href="https://tiktok.com/@aussie.venture" style="color:#0ea5e9;text-decoration:none;">TikTok</a>&nbsp;&middot;&nbsp;<a href="https://facebook.com/AussieVenture" style="color:#0ea5e9;text-decoration:none;">Facebook</a>&nbsp;&middot;&nbsp;<a href="https://facebook.com/Sydneyventure" style="color:#0ea5e9;text-decoration:none;">Sydney Venture</a>
-  </p>
-</div>`
 const seed = (extra: Record<string, Row[]> = {}) => new MemoryDb({
   categories: [{ id: 'cat-1', name: 'Escape Rooms' }], category_email_templates: [template],
   distributed_locks: [], emails: [], leads: [{ id: 'lead-1', status: 'researched' }], ...extra,
@@ -99,7 +90,7 @@ async function main() {
   assert.equal(templateDb.tables.leads[0].status, 'email_ready')
   const templateEmail = templateDb.tables.emails[0]
   assert.equal(templateDb.tables.category_email_templates[0].body_template, template.body_template, 'the stored category template remains core message text only')
-  assert.ok(templateEmail.body_html.endsWith(htmlSignoff), 'Template HTML appends the exact professional signature')
+  assert.ok(templateEmail.body_html.includes('data-outreach-signature="aussie-venture"'), 'Template HTML appends the shared professional signature')
   for (const link of signoffLinks) assert.ok(templateEmail.body_html.includes(link), `Template HTML contains ${link}`)
   for (const link of signoffLinks.map((link) => link.replace('mailto:', ''))) assert.ok(templateEmail.body_text.includes(link), `Template text contains ${link}`)
   assert.doesNotMatch(templateEmail.body_text, /<[^>]+>/, 'Template body_text contains no HTML tags')
@@ -121,7 +112,7 @@ async function main() {
     website: lead.website, description: '', services: '', content_type: lead.content_type,
   }, 'router passes the existing writer inputs through without alteration')
   assert.equal(aiDb.tables.emails[0].subject, 'AI subject')
-  assert.equal(aiDb.tables.emails[0].body_text, 'AI body')
+  assert.equal(aiDb.tables.emails[0].body_text, `AI body\n\n${OUTREACH_SIGNATURE_TEXT}`)
   assert.equal(aiDb.tables.emails[0].body_html, emailBodyToHtml('AI body'), 'AI Personalised HTML remains on the existing formatter path')
   assert.equal(aiDb.tables.emails[0].generation_source, 'ai')
 

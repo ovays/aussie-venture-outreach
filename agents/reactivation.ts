@@ -1,6 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
-import { emailBodyToHtml } from '@/lib/utils'
 import { logger } from '@/lib/logger'
 import { generateStoredReactivation } from '@/lib/stored-sequence-templates'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
@@ -197,7 +196,7 @@ export async function runReactivationAgent(): Promise<void> {
 
       const subject = emailResult.subject
       const body = emailResult.body
-      const html = emailBodyToHtml(body)
+      const html = emailResult.html
 
       const result = await sendEmail({
         to: lead.email,

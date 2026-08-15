@@ -18,6 +18,7 @@ import {
 } from '@/lib/followup-generation'
 import { buildFollowUpEmail } from '@/lib/followup-email-templates'
 import { computeFollowUpEligibility, type FollowUpType } from '@/lib/followup-eligibility'
+import { composeOutreachEmailBody } from '@/lib/outreach-signature'
 
 let failures = 0
 
@@ -95,8 +96,9 @@ async function testTemplatesReturnedDirectly(): Promise<void> {
 
     assert(result.source === 'template', `${type} reports template source`)
     assert(result.subject === expected.subject, `${type} subject exactly matches buildFollowUpEmail`)
-    assert(result.body === expected.body, `${type} body exactly matches buildFollowUpEmail`)
-    assert(result.html === expected.html, `${type} HTML exactly matches buildFollowUpEmail`)
+    const composed = composeOutreachEmailBody(expected.body)
+    assert(result.body === composed.bodyText, `${type} preserves template copy and adds the canonical signature`)
+    assert(result.html === composed.bodyHtml, `${type} HTML matches the shared outreach composer`)
   }
 
   assert(aiCalls === 0, 'the legacy AI generator parameter is never invoked')

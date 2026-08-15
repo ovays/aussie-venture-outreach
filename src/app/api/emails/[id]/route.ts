@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
-import { emailBodyToHtml } from '@/lib/utils'
+import { composeOutreachEmailBody } from '@/lib/outreach-signature'
 
 const patchSchema = z.object({
   subject: z.string().min(1),
@@ -38,6 +38,7 @@ export async function PATCH(
   }
 
   const { subject, body_text } = parsed.data
+  const composed = composeOutreachEmailBody(body_text)
 
   const { data: existing, error: fetchErr } = await supabase
     .from('emails')
@@ -57,8 +58,8 @@ export async function PATCH(
     .from('emails')
     .update({
       subject,
-      body_text,
-      body_html: emailBodyToHtml(body_text),
+      body_text: composed.bodyText,
+      body_html: composed.bodyHtml,
     })
     .eq('id', id)
     .select()

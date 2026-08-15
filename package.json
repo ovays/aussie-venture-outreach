@@ -51,6 +51,7 @@
     "test:ai-analytics": "tsx scripts/test-ai-analytics.ts",
     "test:website-extraction": "tsx scripts/test-website-extraction.ts",
     "test:email-voice": "tsx scripts/test-email-voice.ts",
+    "test:outreach-signature": "tsx scripts/test-outreach-signature.ts",
     "preview:initial-redesign": "tsx scripts/preview-initial-outreach-redesign.ts",
     "deploy:trigger": "npx trigger.dev@4.5.6 deploy"
   },

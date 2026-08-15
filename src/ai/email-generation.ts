@@ -20,6 +20,7 @@ import {
   reactivationContextFor,
   reactivationSubjectFor,
 } from '../lib/email-voice'
+import { composeOutreachEmailBody } from '../lib/outreach-signature'
 
 // Each generation call is isolated, so the model cannot remember how it opened
 // the previous email. These are structural directions rather than sentence
@@ -168,7 +169,7 @@ export async function writeOutreachEmail(params: {
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]) as { body?: string }
       if (parsed.body?.trim()) {
-        return { subject, body: enforceSignOff(parsed.body.trim(), INITIAL_SIGN_OFF) }
+        return { subject, body: composeOutreachEmailBody(enforceSignOff(parsed.body.trim(), FOLLOW_UP_SIGN_OFF)).bodyText }
       }
     }
   } catch {
@@ -176,10 +177,8 @@ export async function writeOutreachEmail(params: {
   }
   // Fallback obeys the same voice rules as the prompt — a malformed API response
   // must never be the reason a lead gets a worse-written email than everyone else.
-  return {
-    subject,
-    body: `Hey ${params.business_name},\n\n${brandIntroOptions(contentType)[0]}\n\nA collaboration with ${params.business_name} is something I'd be keen to explore. I think it could make good content for Aussie Venture, so I wanted to ask directly rather than over-explain it in a first email.\n\nWould you be interested in collaborating?\n\n${INITIAL_SIGN_OFF}`,
-  }
+  const composed = composeOutreachEmailBody(`Hey ${params.business_name},\n\n${brandIntroOptions(contentType)[0]}\n\nA collaboration with ${params.business_name} is something I'd be keen to explore. I think it could make good content for Aussie Venture, so I wanted to ask directly rather than over-explain it in a first email.\n\nWould you be interested in collaborating?\n\n${FOLLOW_UP_SIGN_OFF}`)
+  return { subject, body: composed.bodyText }
 }
 
 // ─── Follow-up email writer ──────────────────────────────────────────────────
@@ -449,10 +448,8 @@ export async function writeReactivationEmail(params: {
   const contentContext = getReactivationFocus(params.category, contentType)
   const subject = reactivationSubjectFor(params.business_name)
 
-  return {
-    subject,
-    body: `Hey ${params.business_name},\n\n${brandIntroOptions(contentType)[0]}\n\nI emailed you about a collab a few months back and never heard anything. ${reactivationContextFor(params.business_name, contentContext)}\n\n${pickVariant(REACTIVATION_ASKS, params.business_name, 'reactivation-ask')}\n\n${INITIAL_SIGN_OFF}`,
-  }
+  const body = `Hey ${params.business_name},\n\n${brandIntroOptions(contentType)[0]}\n\nI emailed you about a collab a few months back and never heard anything. ${reactivationContextFor(params.business_name, contentContext)}\n\n${pickVariant(REACTIVATION_ASKS, params.business_name, 'reactivation-ask')}\n\n${FOLLOW_UP_SIGN_OFF}`
+  return { subject, body: composeOutreachEmailBody(body).bodyText }
 }
 
 

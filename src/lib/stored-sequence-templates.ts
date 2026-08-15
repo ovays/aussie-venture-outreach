@@ -4,10 +4,12 @@ import { getReactivationFocus } from '@/lib/category-copy'
 import { normalizeContentType } from '@/lib/content-type'
 import { buildFollowUpEmail } from '@/lib/followup-email-templates'
 import { textToHtml } from '@/lib/utils'
+import { composeOutreachEmailBody, replaceExactTerminalSignOff } from '@/lib/outreach-signature'
 import {
   brandIntroOptions,
   fu3ClosingFor,
   INITIAL_SIGN_OFF,
+  FOLLOW_UP_SIGN_OFF,
   pickVariant,
   REACTIVATION_ASKS,
   reactivationContextFor,
@@ -53,7 +55,7 @@ export async function generateStoredReactivation(
   const brandIntro = brandIntroOptions(contentType)[0]
   const context = reactivationContextFor(businessName, getReactivationFocus(category, contentType))
   const ask = pickVariant(REACTIVATION_ASKS, businessName, 'reactivation-ask')
-  const body = `Hey ${businessName},\n\n${brandIntro}\n\nI emailed you about a collab a few months back and never heard anything. ${context}\n\n${ask}\n\n${INITIAL_SIGN_OFF}`
+  const body = `Hey ${businessName},\n\n${brandIntro}\n\nI emailed you about a collab a few months back and never heard anything. ${context}\n\n${ask}\n\n${FOLLOW_UP_SIGN_OFF}`
   const values = {
     business_name: businessName,
     reactivation_subject: subject,
@@ -64,8 +66,13 @@ export async function generateStoredReactivation(
   const row = await load(supabase, categoryId, 'reactivation')
   if (row) {
     const rendered = renderTemplate({ template_type: 'reactivation', subject_template: row.subject_template, body_template: row.body_template }, values)
-    if (rendered.ok && rendered.value.subject.trim() && rendered.value.body.trim()) return { subject: rendered.value.subject.trim(), body: rendered.value.body.trim() }
+    if (rendered.ok && rendered.value.subject.trim() && rendered.value.body.trim()) {
+      const normalised = replaceExactTerminalSignOff(rendered.value.body.trim(), INITIAL_SIGN_OFF, FOLLOW_UP_SIGN_OFF)
+      const composed = composeOutreachEmailBody(normalised)
+      return { subject: rendered.value.subject.trim(), body: composed.bodyText, html: composed.bodyHtml }
+    }
   }
   logger.warn('reactivation', 'Stored category template unavailable or invalid; using hardcoded fallback', { category_id: categoryId, template_type: 'reactivation' })
-  return { subject, body }
+  const composed = composeOutreachEmailBody(body)
+  return { subject, body: composed.bodyText, html: composed.bodyHtml }
 }
