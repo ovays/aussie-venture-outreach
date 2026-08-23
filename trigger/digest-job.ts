@@ -15,3 +15,4 @@ export const digestJob = schedules.task({
     console.log('Daily digest sent')
   },
 })
+
