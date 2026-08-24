@@ -84,7 +84,7 @@ class Query {
 const baseLead = {
   id: 'lead-1',
   business_name: 'Harbour Escape',
-  category_id: 'cat-1',
+  category_id: 'cat-1' as string | null,
   category_name: 'Escape Rooms',
   suburb: null,
   city: 'Sydney',
@@ -152,7 +152,8 @@ async function main() {
   // Initial Email AI boundary, while deterministic template routing succeeds.
   {
     const calls = counters()
-    const lead = { ...baseLead, email: 'existing@example.com' }
+    // Finder persists category_name but historically leaves category_id null.
+    const lead = { ...baseLead, category_id: null, email: 'existing@example.com' }
     const db = new MemoryDb([lead])
     const templateAi = throwingTemplateDependencies(calls)
     const result = await researchThenGenerate(db, lead, 'contact_discovery_only', 'template', {
@@ -164,6 +165,7 @@ async function main() {
     assert.equal(result.generated?.ok && result.generated.generationSource, 'template')
     assert.deepEqual(calls, counters(), 'Case A makes no contact-discovery, personalisation, Writer, or Initial Email provider call')
     assert.equal(db.tables.emails[0].generation_source, 'template')
+    assert.equal(db.tables.leads[0].status, 'email_ready')
   }
 
   // Case B: public website/mailto discovery wins before the contact fallback.
@@ -214,7 +216,7 @@ async function main() {
   {
     const calls = counters()
     const missingLead = { ...baseLead, id: 'missing-email', business_name: 'Missing Email Co' }
-    const goodLead = { ...baseLead, id: 'next-lead', business_name: 'Next Lead', email: 'next@example.com' }
+    const goodLead = { ...baseLead, id: 'next-lead', business_name: 'Next Lead', category_id: null, email: 'next@example.com' }
     const db = new MemoryDb([missingLead, goodLead])
     const templateAi = throwingTemplateDependencies(calls)
     const outcomes: string[] = []

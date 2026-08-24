@@ -41,7 +41,7 @@ interface Lead {
   halal: boolean
 }
 
-type BulkAction = 'send' | 'delete' | 'research'
+type BulkAction = 'send' | 'delete' | 'research' | 'process'
 
 interface BulkResult {
   progress: LeadsBulkProgress
@@ -174,29 +174,35 @@ function BulkModal({ action, count, running, progress, result, onConfirm, onClos
     send:       'Send Initial Emails',
     delete:     'Delete Leads',
     research:   'Research Selected',
+    process:    'Process to Email Ready',
   }
   const confirmMessage: Record<BulkAction, string> = {
     send:       `Send initial outreach emails to ${count} selected lead${count === 1 ? '' : 's'}?`,
     delete:     `Permanently delete ${count} lead${count === 1 ? '' : 's'} and all associated data? This cannot be undone.`,
     research:   `Run research on ${count} selected new lead${count === 1 ? '' : 's'}? This will find contact info and generate draft emails.`,
+    process:    `Generate a pending Initial Email for ${count} selected researched lead${count === 1 ? '' : 's'} and move successful leads to Email Ready?`,
   }
   const runningLabel: Record<BulkAction, string> = {
     send:       'Sending…',
     delete:     'Deleting…',
     research:   'Researching…',
+    process:    'Processing…',
   }
   const successVerb: Record<BulkAction, string> = {
     send:       'sent',
     delete:     'deleted',
     research:   'researched',
+    process:    'processed',
   }
   const successUnit: Record<BulkAction, string> = {
     send:       'email',
     delete:     'lead',
     research:   'lead',
+    process:    'lead',
   }
   const successNote: Partial<Record<BulkAction, string>> = {
     research: 'Leads with emails will now appear in Email Ready.',
+    process: 'Successful leads now appear in Email Ready with a pending Initial Email.',
   }
 
   return (
@@ -545,12 +551,15 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   const bulkSendEligibleLeads = emailReadyLeads
   // new leads → research action
   const researchEligibleLeads = leads.filter(l => l.status === 'new')
+  // researched leads → Initial Email generation action
+  const processEligibleLeads = leads.filter(l => l.status === 'researched')
   // combined for row checkboxes and select-all
-  const selectableLeads = [...emailReadyLeads, ...researchEligibleLeads]
+  const selectableLeads = [...emailReadyLeads, ...researchEligibleLeads, ...processEligibleLeads]
 
   const selectedEmailReadyLeads = emailReadyLeads.filter(l => selectedIds.has(l.id))
   const selectedBulkSendLeads = bulkSendEligibleLeads.filter(l => selectedIds.has(l.id))
   const selectedNewLeads = researchEligibleLeads.filter(l => selectedIds.has(l.id))
+  const selectedResearchedLeads = processEligibleLeads.filter(l => selectedIds.has(l.id))
 
   const allSelectableSelected = selectableLeads.length > 0 && selectableLeads.every(l => selectedIds.has(l.id))
   const someSelectableSelected = selectableLeads.some(l => selectedIds.has(l.id))
@@ -593,11 +602,14 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
       send:       'send_initial_emails',
       delete:     'delete',
       research:   'research_leads',
+      process:    'process_researched_leads',
     }
     const leadIds = action === 'send'
       ? selectedBulkSendLeads.map(l => l.id)
       : action === 'research'
         ? selectedNewLeads.map(l => l.id)
+        : action === 'process'
+          ? selectedResearchedLeads.map(l => l.id)
         : Array.from(selectedIds)
     if (leadIds.length === 0) return
 
@@ -909,6 +921,15 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
                 Research Selected ({selectedNewLeads.length})
               </Button>
             )}
+            {selectedResearchedLeads.length > 0 && (
+              <Button
+                size="sm"
+                onClick={() => openBulkDialog('process')}
+              >
+                <Mail size={12} />
+                Process to Email Ready ({selectedResearchedLeads.length})
+              </Button>
+            )}
             {selectedEmailReadyLeads.length > 0 && (
               <>
                 {selectedBulkSendLeads.length > 0 && (
@@ -999,7 +1020,8 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
                 const isSelected    = selectedIds.has(lead.id)
                 const isEmailReady  = lead.status === 'email_ready'
                 const isNew         = lead.status === 'new'
-                const isSelectable  = isEmailReady || isNew
+                const isResearched  = lead.status === 'researched'
+                const isSelectable  = isEmailReady || isNew || isResearched
                 return (
                   <tr
                     key={lead.id}
@@ -1085,7 +1107,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
       {bulkAction && (
         <BulkModal
           action={bulkAction}
-          count={bulkAction === 'send' ? selectedBulkSendLeads.length : bulkAction === 'research' ? selectedNewLeads.length : selectedIds.size}
+          count={bulkAction === 'send' ? selectedBulkSendLeads.length : bulkAction === 'research' ? selectedNewLeads.length : bulkAction === 'process' ? selectedResearchedLeads.length : selectedIds.size}
           running={bulkRunning}
           progress={bulkProgress}
           result={bulkResult}

@@ -40,7 +40,7 @@ async function main() {
 
   for (const mode of ['template', 'ai_personalised']) {
     assert.equal(leadsBulkRequestSchema.safeParse({
-      action: 'research_leads',
+      action: 'process_researched_leads',
       lead_ids: ['00000000-0000-4000-8000-000000000001'],
       initial_email_mode: mode,
     }).success, true, `${mode} is accepted as an explicit mode`)

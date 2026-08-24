@@ -65,8 +65,13 @@ class Query {
   then(resolve: (value: unknown) => unknown) { return Promise.resolve(resolve(this.execute())) }
 }
 
-const lead: InitialEmailLead = { id: 'lead-1', business_name: 'Harbour Escape', category_id: 'cat-1', category_name: 'Escape Rooms', suburb: null, city: 'Sydney', website: 'https://example.com', description: null, services: null, content_type: 'remote' }
-const template = { category_id: 'cat-1', template_type: 'initial_pitch', subject_template: 'Hello {{business_name}}', body_template: 'Hey {{business_name}}, {{category_name}} in {{city}}' }
+const lead: InitialEmailLead = { id: 'lead-1', business_name: 'Harbour Escape', category_id: 'cat-1', category_name: 'Escape Rooms', suburb: null, city: 'Sydney', website: 'https://example.com', description: null, services: null, content_type: 'remote', contact_name: 'Sarah' }
+const template = {
+  category_id: 'cat-1',
+  template_type: 'initial_pitch',
+  subject_template: 'Hello {{business_name}} — {{category_name}}',
+  body_template: 'Hey {{contact_name}}, {{business_name}} in {{city}}: {{website}}',
+}
 const signoffLinks = [
   'mailto:hello@aussieventure.com',
   'https://aussieventure.com',
@@ -96,6 +101,17 @@ async function main() {
   assert.doesNotMatch(templateEmail.body_text, /<[^>]+>/, 'Template body_text contains no HTML tags')
   assert.equal(templateEmail.body_text.match(/hello@aussieventure\.com/g)?.length, 1, 'plain-text signature appears exactly once')
   assert.equal(templateEmail.body_html.match(/mailto:hello@aussieventure\.com/g)?.length, 1, 'HTML signature appears exactly once')
+
+  const discoveredLead = { ...lead, id: 'finder-lead', category_id: null }
+  const discoveredDb = seed({ leads: [{ id: discoveredLead.id, status: 'researched' }] })
+  const discovered = await routeInitialEmail(discoveredDb as never, discoveredLead, 'template', {
+    aiWriter: async () => { aiCalls++; throw new Error('AI must not run') },
+  })
+  assert.equal(discovered.ok && discovered.outcome, 'created', 'Finder-shaped lead resolves its category by the stored category name')
+  assert.equal(aiCalls, 0, 'Finder-shaped Template lead makes no AI call')
+  assert.equal(discoveredDb.tables.leads[0].status, 'email_ready')
+  assert.equal(discoveredDb.tables.emails[0].subject, 'Hello Harbour Escape — Escape Rooms')
+  assert.match(discoveredDb.tables.emails[0].body_text, /^Hey Sarah, Harbour Escape in Sydney: https:\/\/example\.com/)
 
   const repeated = await routeInitialEmail(templateDb as never, lead, 'ai_personalised', { aiWriter: async () => { aiCalls++; return { subject: 'wrong', body: 'wrong' } } })
   assert.equal(repeated.ok && repeated.outcome, 'existing')
@@ -138,7 +154,7 @@ async function main() {
   assert.equal(missingDb.tables.leads[0].status, 'researched')
 
   const templateFailures: Array<[string, ReturnType<typeof seed>, InitialEmailLead]> = [
-    ['missing_category_id', seed(), { ...lead, category_id: null }],
+    ['missing_category_id', seed(), { ...lead, category_id: null, category_name: null }],
     ['category_not_found', seed({ categories: [] }), lead],
     ['empty_subject', seed({ category_email_templates: [{ ...template, subject_template: ' ' }] }), lead],
     ['empty_body', seed({ category_email_templates: [{ ...template, body_template: ' ' }] }), lead],
@@ -234,7 +250,7 @@ async function main() {
 
   const batchModes: string[] = []
   const batchResults = []
-  for (const batchLead of [{ ...lead, id: 'bad', category_id: null }, { ...lead, id: 'good' }]) {
+  for (const batchLead of [{ ...lead, id: 'bad', category_id: null, category_name: null }, { ...lead, id: 'good' }]) {
     const db = seed({ leads: [{ id: batchLead.id, status: 'researched' }] })
     batchModes.push('template')
     batchResults.push(await routeInitialEmail(db as never, batchLead, 'template'))

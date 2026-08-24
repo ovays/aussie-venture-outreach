@@ -109,11 +109,11 @@ async function main() {
 
     const routeIdx = src.indexOf('await routeInitialEmail(')
     const addToIndexIdx = src.indexOf('addLeadToDedupeIndex(dedupeIndex,')
-    const returnEmailIdx = src.lastIndexOf("return { success: true, channel: 'email' }")
+    const returnEmailIdx = src.lastIndexOf("return { success: true, channel: 'email', outcome: 'created'")
 
     assert(routeIdx !== -1, 'write-lead.ts routes the queued email through the central router')
     assert(addToIndexIdx !== -1, 'write-lead.ts calls addLeadToDedupeIndex(dedupeIndex, ...)')
-    assert(returnEmailIdx !== -1, "write-lead.ts still returns { success: true, channel: 'email' }")
+    assert(returnEmailIdx !== -1, "write-lead.ts returns the successful created-email outcome")
     assert(routeIdx < addToIndexIdx, 'The index is updated only after the router saves the email')
     assert(addToIndexIdx < returnEmailIdx, 'The index is updated before writeOneLead returns, so the very next loop iteration sees it')
   }

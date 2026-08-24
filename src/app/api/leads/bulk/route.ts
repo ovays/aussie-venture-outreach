@@ -8,6 +8,7 @@ import { handleEmailSyncFailure } from '@/lib/email-status'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 import { leadsBulkRequestSchema } from '@/lib/leads-bulk-request'
+import { processResearchedLead } from '@/lib/process-researched-lead'
 import {
   summarizeLeadsBulkOutcomes,
   type LeadsBulkOutcome,
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const { action, lead_ids, initial_email_mode: suppliedInitialEmailMode } = parsed.data
-  const initialEmailMode = action === 'research_leads' || action === 'send_initial_emails'
+  const initialEmailMode = action === 'research_leads' || action === 'process_researched_leads' || action === 'send_initial_emails'
     ? suppliedInitialEmailMode ?? await readInitialEmailMode(supabase)
     : null
 
@@ -232,6 +233,46 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       failed,
       outcomes,
       progress: summarizeLeadsBulkOutcomes(lead_ids.length, outcomes),
+    })
+  }
+
+  // ── Process Researched Leads to Email Ready ─────────────────────────────────
+  if (action === 'process_researched_leads') {
+    const outcomes: LeadsBulkOutcome[] = []
+    const dedupeIndex = await fetchPipelineDedupeIndex(supabase)
+
+    for (const lead_id of lead_ids) {
+      const { data: lead } = await supabase
+        .from('leads')
+        .select('id, business_name, category_id, category_name, suburb, city, website, description, services, email, instagram_handle, content_type, status')
+        .eq('id', lead_id)
+        .single()
+
+      if (!lead) {
+        outcomes.push({ lead_id, business_name: lead_id, status: 'failed', reason: 'Lead not found' })
+        continue
+      }
+
+      try {
+        outcomes.push(await processResearchedLead(supabase, lead, dedupeIndex, initialEmailMode!))
+      } catch (error) {
+        outcomes.push({
+          lead_id,
+          business_name: lead.business_name,
+          status: 'failed',
+          reason: error instanceof Error ? error.message : 'Unknown error',
+        })
+      }
+    }
+
+    const progress = summarizeLeadsBulkOutcomes(lead_ids.length, outcomes)
+    return NextResponse.json({
+      processed: progress.succeeded,
+      skipped: progress.skipped,
+      failed: outcomes.filter((outcome) => outcome.status === 'failed'),
+      mode: initialEmailMode,
+      outcomes,
+      progress,
     })
   }
 

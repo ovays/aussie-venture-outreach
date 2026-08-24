@@ -27,26 +27,32 @@ export async function generateInitialEmailFromTemplate(
   supabase: SupabaseClient,
   lead: InitialEmailTemplateLead,
 ): Promise<InitialEmailTemplateResult> {
-  if (!lead.category_id) {
-    return { ok: false, code: 'missing_category_id', reason: 'Lead has no category ID.', categoryId: null, categoryName: lead.category_name }
+  if (!lead.category_id && !lead.category_name?.trim()) {
+    return { ok: false, code: 'missing_category_id', reason: 'Lead has no category ID or category name.', categoryId: null, categoryName: lead.category_name }
   }
 
-  const [{ data: category, error: categoryError }, { data: row, error: templateError }] = await Promise.all([
-    supabase.from('categories').select('id, name').eq('id', lead.category_id).maybeSingle(),
-    supabase.from('category_email_templates')
-      .select('category_id, template_type, subject_template, body_template')
-      .eq('category_id', lead.category_id)
-      .eq('template_type', 'initial_pitch')
-      .maybeSingle(),
-  ])
-  if (categoryError || templateError) {
-    return { ok: false, code: 'template_load_failed', reason: (categoryError ?? templateError)?.message ?? 'Template lookup failed.', categoryId: lead.category_id, categoryName: lead.category_name }
+  let categoryQuery = supabase.from('categories').select('id, name')
+  categoryQuery = lead.category_id
+    ? categoryQuery.eq('id', lead.category_id)
+    : categoryQuery.eq('name', lead.category_name!.trim())
+  const { data: category, error: categoryError } = await categoryQuery.maybeSingle()
+  if (categoryError) {
+    return { ok: false, code: 'template_load_failed', reason: categoryError.message, categoryId: lead.category_id, categoryName: lead.category_name }
   }
   if (!category) {
     return { ok: false, code: 'category_not_found', reason: 'The lead category no longer exists.', categoryId: lead.category_id, categoryName: lead.category_name }
   }
+
+  const { data: row, error: templateError } = await supabase.from('category_email_templates')
+    .select('category_id, template_type, subject_template, body_template')
+    .eq('category_id', category.id)
+    .eq('template_type', 'initial_pitch')
+    .maybeSingle()
+  if (templateError) {
+    return { ok: false, code: 'template_load_failed', reason: templateError.message, categoryId: category.id, categoryName: category.name }
+  }
   if (!row) {
-    return { ok: false, code: 'missing_template', reason: 'This category has no Initial Email template.', categoryId: lead.category_id, categoryName: category.name }
+    return { ok: false, code: 'missing_template', reason: 'This category has no Initial Email template.', categoryId: category.id, categoryName: category.name }
   }
 
   const template: CategoryEmailTemplateDraft = {
@@ -57,7 +63,7 @@ export async function generateInitialEmailFromTemplate(
   const readiness = getInitialTemplateReadiness(template)
   if (!readiness.ready) {
     const code = !template.subject_template?.trim() ? 'empty_subject' : !template.body_template?.trim() ? 'empty_body' : 'invalid_template'
-    return { ok: false, code, reason: readiness.reasons.join(' '), categoryId: lead.category_id, categoryName: category.name }
+    return { ok: false, code, reason: readiness.reasons.join(' '), categoryId: category.id, categoryName: category.name }
   }
 
   const values: Record<string, string | null | undefined> = {
@@ -73,18 +79,18 @@ export async function generateInitialEmailFromTemplate(
   }
   for (const name of used) {
     if (!values[name]?.trim()) {
-      return { ok: false, code: 'missing_lead_value', reason: `Required lead value for {{${name}}} is missing.`, categoryId: lead.category_id, categoryName: category.name }
+      return { ok: false, code: 'missing_lead_value', reason: `Required lead value for {{${name}}} is missing.`, categoryId: category.id, categoryName: category.name }
     }
   }
 
   const rendered = renderTemplate(template, Object.fromEntries([...used].map((name) => [name, values[name]!.trim()])))
   if (!rendered.ok) {
-    return { ok: false, code: rendered.errors.some((item) => item.code === 'unresolved') ? 'unresolved_placeholder' : 'invalid_template', reason: rendered.errors.map((item) => item.message).join(' '), categoryId: lead.category_id, categoryName: category.name }
+    return { ok: false, code: rendered.errors.some((item) => item.code === 'unresolved') ? 'unresolved_placeholder' : 'invalid_template', reason: rendered.errors.map((item) => item.message).join(' '), categoryId: category.id, categoryName: category.name }
   }
   const subject = rendered.value.subject.trim()
   const body = rendered.value.body.trim()
-  if (!subject) return { ok: false, code: 'empty_subject', reason: 'Rendered subject is empty.', categoryId: lead.category_id, categoryName: category.name }
-  if (!body) return { ok: false, code: 'empty_body', reason: 'Rendered body is empty.', categoryId: lead.category_id, categoryName: category.name }
-  if (/{{[^}]*}}|{{|}}/.test(`${subject}\n${body}`)) return { ok: false, code: 'unresolved_placeholder', reason: 'Rendered email contains an unresolved placeholder.', categoryId: lead.category_id, categoryName: category.name }
-  return { ok: true, subject, body, categoryId: lead.category_id, categoryName: category.name }
+  if (!subject) return { ok: false, code: 'empty_subject', reason: 'Rendered subject is empty.', categoryId: category.id, categoryName: category.name }
+  if (!body) return { ok: false, code: 'empty_body', reason: 'Rendered body is empty.', categoryId: category.id, categoryName: category.name }
+  if (/{{[^}]*}}|{{|}}/.test(`${subject}\n${body}`)) return { ok: false, code: 'unresolved_placeholder', reason: 'Rendered email contains an unresolved placeholder.', categoryId: category.id, categoryName: category.name }
+  return { ok: true, subject, body, categoryId: category.id, categoryName: category.name }
 }

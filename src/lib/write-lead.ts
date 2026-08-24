@@ -20,8 +20,9 @@ export type WriteableLeadRow = {
 }
 
 export type WriteOneLeadResult =
-  | { success: true; channel: 'email' | 'dead' | 'duplicate' }
-  | { success: false; error: string }
+  | { success: true; channel: 'email'; outcome: 'created' | 'existing'; generationSource?: 'ai' | 'template' }
+  | { success: true; channel: 'dead' | 'duplicate' }
+  | { success: false; error: string; code?: string }
 
 export async function writeOneLead(
   supabase: ReturnType<typeof createServiceClient>,
@@ -82,8 +83,18 @@ export async function writeOneLead(
     }
 
     const emailResult = await routeInitialEmail(supabase, lead, mode)
-    if (!emailResult.ok) return { success: false, error: `${emailResult.error.code}: ${emailResult.error.reason}` }
-    if (emailResult.outcome === 'existing') return { success: true, channel: 'email' }
+    if (!emailResult.ok) {
+      logger.warn('writer', `Initial Email not created for "${lead.business_name}"`, {
+        lead_id: lead.id,
+        category_id: emailResult.error.categoryId,
+        category_name: emailResult.error.categoryName,
+        initial_email_mode: mode,
+        code: emailResult.error.code,
+        reason: emailResult.error.reason,
+      })
+      return { success: false, error: `${emailResult.error.code}: ${emailResult.error.reason}`, code: emailResult.error.code }
+    }
+    if (emailResult.outcome === 'existing') return { success: true, channel: 'email', outcome: 'existing' }
 
     logger.info('writer', `Email written for "${lead.business_name}"`, { subject: emailResult.subject, initial_email_mode: mode })
 
@@ -105,7 +116,7 @@ export async function writeOneLead(
       description: `Outreach written: ${lead.business_name} (email)`,
       metadata: { channel: 'email', initial_email_mode: mode, generation_source: emailResult.generationSource },
     })
-    return { success: true, channel: 'email' }
+    return { success: true, channel: 'email', outcome: 'created', generationSource: emailResult.generationSource }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     logger.error('writer', `Exception for "${lead.business_name}": ${msg}`)

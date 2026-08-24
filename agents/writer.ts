@@ -11,6 +11,11 @@ type CategoryStatusRow = {
   status: string | null
 }
 
+const RECOVERABLE_TEMPLATE_CODES = new Set([
+  'missing_category_id', 'category_not_found', 'missing_template', 'empty_subject', 'empty_body',
+  'invalid_template', 'missing_lead_value', 'unresolved_placeholder',
+])
+
 export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<void> {
   logger.info('writer', 'Writer agent starting')
 
@@ -125,6 +130,9 @@ export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<v
     let emailsQueued = 0
     let deadCount = 0
     let duplicateSkipped = 0
+    let templateEmailsCreated = 0
+    let skipped = 0
+    let failed = 0
 
     for (const lead of leads) {
       const leadMode = importedModeSnapshots.get(lead.id) ?? mode
@@ -133,11 +141,20 @@ export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<v
         if (result.channel === 'email') {
           emailsQueued++
           processed++
+          if (leadMode === 'template' && result.outcome === 'created' && result.generationSource === 'template') {
+            templateEmailsCreated++
+          }
         } else if (result.channel === 'dead') {
           deadCount++
+          skipped++
         } else if (result.channel === 'duplicate') {
           duplicateSkipped++
+          skipped++
         }
+      } else if (leadMode === 'template' && result.code && RECOVERABLE_TEMPLATE_CODES.has(result.code)) {
+        skipped++
+      } else {
+        failed++
       }
     }
 
@@ -147,6 +164,11 @@ export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<v
       duplicateSkipped,
       totalProcessed: processed,
       initial_email_mode: mode,
+      mode,
+      researchedLeadsFound: leads.length,
+      templateEmailsCreated,
+      skipped,
+      failed,
     })
 
     await supabase.from('activity_log').insert({
@@ -158,6 +180,10 @@ export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<v
         duplicate_skipped: duplicateSkipped,
         total_processed: processed,
         initial_email_mode: mode,
+        researched_leads_found: leads.length,
+        template_emails_created: templateEmailsCreated,
+        skipped,
+        failed,
       },
     })
   } catch (error) {
