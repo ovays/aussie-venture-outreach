@@ -11,6 +11,15 @@ import {
   scoreHalalQualification,
 } from '@/lib/halalQualification'
 import { resolveContentType } from '@/lib/content-type'
+import {
+  CategorySuburbSameRunCooldown,
+  buildExhaustedUpsert,
+  buildLastSearchedUpsert,
+  categorySuburbSearchStateKey,
+  filterEligibleCategorySuburbs,
+  indexCategorySuburbSearchStates,
+  type CategorySuburbSearchState,
+} from '@/lib/category-suburb-search-state'
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
 const MAILTO_REGEX = /href=["']mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi
@@ -39,6 +48,99 @@ type FinderCategoryRow = {
   status: string | null
   content_type: string | null
   city_content_types: Record<string, string> | null
+}
+
+export type FinderLocation = {
+  citySuburbId: string | null
+  suburb: string
+  city: string
+  state: string
+  priority: number
+}
+
+export type CategorySuburbPriorityRow = {
+  category_id: string
+  city_suburb_id: string
+  priority: number
+}
+
+export type CategorySuburbExhaustionProgress = {
+  exhaustedQueries: Set<string>
+  producedNewLead: boolean
+}
+
+export function recordCategorySuburbQueryOutcome(
+  progress: CategorySuburbExhaustionProgress,
+  query: string,
+  exhausted: boolean,
+  newLeads: number
+): void {
+  if (exhausted) progress.exhaustedQueries.add(query)
+  if (newLeads > 0) progress.producedNewLead = true
+}
+
+export function hasCategorySuburbReachedExhaustion(
+  progress: CategorySuburbExhaustionProgress,
+  requiredQueries: ReadonlySet<string>
+): boolean {
+  return !progress.producedNewLead
+    && requiredQueries.size > 0
+    && [...requiredQueries].every((query) => progress.exhaustedQueries.has(query))
+}
+
+export function isFinderCategoryRemoteOnly(
+  category: Pick<FinderEmailCategory, 'name' | 'contentType' | 'cityContentTypes'>,
+  cities: readonly string[]
+): boolean {
+  return cities.length > 0 && cities.every((city) => (
+    resolveContentType(
+      {
+        name: category.name,
+        content_type: category.contentType,
+        city_content_types: category.cityContentTypes,
+      },
+      city
+    ) === 'remote'
+  ))
+}
+
+export function resolveFinderCooldownEligibility(
+  categoryId: string,
+  locations: readonly FinderLocation[],
+  statesByKey: ReadonlyMap<string, Pick<CategorySuburbSearchState, 'exhausted_at'>>,
+  options: { remoteOnly: boolean; persistenceAvailable: boolean },
+  now: Date = new Date()
+): { eligible: FinderLocation[]; excludedCount: number; allCoolingDown: boolean } {
+  if (options.remoteOnly || !options.persistenceAvailable) {
+    return { eligible: [...locations], excludedCount: 0, allCoolingDown: false }
+  }
+
+  return filterEligibleCategorySuburbs(categoryId, locations, statesByKey, now)
+}
+
+/**
+ * Category configuration is an all-or-nothing priority source. Once a category
+ * has at least one configured row, configured active suburbs use those values
+ * and every other active suburb receives the neutral priority of 1. This keeps
+ * the existing active suburb set while preventing unrelated global priorities
+ * from leaking into a configured category.
+ */
+export function resolveCategorySuburbPriorities(
+  globalLocations: FinderLocation[],
+  categoryPriorities: CategorySuburbPriorityRow[]
+): FinderLocation[] {
+  if (categoryPriorities.length === 0) return globalLocations
+
+  const priorityBySuburbId = new Map(
+    categoryPriorities.map((row) => [row.city_suburb_id, row.priority])
+  )
+
+  return globalLocations.map((location) => ({
+    ...location,
+    priority: location.citySuburbId == null
+      ? 1
+      : priorityBySuburbId.get(location.citySuburbId) ?? 1,
+  }))
 }
 
 // Finder categories are loaded from the categories table.
@@ -1304,7 +1406,7 @@ export async function runFinderAgent(): Promise<{ leadsFound: number; runtimeLim
   // Load active suburbs for active cities only — both filters must be satisfied
   const { data: suburbData } = await supabase
     .from('city_suburbs')
-    .select('city, suburb, priority')
+    .select('id, city, suburb, priority')
     .eq('active', true)
     .in('city', activeCities)
     .order('last_used_at', { ascending: true, nullsFirst: true })
@@ -1312,16 +1414,21 @@ export async function runFinderAgent(): Promise<{ leadsFound: number; runtimeLim
     .order('suburb')
 
   // Map<suburb, priority> per city — deduplicates while preserving individual suburb priority
-  const cityAreaMaps: Record<string, Map<string, number>> = {}
+  const cityAreaMaps: Record<string, Map<string, { citySuburbId: string | null; priority: number }>> = {}
   for (const row of suburbData ?? []) {
     if (!cityAreaMaps[row.city]) cityAreaMaps[row.city] = new Map()
     if (!cityAreaMaps[row.city].has(row.suburb)) {
-      cityAreaMaps[row.city].set(row.suburb, (row as typeof row & { priority?: number | null }).priority ?? 1)
+      cityAreaMaps[row.city].set(row.suburb, {
+        citySuburbId: row.id,
+        priority: (row as typeof row & { priority?: number | null }).priority ?? 1,
+      })
     }
   }
   // If a city is active but has no configured suburbs, search the city name itself (priority 1)
   for (const city of activeCities) {
-    if (!cityAreaMaps[city]?.size) cityAreaMaps[city] = new Map([[city, 1]])
+    if (!cityAreaMaps[city]?.size) {
+      cityAreaMaps[city] = new Map([[city, { citySuburbId: null, priority: 1 }]])
+    }
   }
 
   const totalSuburbs = Object.values(cityAreaMaps).reduce((n, m) => n + m.size, 0)
@@ -1362,18 +1469,107 @@ export async function runFinderAgent(): Promise<{ leadsFound: number; runtimeLim
   let costGuardHit = false
 
   // Suburb weighted rotation — flat list with priority for weighted score sorting
-  const allLocations: Array<{ suburb: string; city: string; state: string; priority: number }> =
+  const allLocations: FinderLocation[] =
     Object.entries(cityAreaMaps).flatMap(([city, suburbMap]) =>
-      [...suburbMap.entries()].map(([suburb, priority]) => ({ suburb, city, state: getCityState(city), priority }))
+      [...suburbMap.entries()].map(([suburb, config]) => ({
+        citySuburbId: config.citySuburbId,
+        suburb,
+        city,
+        state: getCityState(city),
+        priority: config.priority,
+      }))
     )
+
+  // Fetch only sparse rows for categories participating in this Finder run.
+  // If the migration is not visible yet during a rolling deploy, retain the
+  // legacy global priority behaviour instead of interrupting existing jobs.
+  const categoryPriorityRowsByCategory = new Map<string, CategorySuburbPriorityRow[]>()
+  if (finderCategories.length > 0) {
+    const { data: categoryPriorityData, error: categoryPriorityError } = await supabase
+      .from('category_suburb_priorities')
+      .select('category_id, city_suburb_id, priority')
+      .in('category_id', finderCategories.map((category) => category.id))
+
+    if (categoryPriorityError) {
+      logger.warn('finder', 'Category suburb priorities unavailable; using global fallback', {
+        error: categoryPriorityError.message,
+      })
+    } else {
+      for (const row of (categoryPriorityData ?? []) as CategorySuburbPriorityRow[]) {
+        const existing = categoryPriorityRowsByCategory.get(row.category_id) ?? []
+        existing.push(row)
+        categoryPriorityRowsByCategory.set(row.category_id, existing)
+      }
+    }
+  }
+
+  // Search-state is sparse and loaded once for all location-based categories
+  // and active suburb IDs. A failed read disables state writes for this run so
+  // a partial persistence outage cannot create misleading exhaustion records.
+  const locationCategoryIds = finderCategories
+    .filter((category) => !isFinderCategoryRemoteOnly(category, activeCities))
+    .map((category) => category.id)
+  const activeCitySuburbIds = allLocations
+    .map((location) => location.citySuburbId)
+    .filter((id): id is string => id != null)
+  let categorySuburbStatePersistenceAvailable = true
+  let categorySuburbStates = new Map<string, CategorySuburbSearchState>()
+
+  if (locationCategoryIds.length > 0 && activeCitySuburbIds.length > 0) {
+    const { data: stateData, error: stateError } = await supabase
+      .from('category_suburb_search_state')
+      .select('category_id, city_suburb_id, last_searched_at, exhausted_at')
+      .in('category_id', locationCategoryIds)
+      .in('city_suburb_id', activeCitySuburbIds)
+
+    if (stateError) {
+      categorySuburbStatePersistenceAvailable = false
+      logger.error('finder', 'CATEGORY_SUBURB_STATE_LOAD_FAILED', {
+        error: stateError.message,
+        fallback: 'legacy_finder_eligibility',
+      })
+    } else {
+      categorySuburbStates = indexCategorySuburbSearchStates(
+        (stateData ?? []) as CategorySuburbSearchState[]
+      )
+    }
+  }
+
+  logger.info('finder', 'CATEGORY_SUBURB_STATES_LOADED', {
+    count: categorySuburbStates.size,
+    persistence_available: categorySuburbStatePersistenceAvailable,
+  })
+
+  async function persistCategorySuburbState(
+    payload: Record<string, string | null>,
+    operation: 'last_searched' | 'exhausted'
+  ): Promise<boolean> {
+    if (!categorySuburbStatePersistenceAvailable) return false
+
+    const { error } = await supabase
+      .from('category_suburb_search_state')
+      .upsert(payload, { onConflict: 'category_id,city_suburb_id' })
+
+    if (!error) return true
+
+    categorySuburbStatePersistenceAvailable = false
+    logger.error('finder', 'CATEGORY_SUBURB_STATE_UPSERT_FAILED', {
+      operation,
+      category_id: payload.category_id,
+      city_suburb_id: payload.city_suburb_id,
+      error: error.message,
+      writes_disabled_for_run: true,
+    })
+    return false
+  }
+
   const totalCombinations = finderCategories.reduce(
     (sum, cat) => sum + cat.queries.length * allLocations.length, 0
   )
   logger.info('finder', `Total keyword/suburb combinations: ${totalCombinations}`)
   const suburbUsageCounts    = new Map<string, number>()
   const SUBURB_COOLDOWN_SIZE = 15
-  const suburbCooldownQueue: string[] = []
-  const suburbCooldownSet    = new Set<string>()
+  const sameRunSuburbCooldown = new CategorySuburbSameRunCooldown(SUBURB_COOLDOWN_SIZE)
 
   let emailCount               = 0
   let dmCount                  = 0
@@ -1439,6 +1635,88 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
     if (costGuardHit) break
 
     const categoryLimit = category.capped ? cappedLimit : EMAIL_TARGET - emailCount
+    const categoryPriorityRows = categoryPriorityRowsByCategory.get(category.id) ?? []
+    const categoryLocations = resolveCategorySuburbPriorities(allLocations, categoryPriorityRows)
+    const remoteOnlyCategory = isFinderCategoryRemoteOnly(category, activeCities)
+    const eligibility = resolveFinderCooldownEligibility(
+      category.id,
+      categoryLocations,
+      categorySuburbStates,
+      {
+        remoteOnly: remoteOnlyCategory,
+        persistenceAvailable: categorySuburbStatePersistenceAvailable,
+      }
+    )
+    const eligibleCategoryLocations = eligibility.eligible
+    const categorySuburbProgress = new Map<string, CategorySuburbExhaustionProgress>()
+    const markedExhaustedSuburbs = new Set<string>()
+
+    logger.info('finder', 'CATEGORY_SUBURB_COOLDOWN_FILTERED', {
+      category_id: category.id,
+      excluded_count: eligibility.excludedCount,
+      eligible_count: eligibleCategoryLocations.length,
+      remote_only: remoteOnlyCategory,
+    })
+
+    if (!remoteOnlyCategory && eligibility.allCoolingDown) {
+      logger.info('finder', 'CATEGORY_SUBURBS_COOLING_DOWN', {
+        category_id: category.id,
+        category: category.name,
+        active_suburb_count: categoryLocations.length,
+        excluded_count: eligibility.excludedCount,
+      })
+      continue
+    }
+
+    const requiredQueriesBySuburb = new Map<string, Set<string>>()
+    for (const location of eligibleCategoryLocations) {
+      if (location.citySuburbId == null) continue
+      requiredQueriesBySuburb.set(
+        location.citySuburbId,
+        new Set(category.queries.map((keyword) => (
+          buildNormalizedSearchQuery(keyword, location.suburb, location.city, location.state)
+        )))
+      )
+    }
+
+    const recordExhaustionOutcome = async (
+      citySuburbId: string | null,
+      query: string,
+      exhausted: boolean,
+      newLeads: number
+    ): Promise<void> => {
+      if (remoteOnlyCategory || citySuburbId == null || markedExhaustedSuburbs.has(citySuburbId)) return
+
+      const progressKey = categorySuburbSearchStateKey(category.id, citySuburbId)
+      const progress = categorySuburbProgress.get(progressKey) ?? {
+        exhaustedQueries: new Set<string>(),
+        producedNewLead: false,
+      }
+      recordCategorySuburbQueryOutcome(progress, query, exhausted, newLeads)
+      categorySuburbProgress.set(progressKey, progress)
+
+      const requiredQueries = requiredQueriesBySuburb.get(citySuburbId)
+      if (
+        !requiredQueries
+        || !hasCategorySuburbReachedExhaustion(progress, requiredQueries)
+        || !categorySuburbStatePersistenceAvailable
+      ) return
+
+      const exhaustedAt = new Date().toISOString()
+      const persisted = await persistCategorySuburbState(
+        buildExhaustedUpsert(category.id, citySuburbId, exhaustedAt),
+        'exhausted'
+      )
+      if (!persisted) return
+
+      markedExhaustedSuburbs.add(citySuburbId)
+      logger.info('finder', 'CATEGORY_SUBURB_MARKED_EXHAUSTED', {
+        category_id: category.id,
+        city_suburb_id: citySuburbId,
+        exhausted_at: exhaustedAt,
+        reason: 'all_category_suburb_queries_exhausted_without_new_leads',
+      })
+    }
     let categoryEmailCount = 0
     const shouldApplyHalalQualification = isHalalFilterCategory(category.name)
     logger.info('finder', `Category: ${category.name}`, { limit: categoryLimit })
@@ -1453,9 +1731,15 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
       if (categoryEmailCount >= categoryLimit) break
       if (costGuardHit || safetyLimitHit) break
 
-      // Suburb ordering — exclude cooldown window, fall back to all if all cooled.
-      const eligibleLocations = allLocations.filter((loc) => !suburbCooldownSet.has(loc.suburb))
-      const baseLocations = (eligibleLocations.length > 0 ? eligibleLocations : allLocations).slice()
+      // De-prioritise recently used category/suburb pairs without removing any
+      // pair that survived the persistent seven-day cooldown filter.
+      const sameRunEligibleLocations = eligibleCategoryLocations.filter((location) => (
+        !sameRunSuburbCooldown.has(category.id, location.citySuburbId)
+      ))
+      const sameRunRecentLocations = eligibleCategoryLocations.filter((location) => (
+        sameRunSuburbCooldown.has(category.id, location.citySuburbId)
+      ))
+      const baseLocations = [...sameRunEligibleLocations, ...sameRunRecentLocations]
 
       let rotatedLocations: typeof baseLocations
       if (category.usePrioritySuburbs) {
@@ -1464,18 +1748,21 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
         rotatedLocations = baseLocations.sort((a, b) => b.priority - a.priority)
         logger.info('finder', 'PRIORITY_SUBURB_ORDER_ENABLED', {
           category: category.name,
+          priority_source: categoryPriorityRows.length > 0 ? 'category' : 'global',
           suburb_order: rotatedLocations.map((loc) => ({ suburb: loc.suburb, priority: loc.priority })),
         })
       } else {
         // Default weighted rotation: sort by usageCount/priority (least-used relative to priority first).
         rotatedLocations = baseLocations.sort((a, b) => {
-          const scoreA = (suburbUsageCounts.get(a.suburb) ?? 0) / a.priority
-          const scoreB = (suburbUsageCounts.get(b.suburb) ?? 0) / b.priority
+          const keyA = `${category.id}:${a.citySuburbId ?? `${a.city}:${a.suburb}`}`
+          const keyB = `${category.id}:${b.citySuburbId ?? `${b.city}:${b.suburb}`}`
+          const scoreA = (suburbUsageCounts.get(keyA) ?? 0) / a.priority
+          const scoreB = (suburbUsageCounts.get(keyB) ?? 0) / b.priority
           return scoreA - scoreB
         })
       }
 
-      for (const { suburb, city, state, priority } of rotatedLocations) {
+      for (const { citySuburbId, suburb, city, state, priority } of rotatedLocations) {
         if (emailCount >= EMAIL_TARGET) break keywordSuburbLoop
         if (emailCount + dmCount >= TOTAL_TARGET) break keywordSuburbLoop
         if (categoryEmailCount >= categoryLimit) break keywordSuburbLoop
@@ -1501,14 +1788,10 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
         seenQueries.add(query)
 
         // Update suburb rotation tracking
-        const newSuburbCount = (suburbUsageCounts.get(suburb) ?? 0) + 1
-        suburbUsageCounts.set(suburb, newSuburbCount)
-        suburbCooldownSet.add(suburb)
-        suburbCooldownQueue.push(suburb)
-        if (suburbCooldownQueue.length > SUBURB_COOLDOWN_SIZE) {
-          const evicted = suburbCooldownQueue.shift()!
-          suburbCooldownSet.delete(evicted)
-        }
+        const suburbUsageKey = `${category.id}:${citySuburbId ?? `${city}:${suburb}`}`
+        const newSuburbCount = (suburbUsageCounts.get(suburbUsageKey) ?? 0) + 1
+        suburbUsageCounts.set(suburbUsageKey, newSuburbCount)
+        sameRunSuburbCooldown.add(category.id, citySuburbId)
         logger.info('finder', 'SUBURB_PRIORITY_USED', {
           suburb,
           city,
@@ -1520,7 +1803,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           suburb,
           city,
           count:               newSuburbCount,
-          cooldown_queue_size: suburbCooldownQueue.length,
+          cooldown_queue_size: sameRunSuburbCooldown.size,
         })
 
         // Per-combination counters for EMPTY_GOOGLE_RESULTS / SUBURB_EXHAUSTED logging
@@ -1573,12 +1856,19 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           try {
             callCount++
             const searchResult = await searchBusinesses(query, category.batchSize, supabase, skip)
+            const searchedAt = new Date().toISOString()
             await supabase
               .from('city_suburbs')
-              .update({ last_used_at: new Date().toISOString() })
+              .update({ last_used_at: searchedAt })
               .eq('active', true)
               .eq('city', city)
               .eq('suburb', suburb)
+            if (!remoteOnlyCategory && citySuburbId != null) {
+              await persistCategorySuburbState(
+                buildLastSearchedUpsert(category.id, citySuburbId, searchedAt),
+                'last_searched'
+              )
+            }
             results = searchResult.results
             apiUsed = searchResult.apiUsed
           } catch (error) {
@@ -2056,6 +2346,8 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           })
           exhaustedSet.add(query)
         }
+
+        await recordExhaustionOutcome(citySuburbId, query, exhaustedThisQuery, comboNewLeads)
 
         if (comboGoogleResults === 0) {
           console.log(`[EMPTY_GOOGLE_RESULTS] keyword="${keyword}" suburb="${suburb}"`)

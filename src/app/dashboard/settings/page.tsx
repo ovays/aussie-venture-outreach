@@ -160,7 +160,14 @@ export default async function SettingsPage() {
         </Card>
 
         <Card>
-          <CitySuburbs initialData={suburbsByCity} />
+          <CitySuburbs
+            initialData={suburbsByCity}
+            initialCategories={(categories ?? []).map((category) => ({
+              id: category.id,
+              name: category.name,
+              status: category.status,
+            }))}
+          />
         </Card>
 
         <Card>
