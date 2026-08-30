@@ -7,6 +7,7 @@ import {
   SYSTEM_PLACEHOLDERS,
   USER_PLACEHOLDERS,
   emptyTemplateDraft,
+  emptyTemplateDrafts,
   getInitialTemplateReadiness,
   getTemplateModeBlockers,
   isDuplicateCategoryName,
@@ -17,7 +18,9 @@ import {
   validateTemplateField,
 } from '../src/lib/category-email-templates'
 import { isInitialEmailMode, SETTINGS_DEFAULTS } from '../src/lib/settingsDefaults'
-import type { CategoryEmailTemplateDraft, EmailTemplateType } from '../src/lib/email-template-types'
+import { EMAIL_TEMPLATE_TYPES, type CategoryEmailTemplateDraft, type EmailTemplateType, type ManagedCategory } from '../src/lib/email-template-types'
+import { updateCategorySchema } from '../src/lib/category-api-schema'
+import { buildCategorySavePayload } from '../src/lib/category-save-payload'
 
 const root = resolve(__dirname, '..')
 const initial = (subject: string | null, body: string | null): CategoryEmailTemplateDraft => ({ template_type: 'initial_pitch', subject_template: subject, body_template: body })
@@ -94,6 +97,41 @@ assert.equal(SETTINGS_DEFAULTS.initial_email_mode.value, 'ai_personalised')
 assert.equal(isInitialEmailMode('ai_personalised'), true)
 assert.equal(isInitialEmailMode('template'), true)
 assert.equal(isInitialEmailMode('invalid'), false)
+
+const enrichedCategory: ManagedCategory & { created_at: string; updated_at: string } = {
+  id: '11111111-1111-4111-8111-111111111111',
+  name: 'Mini Golf',
+  halal_filter: false,
+  cities: 'all',
+  custom_cities: [],
+  content_type: 'both',
+  city_content_types: {},
+  pitch_template: 'Pitch',
+  dm_template: 'DM',
+  search_keywords: ['mini golf'],
+  use_priority_suburbs: true,
+  status: 'active',
+  templates: emptyTemplateDrafts(),
+  initialTemplateReadiness: getInitialTemplateReadiness(null),
+  templateValidation: Object.fromEntries(EMAIL_TEMPLATE_TYPES.map((type) => [type, []])) as unknown as ManagedCategory['templateValidation'],
+  templateCompleteness: Object.fromEntries(EMAIL_TEMPLATE_TYPES.map((type) => [type, false])) as unknown as ManagedCategory['templateCompleteness'],
+  created_at: '2026-08-01T00:00:00.000Z',
+  updated_at: '2026-08-02T00:00:00.000Z',
+}
+const categorySavePayload = buildCategorySavePayload(enrichedCategory, { ...enrichedCategory, name: 'Mini Golf Sydney' })
+assert.equal(updateCategorySchema.safeParse(categorySavePayload).success, true, 'An edited enriched GET category produces a valid PATCH payload')
+assert.deepEqual(Object.keys(categorySavePayload).sort(), [
+  'cities', 'city_content_types', 'content_type', 'custom_cities', 'dm_template', 'halal_filter', 'id', 'name',
+  'pitch_template', 'search_keywords', 'status', 'templates', 'use_priority_suburbs',
+].sort(), 'PATCH contains only fields accepted by the category update schema')
+assert.deepEqual(categorySavePayload.templates.initial_pitch, { subject_template: null, body_template: null }, 'Template persistence strips hydrated template metadata')
+assert.equal('initialTemplateReadiness' in categorySavePayload, false)
+assert.equal('templateValidation' in categorySavePayload, false)
+assert.equal('templateCompleteness' in categorySavePayload, false)
+assert.equal('created_at' in categorySavePayload, false)
+assert.equal('updated_at' in categorySavePayload, false)
+assert.equal(updateCategorySchema.safeParse({ ...categorySavePayload, templates: enrichedCategory.templates }).success, false, 'Hydrated template_type metadata reproduces the original validation failure')
+assert.equal(updateCategorySchema.safeParse({ ...categorySavePayload, custom_cities: [] }).success, true, 'Empty custom cities are valid for all-cities categories')
 
 const settingsRoute = readFileSync(resolve(root, 'src/app/api/settings/route.ts'), 'utf8')
 const categoriesRoute = readFileSync(resolve(root, 'src/app/api/categories/route.ts'), 'utf8')

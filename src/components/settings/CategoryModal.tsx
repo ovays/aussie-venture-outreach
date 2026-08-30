@@ -19,8 +19,9 @@ import {
 import { EMAIL_TEMPLATE_TYPES, type EmailTemplateType, type ManagedCategory, type TemplateValidationError } from '@/lib/email-template-types'
 import { composeOutreachEmailBody, replaceExactTerminalSignOff } from '@/lib/outreach-signature'
 import { FOLLOW_UP_SIGN_OFF, INITIAL_SIGN_OFF } from '@/lib/email-voice'
+import { buildCategorySavePayload, type CategorySaveDraft } from '@/lib/category-save-payload'
 
-type CategoryDraft = Omit<ManagedCategory, 'id' | 'initialTemplateReadiness' | 'templateValidation' | 'templateCompleteness'>
+type CategoryDraft = CategorySaveDraft
 
 interface CategoryModalProps {
   open: boolean
@@ -122,11 +123,10 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
     setSaving(true)
     setError('')
     setServerReasons([])
-    const { templates, ...categoryFields } = form
     const response = await fetch('/api/categories', {
       method: isNew ? 'POST' : 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...(isNew ? {} : { id: category!.id }), ...categoryFields, templates }),
+      body: JSON.stringify(buildCategorySavePayload(category, form)),
     })
     const json = await response.json() as { error?: string; reasons?: string[] }
     setSaving(false)

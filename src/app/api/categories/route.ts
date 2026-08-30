@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { isAuthErrorResponse, requireApiAdmin, requireApiUser } from '@/lib/auth'
+import { createCategorySchema, updateCategorySchema } from '@/lib/category-api-schema'
 import {
   emptyTemplateDrafts,
   getInitialTemplateReadiness,
@@ -12,39 +12,6 @@ import {
   templatesForCategory,
 } from '@/lib/category-email-templates'
 import { EMAIL_TEMPLATE_TYPES, type EmailTemplateType } from '@/lib/email-template-types'
-
-const categoryFieldsSchema = z.object({
-  name: z.string().trim().min(1, 'Category name is required').optional(),
-  halal_filter: z.boolean().optional(),
-  cities: z.enum(['sydney_only', 'all', 'custom']).optional(),
-  custom_cities: z.array(z.string()).nullable().optional(),
-  content_type: z.enum(['visit', 'remote', 'both']).optional(),
-  city_content_types: z.record(z.string(), z.enum(['visit', 'remote'])).nullable().optional(),
-  pitch_template: z.string().nullable().optional(),
-  dm_template: z.string().nullable().optional(),
-  search_keywords: z.array(z.string()).nullable().optional(),
-  use_priority_suburbs: z.boolean().optional(),
-  status: z.enum(['active', 'paused']).optional(),
-})
-
-const templatePatchSchema = z.object({
-  subject_template: z.string().nullable().optional(),
-  body_template: z.string().nullable().optional(),
-}).strict()
-
-const templatesSchema = z.object({
-  initial_pitch: templatePatchSchema.optional(),
-  follow_up_1: templatePatchSchema.optional(),
-  follow_up_2: templatePatchSchema.optional(),
-  follow_up_3: templatePatchSchema.optional(),
-  reactivation: templatePatchSchema.optional(),
-}).strict()
-
-const createSchema = categoryFieldsSchema.extend({
-  name: z.string().trim().min(1, 'Category name is required'),
-  templates: templatesSchema.optional(),
-})
-const updateSchema = categoryFieldsSchema.extend({ id: z.string().uuid(), templates: templatesSchema.optional() })
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>
 type CategoryRow = Record<string, unknown> & { id: string; name: string; status: 'active' | 'paused' }
@@ -95,7 +62,7 @@ export async function GET(): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const auth = await requireApiAdmin()
   if (isAuthErrorResponse(auth)) return auth
-  const parsed = createSchema.safeParse(await request.json())
+  const parsed = createCategorySchema.safeParse(await request.json())
   if (!parsed.success) return NextResponse.json({ error: 'Invalid category data', issues: parsed.error.issues }, { status: 400 })
 
   const supabase = await createClient()
@@ -142,7 +109,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const auth = await requireApiAdmin()
   if (isAuthErrorResponse(auth)) return auth
-  const parsed = updateSchema.safeParse(await request.json())
+  const parsed = updateCategorySchema.safeParse(await request.json())
   if (!parsed.success) return NextResponse.json({ error: 'Invalid category data', issues: parsed.error.issues }, { status: 400 })
 
   const supabase = await createClient()
