@@ -34,6 +34,7 @@ interface Scenario {
   reason: string
   currentEmail?: string
   suppressedEmails?: string[]
+  leadStatus?: string
 }
 
 // Apply the EXACT same eligibility logic as the patched agents/reactivation.ts.
@@ -44,7 +45,9 @@ function isEligibleForReactivation(
   reactivationDelayDays: number,
   currentEmail?: string,
   suppressedEmails?: string[],
+  leadStatus = 'contacted',
 ): boolean {
+  if (leadStatus !== 'contacted') return false
   if (isDeliverySuppressedForAddress(currentEmail, suppressedEmails)) return false
   const initialEmail = emails.find((e) => e.type === 'initial_pitch' && e.sent_at)
   if (!initialEmail?.sent_at) return false
@@ -163,6 +166,18 @@ const scenarios: Scenario[] = [
     currentEmail: 'new@example.com',
     suppressedEmails: ['failed@example.com'],
   },
+  {
+    name: 'I — Replied lead with full sequence and elapsed delay',
+    emails: [
+      { type: 'initial_pitch', sent_at: daysAgo(90) },
+      { type: 'follow_up_3', sent_at: daysAgo(69) },
+    ],
+    daysSinceInitial: 90,
+    reactivationDelayDays: REACTIVATION_DELAY,
+    expectEligible: false,
+    reason: "status='replied' excludes the lead from reactivation",
+    leadStatus: 'replied',
+  },
 ]
 
 // ── FU1/FU2/FU3 gate-unchanged sanity checks ─────────────────────────────────
@@ -185,7 +200,7 @@ console.log('  REACTIVATION ELIGIBILITY SCENARIOS')
 console.log(DIV)
 
 for (const s of scenarios) {
-  const got = isEligibleForReactivation(s.emails, s.daysSinceInitial, s.reactivationDelayDays, s.currentEmail, s.suppressedEmails)
+  const got = isEligibleForReactivation(s.emails, s.daysSinceInitial, s.reactivationDelayDays, s.currentEmail, s.suppressedEmails, s.leadStatus)
   const ok  = got === s.expectEligible
   const tag = ok ? '✓ PASS' : '✗ FAIL'
 

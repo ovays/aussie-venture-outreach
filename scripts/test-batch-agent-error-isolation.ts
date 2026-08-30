@@ -53,7 +53,7 @@ async function main() {
   {
     const loopIdx = followupSrc.indexOf('for (const candidate of toSend) {')
     const tryIdx = followupSrc.indexOf('try {', loopIdx)
-    const sendIdx = followupSrc.indexOf('await sendFollowUp(supabase, candidate, type)', loopIdx)
+    const sendIdx = followupSrc.indexOf('await sendFollowUp(supabase, candidate, type', loopIdx)
     const catchIdx = followupSrc.indexOf('} catch (error) {', sendIdx)
 
     assert(loopIdx !== -1, 'The per-candidate send loop still exists')

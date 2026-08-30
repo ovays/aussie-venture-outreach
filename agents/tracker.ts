@@ -13,7 +13,8 @@ import {
 // production call site omits it and gets the real service-role client.
 export async function handleEmailReply(
   leadId: string,
-  supabaseOverride?: ReturnType<typeof createServiceClient>
+  supabaseOverride?: ReturnType<typeof createServiceClient>,
+  matchedEmailId?: string,
 ): Promise<void> {
   const supabase = supabaseOverride ?? createServiceClient()
 
@@ -25,19 +26,32 @@ export async function handleEmailReply(
 
   if (!lead) return
 
-  // Only advance status on the lead's first reply. A lead that has already
-  // moved past 'contacted' (negotiating, closed, etc.) must not be regressed
-  // back to 'replied' by a second reply on the same thread, or by duplicate
-  // webhook delivery of the same reply event.
-  if (lead.status === 'contacted') {
-    await supabase.from('leads').update({ status: 'replied' }).eq('id', leadId)
+  // Advance outreach/no-response states, including a genuinely late reply
+  // from a lead already marked dead. Never regress active-deal or closed
+  // states. The status predicate also prevents a concurrent manual status
+  // change between this read and update from being overwritten.
+  if (lead.status === 'contacted' || lead.status === 'dead') {
+    await supabase
+      .from('leads')
+      .update({ status: 'replied' })
+      .eq('id', leadId)
+      .eq('status', lead.status)
   }
 
-  await supabase
+  let replyUpdate = supabase
     .from('emails')
     .update({ replied_at: new Date().toISOString() })
     .eq('lead_id', leadId)
-    .eq('type', 'initial_pitch')
+    .is('replied_at', null)
+
+  // When In-Reply-To identified a specific outbound message, attribute the
+  // reply to that row. Sender-address fallback has no thread identifier, so
+  // retain the existing initial-pitch attribution in that case.
+  replyUpdate = matchedEmailId
+    ? replyUpdate.eq('id', matchedEmailId)
+    : replyUpdate.eq('type', 'initial_pitch')
+
+  await replyUpdate
 
   await supabase.from('activity_log').insert({
     event_type: 'reply_received',
@@ -47,6 +61,35 @@ export async function handleEmailReply(
   })
 
   logger.info('tracker', `Reply received from ${lead.business_name}`, { lead_id: leadId })
+}
+
+function inboundHeader(headers: Record<string, string> | null, name: string): string {
+  if (!headers) return ''
+  return Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1]?.trim() ?? ''
+}
+
+// Conservative, deterministic filtering for obvious machine-generated mail.
+// This intentionally does not attempt to classify the message body or infer
+// ambiguous replies; it only honors standard automation headers and familiar
+// delivery/auto-reply sender and subject markers.
+export function isAutomatedInboundEmail(params: {
+  from: string
+  subject?: string
+  headers: Record<string, string> | null
+}): boolean {
+  const autoSubmitted = inboundHeader(params.headers, 'auto-submitted').toLowerCase()
+  if (autoSubmitted && autoSubmitted !== 'no') return true
+
+  if (inboundHeader(params.headers, 'x-autoreply') || inboundHeader(params.headers, 'x-autorespond')) return true
+
+  const precedence = inboundHeader(params.headers, 'precedence').toLowerCase()
+  if (['bulk', 'junk', 'list'].includes(precedence)) return true
+
+  const from = params.from.toLowerCase()
+  if (/(^|[<\s])(mailer-daemon|postmaster|no-?reply|bounce)[@+]/.test(from)) return true
+
+  const subject = params.subject?.trim().toLowerCase() ?? ''
+  return /^(automatic reply|auto(?:matic)?[ -]?reply|out of office|delivery status notification|undeliverable|delivery failure|mail delivery failed|returned mail|mail delivery subsystem)\b/.test(subject)
 }
 
 // Matches an inbound email.received webhook event to a lead and, if found,
@@ -62,27 +105,35 @@ export async function handleEmailReply(
 // is done, email.received is never sent by Resend and this function is never
 // invoked; it does not itself require any further setup once that is in place.
 export async function handleInboundEmail(
-  params: { emailId: string; from: string },
+  params: { emailId: string; from: string; subject?: string },
   supabaseOverride?: ReturnType<typeof createServiceClient>,
   fetchHeaders: typeof getReceivedEmailHeaders = getReceivedEmailHeaders
 ): Promise<void> {
   const supabase = supabaseOverride ?? createServiceClient()
 
   const headers = await fetchHeaders(params.emailId)
-  const inReplyTo = headers
-    ? Object.entries(headers).find(([key]) => key.toLowerCase() === 'in-reply-to')?.[1]?.trim()
-    : null
+  if (isAutomatedInboundEmail({ from: params.from, subject: params.subject, headers })) {
+    logger.info('tracker', 'Automated inbound email ignored', {
+      email_id: params.emailId,
+      from: params.from,
+    })
+    return
+  }
+
+  const inReplyTo = inboundHeader(headers, 'in-reply-to') || null
 
   let leadId: string | null = null
+  let matchedEmailId: string | undefined
 
   if (inReplyTo) {
     const { data: matchedEmail } = await supabase
       .from('emails')
-      .select('lead_id')
+      .select('id, lead_id')
       .eq('message_id', inReplyTo)
       .limit(1)
       .maybeSingle()
     leadId = matchedEmail?.lead_id ?? null
+    matchedEmailId = matchedEmail?.id
   }
 
   if (!leadId && params.from) {
@@ -104,7 +155,7 @@ export async function handleInboundEmail(
     return
   }
 
-  await handleEmailReply(leadId, supabaseOverride)
+  await handleEmailReply(leadId, supabaseOverride, matchedEmailId)
 }
 
 export async function handleTerminalDeliveryFailure(

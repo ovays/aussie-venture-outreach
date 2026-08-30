@@ -90,14 +90,14 @@ export async function sendFollowUp(
   const currentAddressIfAllowed = async (): Promise<string | null> => {
     const { data: currentLead, error: leadErr } = await supabase
       .from('leads')
-      .select('email, delivery_suppressed_emails')
+      .select('status, email, delivery_suppressed_emails')
       .eq('id', candidate.lead.id)
       .maybeSingle()
 
-    if (leadErr || !currentLead?.email) {
+    if (leadErr || !currentLead?.email || currentLead.status !== 'contacted') {
       logger.warn('followup', 'Follow-up skipped because current lead address could not be verified', {
         lead_id: candidate.lead.id,
-        error: leadErr?.message ?? 'lead/email missing',
+        error: leadErr?.message ?? (currentLead?.status !== 'contacted' ? `lead status is ${currentLead?.status ?? 'missing'}` : 'lead/email missing'),
       })
       return null
     }

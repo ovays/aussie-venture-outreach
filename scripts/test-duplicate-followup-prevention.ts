@@ -144,7 +144,7 @@ async function main() {
   // ── 1. Fresh lead — send proceeds normally ──────────────────────────────────
   console.log('\n  1. No prior delivered row — send proceeds')
   {
-    const db = makeFakeSupabase({ leads: [{ id: 'lead-1', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [], follow_ups: [], activity_log: [] }, { enforceUniqueDeliveredPerLeadType: true })
+    const db = makeFakeSupabase({ leads: [{ id: 'lead-1', status: 'contacted', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [], follow_ups: [], activity_log: [] }, { enforceUniqueDeliveredPerLeadType: true })
     let sendCalls = 0
     const stubSendEmail = async () => { sendCalls++; return { id: 'rs_1', messageId: '<fu1@aussieventure.com>' } }
 
@@ -157,7 +157,7 @@ async function main() {
   console.log('\n  2. Already-delivered row for this lead+type — skipped before any send')
   {
     const db = makeFakeSupabase(
-      { leads: [{ id: 'lead-2', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [{ id: 'e1', lead_id: 'lead-2', type: 'follow_up_1', status: 'sent' }], follow_ups: [], activity_log: [] },
+      { leads: [{ id: 'lead-2', status: 'contacted', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [{ id: 'e1', lead_id: 'lead-2', type: 'follow_up_1', status: 'sent' }], follow_ups: [], activity_log: [] },
       { enforceUniqueDeliveredPerLeadType: true }
     )
     let sendCalls = 0
@@ -175,7 +175,7 @@ async function main() {
   console.log('\n  3. email_sync_failed also counts as "already delivered"')
   {
     const db = makeFakeSupabase(
-      { leads: [{ id: 'lead-3', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [{ id: 'e1', lead_id: 'lead-3', type: 'follow_up_2', status: 'email_sync_failed' }], follow_ups: [], activity_log: [] },
+      { leads: [{ id: 'lead-3', status: 'contacted', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [{ id: 'e1', lead_id: 'lead-3', type: 'follow_up_2', status: 'email_sync_failed' }], follow_ups: [], activity_log: [] },
       { enforceUniqueDeliveredPerLeadType: true }
     )
     let sendCalls = 0
@@ -193,7 +193,7 @@ async function main() {
     // for the same lead+type, before our own insert executes. This models
     // two overlapping scheduler runs racing on the exact same candidate and
     // losing the TOCTOU window between the check and the insert.
-    const tables: Record<string, Row[]> = { leads: [{ id: 'lead-4', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [], follow_ups: [], activity_log: [] }
+    const tables: Record<string, Row[]> = { leads: [{ id: 'lead-4', status: 'contacted', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [], follow_ups: [], activity_log: [] }
     let selectCallCount = 0
 
     const db = {
@@ -295,8 +295,8 @@ async function main() {
   {
     const tables = {
       leads: [
-        { id: 'lead-6-remote', email: 'biz@example.com', delivery_suppressed_emails: ['biz@example.com'] },
-        { id: 'lead-6-visit', email: 'visit@example.com', delivery_suppressed_emails: ['visit@example.com'] },
+        { id: 'lead-6-remote', status: 'contacted', email: 'biz@example.com', delivery_suppressed_emails: ['biz@example.com'] },
+        { id: 'lead-6-visit', status: 'contacted', email: 'visit@example.com', delivery_suppressed_emails: ['visit@example.com'] },
       ],
       emails: [],
       follow_ups: [
@@ -322,7 +322,24 @@ async function main() {
     assert(tables.follow_ups.every((row) => row.status === 'cancelled'), 'Stale scheduled follow-ups are marked cancelled')
   }
 
-  console.log('\n  7. Trigger.dev schedule has concurrencyLimit: 1')
+  console.log('\n  7. A stale queued follow-up is blocked after the lead replies')
+  {
+    const db = makeFakeSupabase({
+      leads: [{ id: 'lead-replied', status: 'replied', email: 'biz@example.com', delivery_suppressed_emails: [] }],
+      emails: [], follow_ups: [], activity_log: [],
+    })
+    let sendCalls = 0
+    let aiCalls = 0
+    const result = await sendFollowUp(
+      db, makeCandidate('lead-replied'), 'follow_up_1',
+      (async () => { aiCalls++; return { subject: 'x', body: 'x' } }) as never,
+      (async () => { sendCalls++; return { id: 'never', messageId: '<never>' } }) as never,
+    )
+    assert(result === false, 'Replied lead is rejected by the send-time status guard')
+    assert(aiCalls === 0 && sendCalls === 0, 'No content generation or provider send occurs for a replied lead')
+  }
+
+  console.log('\n  8. Trigger.dev schedule has concurrencyLimit: 1')
   {
     const src = fs.readFileSync(path.resolve(process.cwd(), 'trigger/daily-pipeline.ts'), 'utf8')
     const hasQueue = /queue:\s*\{\s*concurrencyLimit:\s*1/.test(src)

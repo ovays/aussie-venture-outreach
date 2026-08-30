@@ -52,6 +52,7 @@ function makeFakeSupabase(tables: Record<string, Row[]>) {
     },
     from(table: string) {
       const eqFilters: [string, unknown][] = []
+      const isFilters: [string, unknown][] = []
       const ilikeFilters: [string, unknown][] = []
       let limitN: number | undefined
       let mode: 'select' | 'update' | null = null
@@ -62,6 +63,7 @@ function makeFakeSupabase(tables: Record<string, Row[]>) {
       const applyFilters = (list: Row[]) => {
         let out = list
         for (const [col, val] of eqFilters) out = out.filter((r) => r[col] === val)
+        for (const [col, val] of isFilters) out = out.filter((r) => r[col] === val)
         for (const [col, val] of ilikeFilters) {
           out = out.filter((r) => typeof r[col] === 'string' && (r[col] as string).toLowerCase() === String(val).toLowerCase())
         }
@@ -80,6 +82,7 @@ function makeFakeSupabase(tables: Record<string, Row[]>) {
 
       const builder = {
         eq(col: string, val: unknown) { eqFilters.push([col, val]); return builder },
+        is(col: string, val: unknown) { isFilters.push([col, val]); return builder },
         ilike(col: string, val: unknown) { ilikeFilters.push([col, val]); return builder },
         limit(n: number) { limitN = n; return builder },
         select() { mode = 'select'; return builder },
@@ -179,6 +182,17 @@ async function main() {
     assert(email.data?.replied_at !== null, 'replied_at is still recorded even though status was not changed')
   }
 
+  {
+    const db = makeFakeSupabase({
+      leads: [{ id: 'lead-dead', business_name: 'Late Biz', status: 'dead' }],
+      emails: [{ id: 'late-row', lead_id: 'lead-dead', type: 'initial_pitch', replied_at: null }],
+      activity_log: [],
+    })
+    await handleEmailReply('lead-dead', db)
+    const lead = await db.from('leads').select().eq('id', 'lead-dead').maybeSingle()
+    assert(lead.data?.status === 'replied', 'A genuine late reply revives a dead lead to replied')
+  }
+
   // ── 6. Duplicate reply delivery is idempotent ───────────────────────────────
   console.log('\n  6. Duplicate webhook delivery — reply replay is idempotent')
   {
@@ -188,9 +202,12 @@ async function main() {
       activity_log: [],
     })
     await handleEmailReply('lead-1', db)
+    const firstEmail = await db.from('emails').select().eq('id', 'row-1').maybeSingle()
     await handleEmailReply('lead-1', db) // redelivered
     const lead = await db.from('leads').select().eq('id', 'lead-1').maybeSingle()
+    const replayedEmail = await db.from('emails').select().eq('id', 'row-1').maybeSingle()
     assert(lead.data?.status === 'replied', "Lead stays 'replied' (not bounced back or double-transitioned) after redelivery", JSON.stringify(lead.data))
+    assert(replayedEmail.data?.replied_at === firstEmail.data?.replied_at, 'Duplicate delivery preserves the original reply timestamp')
   }
 
   // ── 7. Inbound reply matches via In-Reply-To header ─────────────────────────
@@ -198,13 +215,20 @@ async function main() {
   {
     const db = makeFakeSupabase({
       leads: [{ id: 'lead-1', business_name: 'Biz', status: 'contacted' }],
-      emails: [{ id: 'row-1', lead_id: 'lead-1', type: 'initial_pitch', message_id: '<abc@aussieventure.com>', replied_at: null }],
+      emails: [
+        { id: 'initial-1', lead_id: 'lead-1', type: 'initial_pitch', message_id: '<initial@aussieventure.com>', replied_at: null },
+        { id: 'fu1-1', lead_id: 'lead-1', type: 'follow_up_1', message_id: '<abc@aussieventure.com>', replied_at: null },
+      ],
       activity_log: [],
     })
     const fetchHeaders = async () => ({ 'In-Reply-To': '<abc@aussieventure.com>' })
     await handleInboundEmail({ emailId: 'in_1', from: 'someone@biz.com' }, db, fetchHeaders)
     const lead = await db.from('leads').select().eq('id', 'lead-1').maybeSingle()
     assert(lead.data?.status === 'replied', 'Lead is matched via In-Reply-To and marked replied', JSON.stringify(lead.data))
+    const initial = await db.from('emails').select().eq('id', 'initial-1').maybeSingle()
+    const followUp = await db.from('emails').select().eq('id', 'fu1-1').maybeSingle()
+    assert(followUp.data?.replied_at !== null, 'The exact outbound email identified by In-Reply-To gets replied_at')
+    assert(initial.data?.replied_at === null, 'Other thread emails are not incorrectly marked replied')
   }
 
   // ── 8. Inbound reply falls back to from-address match ───────────────────────
@@ -242,7 +266,33 @@ async function main() {
   }
 
   // ── Summary ──────────────────────────────────────────────────────────────────
-  console.log('\n  10. Terminal events suppress the address and cancel pending follow-ups')
+  console.log('\n  10. Automated/system inbound mail is ignored')
+  {
+    const db = makeFakeSupabase({
+      leads: [{ id: 'lead-auto', business_name: 'Biz', status: 'contacted', email: 'owner@biz.com' }],
+      emails: [{ id: 'auto-row', lead_id: 'lead-auto', type: 'initial_pitch', message_id: '<auto@aussieventure.com>', replied_at: null }],
+      activity_log: [],
+    })
+    await handleInboundEmail(
+      { emailId: 'in_auto', from: 'owner@biz.com', subject: 'Automatic reply: away' },
+      db,
+      async () => ({ 'In-Reply-To': '<auto@aussieventure.com>', 'Auto-Submitted': 'auto-replied' }),
+    )
+    const lead = await db.from('leads').select().eq('id', 'lead-auto').maybeSingle()
+    const email = await db.from('emails').select().eq('id', 'auto-row').maybeSingle()
+    assert(lead.data?.status === 'contacted', 'Out-of-office message does not mark the lead replied')
+    assert(email.data?.replied_at === null, 'Out-of-office message does not set replied_at')
+
+    await handleInboundEmail(
+      { emailId: 'in_dsn', from: 'mailer-daemon@example.com', subject: 'Delivery Status Notification' },
+      db,
+      async () => ({ 'In-Reply-To': '<auto@aussieventure.com>' }),
+    )
+    const afterDeliveryNotice = await db.from('leads').select().eq('id', 'lead-auto').maybeSingle()
+    assert(afterDeliveryNotice.data?.status === 'contacted', 'Delivery-system message does not mark the lead replied')
+  }
+
+  console.log('\n  11. Terminal events suppress the address and cancel pending follow-ups')
   {
     const db = makeFakeSupabase({
       leads: [{ id: 'lead-t', email: 'Owner@Biz.com', delivery_suppressed_emails: [] }],

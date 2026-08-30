@@ -196,10 +196,10 @@ export async function runReactivationAgent(): Promise<void> {
       try {
       const { data: currentLead, error: currentLeadErr } = await supabase
         .from('leads')
-        .select('email, delivery_suppressed_emails')
+        .select('status, email, delivery_suppressed_emails')
         .eq('id', lead.id)
         .maybeSingle()
-      if (currentLeadErr || !currentLead?.email) continue
+      if (currentLeadErr || !currentLead?.email || currentLead.status !== 'contacted') continue
       if (isDeliverySuppressedForAddress(currentLead.email, currentLead.delivery_suppressed_emails)) {
         suppressedDeliveryFailure++
         logger.warn('reactivation', 'REACTIVATION_SUPPRESSED_DELIVERY_FAILURE', { lead_id: lead.id })
@@ -221,10 +221,10 @@ export async function runReactivationAgent(): Promise<void> {
 
       const { data: sendTimeLead, error: sendTimeLeadErr } = await supabase
         .from('leads')
-        .select('email, delivery_suppressed_emails')
+        .select('status, email, delivery_suppressed_emails')
         .eq('id', lead.id)
         .maybeSingle()
-      if (sendTimeLeadErr || !sendTimeLead?.email) continue
+      if (sendTimeLeadErr || !sendTimeLead?.email || sendTimeLead.status !== 'contacted') continue
       if (isDeliverySuppressedForAddress(sendTimeLead.email, sendTimeLead.delivery_suppressed_emails)) {
         suppressedDeliveryFailure++
         logger.warn('reactivation', 'REACTIVATION_SUPPRESSED_DELIVERY_FAILURE', { lead_id: lead.id })

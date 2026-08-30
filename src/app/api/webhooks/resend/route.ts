@@ -60,7 +60,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
 
       case 'email.received': {
-        await handleInboundEmail({ emailId: event.data.email_id, from: event.data.from })
+        await handleInboundEmail({
+          emailId: event.data.email_id,
+          from: event.data.from,
+          subject: event.data.subject,
+        })
         break
       }
 
