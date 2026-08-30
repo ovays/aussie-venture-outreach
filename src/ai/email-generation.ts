@@ -117,7 +117,7 @@ ${hasWebsiteFacts
 The category maps internally to ${contentFocus}. Do not repeat that label or describe the business back to its owner.
 
 TRUE SENDER CONTEXT
-Use these as facts to distribute naturally, never as four lines to paraphrase in order: Owais personally runs Aussie Venture from Sydney; the page shares food, activities and travel from around Australia; it has around 650k followers across Instagram, TikTok and Facebook.
+Use these as facts to distribute naturally, never as four lines to paraphrase in order: Owais personally runs Aussie Venture from Sydney; the page shares food, activities and travel from around Australia; it has nearly 600K followers across Instagram, TikTok and Facebook.
 
 ASSIGNMENT FOR THIS RECIPIENT
 - Start with exactly "Hey ${params.business_name}," on its own line.
@@ -388,7 +388,7 @@ IT ALSO HAS TO SOUND LIKE A PERSON WHO REMEMBERED THEM. Three months have gone b
 
 FACTS YOU MAY USE ABOUT YOURSELF (nothing else):
 - Aussie Venture posts food, activities and travel from around Australia
-- Around 650k followers across Instagram, TikTok and Facebook
+- Nearly 600K followers across Instagram, TikTok and Facebook
 - You're covering more ${contentContext} at the moment
 
 FACTS YOU MAY USE ABOUT THEM (nothing else, and never invent more):

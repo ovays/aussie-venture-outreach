@@ -14,7 +14,7 @@ export function getBrandDescription(_category: string, contentType: ContentType)
 function getCategoryPitch(category: string, contentType: ContentType): string {
   const focus = getContentFocus(category, contentType)
   const noun = getCategoryReferenceNoun(category)
-  return `Owais creates ${focus} for 650K+ Australians and wants to collab with this ${noun}.`
+  return `Owais creates ${focus} for nearly 600K followers and wants to collab with this ${noun}.`
 }
 
 export function buildOutreachDMPrompt(
@@ -22,7 +22,7 @@ export function buildOutreachDMPrompt(
   brandDesc: string,
   pitch: string
 ): string {
-  return `You're Owais. You run Aussie Venture, ${brandDesc} with 650K+ followers across Facebook, Instagram and TikTok. Write a short Instagram DM to this business.
+  return `You're Owais. You run Aussie Venture, ${brandDesc} with nearly 600K followers across Instagram, TikTok and Facebook. Write a short Instagram DM to this business.
 
 Business: ${params.business_name}, ${params.suburb} ${params.city}
 Category: ${params.category}
@@ -34,7 +34,7 @@ Rules:
 - Sound like a real person, not a platform
 - No em dashes, no bullet points, no corporate language
 - No "I wanted to reach out", no "I came across your page"
-- You may mention 650K+ followers once if it adds credibility
+- You may mention nearly 600K followers once if it adds credibility
 - NEVER mention free, no cost, no charge, or anything being free
 - NEVER say "paid collab" - use "sponsored feature" or "collab" instead
 - Never state a price

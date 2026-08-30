@@ -116,7 +116,7 @@ export const LENGTH_RULE = `LENGTH — the band is a ceiling with a rough floor,
 // so being Sydney based is relevant to them; remote leads should not be told
 // we're local to them.
 export function brandIntroOptions(contentType: ContentType): string[] {
-  const followers = 'around 650k followers across Instagram, TikTok and Facebook'
+  const followers = 'nearly 600K followers across Instagram, TikTok and Facebook'
   if (contentType === 'visit') {
     return [
       `I'm Owais, and I run Aussie Venture. We're based in Sydney and post food, activities and travel from around Australia. We have ${followers}.`,
