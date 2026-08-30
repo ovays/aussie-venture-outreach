@@ -16,7 +16,8 @@
  * Run: npx tsx scripts/test-webhook-handling.ts
  */
 
-import { handleEmailBounce, handleEmailReply, handleInboundEmail } from '../agents/tracker'
+import { handleEmailBounce, handleEmailReply, handleInboundEmail, handleTerminalDeliveryFailure } from '../agents/tracker'
+import { isDeliverySuppressedForAddress } from '../src/lib/delivery-suppression'
 
 const SEP = '═'.repeat(60)
 let passed = 0
@@ -40,6 +41,15 @@ type Row = Record<string, unknown>
 
 function makeFakeSupabase(tables: Record<string, Row[]>) {
   return {
+    async rpc(name: string, args: { p_lead_id: string; p_email: string }) {
+      if (name !== 'suppress_lead_delivery_email') return { error: { message: 'unknown rpc' } }
+      const lead = (tables.leads ?? []).find((row) => row.id === args.p_lead_id)
+      if (!lead) return { error: { message: 'lead not found' } }
+      const current = (lead.delivery_suppressed_emails as string[] | undefined) ?? []
+      const normalized = args.p_email.trim().toLowerCase()
+      lead.delivery_suppressed_emails = current.includes(normalized) ? current : [...current, normalized]
+      return { error: null }
+    },
     from(table: string) {
       const eqFilters: [string, unknown][] = []
       const ilikeFilters: [string, unknown][] = []
@@ -232,6 +242,62 @@ async function main() {
   }
 
   // ── Summary ──────────────────────────────────────────────────────────────────
+  console.log('\n  10. Terminal events suppress the address and cancel pending follow-ups')
+  {
+    const db = makeFakeSupabase({
+      leads: [{ id: 'lead-t', email: 'Owner@Biz.com', delivery_suppressed_emails: [] }],
+      emails: [{ id: 'email-t', lead_id: 'lead-t', type: 'follow_up_1', resend_id: 'rs_failed', status: 'sent' }],
+      follow_ups: [
+        { id: 'fu2', lead_id: 'lead-t', status: 'scheduled' },
+        { id: 'old', lead_id: 'lead-t', status: 'sent' },
+      ],
+      activity_log: [],
+    })
+    const handled = await handleTerminalDeliveryFailure({
+      taggedLeadId: 'lead-t', resendId: 'rs_failed', eventType: 'email.failed',
+      recipient: 'Owner@Biz.com', providerReason: { reason: 'provider terminal failure' },
+    }, db)
+    const email = await db.from('emails').select().eq('id', 'email-t').maybeSingle()
+    const lead = await db.from('leads').select().eq('id', 'lead-t').maybeSingle()
+    const pending = await db.from('follow_ups').select().eq('id', 'fu2').maybeSingle()
+    const sent = await db.from('follow_ups').select().eq('id', 'old').maybeSingle()
+    assert(handled && email.data?.status === 'failed', 'email.failed is persisted as terminal failed')
+    assert(isDeliverySuppressedForAddress('owner@biz.com', lead.data?.delivery_suppressed_emails as string[]), 'Failed recipient is suppressed case-insensitively')
+    assert(pending.data?.status === 'cancelled' && sent.data?.status === 'sent', 'Only scheduled follow-ups are cancelled')
+  }
+
+  console.log('\n  11. Terminal precedence and duplicate delivery are idempotent')
+  {
+    const tables = {
+      leads: [{ id: 'lead-p', email: 'p@example.com', delivery_suppressed_emails: [] as string[] }],
+      emails: [{ id: 'email-p', lead_id: 'lead-p', type: 'initial_pitch', resend_id: 'rs_p', status: 'sent' }],
+      follow_ups: [] as Row[], activity_log: [] as Row[],
+    }
+    const db = makeFakeSupabase(tables)
+    await handleTerminalDeliveryFailure({ resendId: 'rs_p', eventType: 'email.bounced', recipient: 'p@example.com' }, db)
+    await handleTerminalDeliveryFailure({ resendId: 'rs_p', eventType: 'email.bounced', recipient: 'p@example.com' }, db)
+    await handleTerminalDeliveryFailure({ resendId: 'rs_p', eventType: 'email.failed', recipient: 'p@example.com' }, db)
+    assert(tables.emails[0].status === 'bounced', 'First terminal state is not overwritten by a later event')
+    assert(tables.activity_log.length === 3, 'Each provider delivery is logged while repeated state changes remain idempotent')
+    assert(!isDeliverySuppressedForAddress('new@example.com', tables.leads[0].delivery_suppressed_emails), 'A different address remains eligible')
+  }
+
+  console.log('\n  12. Late failure for an old address does not cancel outreach to a replacement address')
+  {
+    const tables = {
+      leads: [{ id: 'lead-new', email: 'new@example.com', delivery_suppressed_emails: [] as string[] }],
+      emails: [{ id: 'email-old', lead_id: 'lead-new', type: 'initial_pitch', resend_id: 'rs_old', status: 'sent' }],
+      follow_ups: [{ id: 'fu-new', lead_id: 'lead-new', status: 'scheduled' }],
+      activity_log: [] as Row[],
+    }
+    const db = makeFakeSupabase(tables)
+    await handleTerminalDeliveryFailure({ resendId: 'rs_old', eventType: 'email.suppressed', recipient: 'old@example.com' }, db)
+    assert(tables.emails[0].status === 'suppressed', 'email.suppressed is persisted using the provider status')
+    assert(tables.follow_ups[0].status === 'scheduled', 'Replacement-address pending outreach is not cancelled by an old-address event')
+    assert(isDeliverySuppressedForAddress('old@example.com', tables.leads[0].delivery_suppressed_emails), 'Old failed address remains suppressed')
+    assert(!isDeliverySuppressedForAddress('new@example.com', tables.leads[0].delivery_suppressed_emails), 'Replacement address remains sendable')
+  }
+
   console.log('\n' + SEP)
   console.log(`  RESULTS: ${passed} passed, ${failed} failed`)
   console.log(SEP)

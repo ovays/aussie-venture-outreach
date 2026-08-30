@@ -25,6 +25,7 @@ const EVENT_CONFIG: Record<string, EventConfig> = {
   lead_marked_dead:    { icon: '💀', color: '#475569' },
   deal_closed:         { icon: '✅', color: '#34d399' },
   email_bounced:       { icon: '↩️', color: '#fb923c' },
+  delivery_terminal_failure: { icon: '⛔', color: '#f87171' },
   email_failed:        { icon: '❌', color: '#f87171' },
   digest_sent:         { icon: '📰', color: '#94a3b8' },
   finder_complete:     { icon: '🔍', color: '#60a5fa' },

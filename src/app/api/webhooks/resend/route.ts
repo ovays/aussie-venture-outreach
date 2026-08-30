@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { WebhookEventPayload } from 'resend'
 import { verifyResendWebhook } from '@/lib/webhook-verify'
-import { handleEmailBounce, handleInboundEmail } from '../../../../../agents/tracker'
+import { handleInboundEmail, handleTerminalDeliveryFailure } from '../../../../../agents/tracker'
 import { logger } from '@/lib/logger'
 
 // ─── Reply detection prerequisite ───────────────────────────────────────────
@@ -21,8 +21,8 @@ import { logger } from '@/lib/logger'
 // this without disrupting existing mail. Until this is set up, the interim
 // safety net is the existing manual reply/status controls in the dashboard.
 //
-// Bounce handling (email.bounced) has no such prerequisite and is fully
-// functional as soon as signature verification passes.
+// Terminal delivery handling (email.bounced, email.failed, email.suppressed)
+// has no such prerequisite and is active once signature verification passes.
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const body = await request.text()
 
@@ -38,11 +38,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     switch (event.type) {
-      case 'email.bounced': {
-        const leadId = event.data.tags?.['lead_id']
-        if (leadId) {
-          await handleEmailBounce(leadId, event.data.email_id)
-        }
+      case 'email.bounced':
+      case 'email.failed':
+      case 'email.suppressed': {
+        const providerReason = event.type === 'email.bounced'
+          ? event.data.bounce
+          : event.type === 'email.failed'
+            ? event.data.failed
+            : event.data.suppressed
+        const handled = await handleTerminalDeliveryFailure({
+          taggedLeadId: event.data.tags?.['lead_id'],
+          resendId: event.data.email_id,
+          eventType: event.type,
+          recipient: event.data.to?.[0],
+          providerReason,
+        })
+        // Returning 500 asks Resend to retry a valid event that raced the
+        // post-send database write, rather than acknowledging and losing it.
+        if (!handled) throw new Error(`No email row found for Resend id ${event.data.email_id}`)
         break
       }
 
@@ -52,8 +65,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
 
       default:
-        // All other event types (email.sent, delivered, opened, clicked,
-        // complained, etc.) are accepted but currently unhandled.
+        // Successful/non-terminal events are accepted but do not replace an
+        // existing terminal status. Reply handling remains email.received.
         break
     }
 

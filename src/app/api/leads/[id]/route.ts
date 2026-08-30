@@ -92,7 +92,9 @@ export async function DELETE(
   await supabase.from('follow_ups').delete().eq('lead_id', id)
   await supabase.from('dm_queue').delete().eq('lead_id', id)
   await supabase.from('deals').delete().eq('lead_id', id)
-  await supabase.from('activity_log').delete().eq('lead_id', id)
+  // Preserve audit history. activity_log.lead_id uses ON DELETE SET NULL, so
+  // terminal delivery events remain available to the failure report after
+  // the lead and its cascading email rows are removed.
   await supabase.from('emails').delete().eq('lead_id', id)
 
   const { error } = await supabase.from('leads').delete().eq('id', id)

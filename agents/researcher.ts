@@ -38,14 +38,16 @@ async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>
 
       logger.info('researcher', `Fixed bounced email for ${lead.business_name}`, { old: lead.email, new: newEmail })
 
-      await supabase.from('leads').update({ email: newEmail }).eq('id', lead.id)
-      await supabase.from('emails').update({ status: 'pending_send' }).eq('id', emailRecord.id)
+      // Preserve the bounced row as immutable delivery history. Moving the
+      // lead back through the writer creates a fresh pending row for the new
+      // address; it must never weaken bounced -> pending_send.
+      await supabase.from('leads').update({ email: newEmail, status: 'researched' }).eq('id', lead.id)
 
       await supabase.from('activity_log').insert({
         event_type: 'email_fixed',
         lead_id: lead.id,
         description: `Bounced email corrected for ${lead.business_name}: ${lead.email} → ${newEmail}`,
-        metadata: { old_email: lead.email, new_email: newEmail },
+        metadata: { old_email: lead.email, new_email: newEmail, bounced_email_id: emailRecord.id },
       })
     } catch (err) {
       logger.error('researcher', `Error fixing bounced email for lead`, { lead_id: emailRecord.lead_id, error: String(err) })

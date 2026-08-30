@@ -13,6 +13,7 @@ import {
   summarizeLeadsBulkOutcomes,
   type LeadsBulkOutcome,
 } from '@/lib/leads-bulk-progress'
+import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 
 // Same protection agents/sender.ts (idempotency re-check) and
 // resend/route.ts (per-lead lock) already apply to their send paths — this
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     for (const lead_id of lead_ids) {
       const { data: lead } = await supabase
         .from('leads')
-        .select('id, business_name, email, status, source, city, category_id, category_name, suburb, website, description, services, content_type')
+        .select('id, business_name, email, status, source, city, category_id, category_name, suburb, website, description, services, content_type, delivery_suppressed_emails')
         .eq('id', lead_id)
         .single()
 
@@ -73,6 +74,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
       if (!lead.email) {
         const skip = { lead_id, business_name: lead.business_name, reason: 'No email address' }
+        skipped.push(skip)
+        outcomes.push({ ...skip, status: 'skipped' })
+        continue
+      }
+      if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
+        const skip = { lead_id, business_name: lead.business_name, reason: 'Current email has a terminal delivery failure' }
         skipped.push(skip)
         outcomes.push({ ...skip, status: 'skipped' })
         continue
@@ -136,7 +143,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const bodyHtml = pendingEmail.body_html
         const bodyText = pendingEmail.body_text ?? ''
 
-        const result = await sendEmail({ to: lead.email, subject, html: bodyHtml, text: bodyText, leadId: lead_id })
+        const { data: sendTimeLead, error: sendTimeLeadErr } = await supabase
+          .from('leads').select('email, delivery_suppressed_emails').eq('id', lead_id).maybeSingle()
+        if (sendTimeLeadErr || !sendTimeLead?.email) {
+          const skip = { lead_id, business_name: lead.business_name, reason: 'Current email address could not be verified' }
+          skipped.push(skip)
+          outcomes.push({ ...skip, status: 'skipped' })
+          continue
+        }
+        if (isDeliverySuppressedForAddress(sendTimeLead.email, sendTimeLead.delivery_suppressed_emails)) {
+          const skip = { lead_id, business_name: lead.business_name, reason: 'Current email has a terminal delivery failure' }
+          skipped.push(skip)
+          outcomes.push({ ...skip, status: 'skipped' })
+          continue
+        }
+
+        const result = await sendEmail({ to: sendTimeLead.email, subject, html: bodyHtml, text: bodyText, leadId: lead_id })
 
         if (!result) {
           const failure = { lead_id, business_name: lead.business_name, reason: 'Email send failed' }

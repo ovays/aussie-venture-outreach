@@ -9,7 +9,7 @@ interface EmailRecord {
   id: string
   type: 'initial_pitch' | 'follow_up_1' | 'follow_up_2' | 'follow_up_3'
   subject: string
-  status: 'pending_send' | 'sent' | 'failed' | 'bounced' | 'email_sync_failed'
+  status: 'pending_send' | 'sent' | 'failed' | 'bounced' | 'suppressed' | 'email_sync_failed'
   sent_at: string | null
   replied_at: string | null
   created_at: string
@@ -32,10 +32,10 @@ const TYPE_LABELS: Record<string, string> = {
   initial_pitch: 'Initial', follow_up_1: 'Follow-up 1', follow_up_2: 'Follow-up 2', follow_up_3: 'Follow-up 3',
 }
 const STATUS_COLORS: Record<string, string> = {
-  sent: 'bg-green-500/20 text-green-400', failed: 'bg-red-500/20 text-red-400', bounced: 'bg-orange-500/20 text-orange-400', pending_send: 'bg-yellow-500/20 text-yellow-400', email_sync_failed: 'bg-purple-500/20 text-purple-400',
+  sent: 'bg-green-500/20 text-green-400', failed: 'bg-red-500/20 text-red-400', bounced: 'bg-orange-500/20 text-orange-400', suppressed: 'bg-red-500/20 text-red-300', pending_send: 'bg-yellow-500/20 text-yellow-400', email_sync_failed: 'bg-purple-500/20 text-purple-400',
 }
 const STATUS_LABELS: Record<string, string> = {
-  sent: 'Sent', failed: 'Failed', bounced: 'Bounced', pending_send: 'Pending', email_sync_failed: 'Sync Failed',
+  sent: 'Sent', failed: 'Failed', bounced: 'Bounced', suppressed: 'Suppressed', pending_send: 'Pending', email_sync_failed: 'Sync Failed',
 }
 
 export function EmailLogTable() {
@@ -149,7 +149,7 @@ export function EmailLogTable() {
           <option value="">All Types</option><option value="initial_pitch">Initial</option><option value="follow_up_1">Follow-up 1</option><option value="follow_up_2">Follow-up 2</option><option value="follow_up_3">Follow-up 3</option>
         </select>
         <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
-          <option value="">All Statuses</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="bounced">Bounced</option><option value="pending_send">Pending</option><option value="email_sync_failed">Sync Failed</option>
+          <option value="">All Statuses</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="bounced">Bounced</option><option value="suppressed">Suppressed</option><option value="pending_send">Pending</option><option value="email_sync_failed">Sync Failed</option>
         </select>
         <span className="ml-auto self-center text-xs" style={{ color: '#64748b' }}>{total} email{total === 1 ? '' : 's'}</span>
       </div>

@@ -32,6 +32,8 @@ interface Scenario {
   reactivationDelayDays: number
   expectEligible: boolean
   reason: string
+  currentEmail?: string
+  suppressedEmails?: string[]
 }
 
 // Apply the EXACT same eligibility logic as the patched agents/reactivation.ts.
@@ -39,8 +41,11 @@ interface Scenario {
 function isEligibleForReactivation(
   emails: EmailRow[],
   daysSinceInitial: number,
-  reactivationDelayDays: number
+  reactivationDelayDays: number,
+  currentEmail?: string,
+  suppressedEmails?: string[],
 ): boolean {
+  if (isDeliverySuppressedForAddress(currentEmail, suppressedEmails)) return false
   const initialEmail = emails.find((e) => e.type === 'initial_pitch' && e.sent_at)
   if (!initialEmail?.sent_at) return false
 
@@ -132,6 +137,32 @@ const scenarios: Scenario[] = [
     expectEligible: false,
     reason: 'Old code would have allowed this; new code blocks it (FU3 not sent)',
   },
+  {
+    name: 'G — Full sequence complete but current address terminally failed',
+    emails: [
+      { type: 'initial_pitch', sent_at: daysAgo(90) },
+      { type: 'follow_up_3', sent_at: daysAgo(69) },
+    ],
+    daysSinceInitial: 90,
+    reactivationDelayDays: REACTIVATION_DELAY,
+    expectEligible: false,
+    reason: 'Current failed recipient must never be reactivated',
+    currentEmail: 'failed@example.com',
+    suppressedEmails: ['failed@example.com'],
+  },
+  {
+    name: 'H — Different newly discovered address remains eligible',
+    emails: [
+      { type: 'initial_pitch', sent_at: daysAgo(90) },
+      { type: 'follow_up_3', sent_at: daysAgo(69) },
+    ],
+    daysSinceInitial: 90,
+    reactivationDelayDays: REACTIVATION_DELAY,
+    expectEligible: true,
+    reason: 'Suppression is address-specific, not a permanent business blacklist',
+    currentEmail: 'new@example.com',
+    suppressedEmails: ['failed@example.com'],
+  },
 ]
 
 // ── FU1/FU2/FU3 gate-unchanged sanity checks ─────────────────────────────────
@@ -154,7 +185,7 @@ console.log('  REACTIVATION ELIGIBILITY SCENARIOS')
 console.log(DIV)
 
 for (const s of scenarios) {
-  const got = isEligibleForReactivation(s.emails, s.daysSinceInitial, s.reactivationDelayDays)
+  const got = isEligibleForReactivation(s.emails, s.daysSinceInitial, s.reactivationDelayDays, s.currentEmail, s.suppressedEmails)
   const ok  = got === s.expectEligible
   const tag = ok ? '✓ PASS' : '✗ FAIL'
 
@@ -174,6 +205,7 @@ console.log(DIV)
 // so the test has no dependency on the follow-up agent internals.
 
 import { computeFollowUpEligibility } from '@/lib/followup-eligibility'
+import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 
 const FU_SETTINGS = { fu1Days: 7, fu2Days: 14, fu3Days: 21 }
 const NOW = new Date()

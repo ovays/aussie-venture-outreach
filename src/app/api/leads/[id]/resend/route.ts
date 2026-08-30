@@ -8,6 +8,7 @@ import { generateFollowUpEmail } from '@/lib/followup-generation'
 import { determineNextEmailType, buildEmailHistory, buildReferenceChain } from '@/lib/email-sequence'
 import { FOLLOW_UP_NUMBER } from '@/lib/stage-import'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
+import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 
 // Generation + send + DB write normally completes in a few seconds; 3 minutes
 // gives ample headroom before a stale lock is reclaimed from a crashed request.
@@ -32,6 +33,10 @@ export async function POST(
 
   if (!lead.email) {
     return NextResponse.json({ error: 'Lead has no email address' }, { status: 400 })
+  }
+
+  if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
+    return NextResponse.json({ error: 'This email address has a terminal delivery failure. Add a different address before sending again.' }, { status: 409 })
   }
 
   // Serializes the entire check-then-send sequence below per lead, so two
@@ -156,8 +161,17 @@ export async function POST(
     bodyHtml = generated.html
   }
 
+  const { data: sendTimeLead, error: sendTimeLeadErr } = await supabase
+    .from('leads').select('email, delivery_suppressed_emails').eq('id', id).maybeSingle()
+  if (sendTimeLeadErr || !sendTimeLead?.email) {
+    return NextResponse.json({ error: 'Current email address could not be verified.' }, { status: 409 })
+  }
+  if (isDeliverySuppressedForAddress(sendTimeLead.email, sendTimeLead.delivery_suppressed_emails)) {
+    return NextResponse.json({ error: 'This email address entered a terminal delivery failure state before send.' }, { status: 409 })
+  }
+
   const result = await sendEmail({
-    to:      lead.email,
+    to:      sendTimeLead.email,
     subject,
     html:    bodyHtml,
     text:    bodyText,

@@ -6,6 +6,7 @@ import { logger } from '@/lib/logger'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
 import { generateFollowUpEmail } from '@/lib/followup-generation'
 import { buildEmailHistory, buildReferenceChain } from '@/lib/email-sequence'
+import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 
 // Re-exported for scripts/test-email-threading.ts, which verifies this
 // function against the live sender's exact behavior.
@@ -36,6 +37,7 @@ interface ContactedLead {
   description: string | null
   services: string | null
   notes: string | null
+  delivery_suppressed_emails?: string[] | null
   emails: LeadEmail[]
 }
 
@@ -85,6 +87,35 @@ export async function sendFollowUp(
 ) {
   const followUpNumber = type === 'follow_up_1' ? 1 : type === 'follow_up_2' ? 2 : 3
 
+  const currentAddressIfAllowed = async (): Promise<string | null> => {
+    const { data: currentLead, error: leadErr } = await supabase
+      .from('leads')
+      .select('email, delivery_suppressed_emails')
+      .eq('id', candidate.lead.id)
+      .maybeSingle()
+
+    if (leadErr || !currentLead?.email) {
+      logger.warn('followup', 'Follow-up skipped because current lead address could not be verified', {
+        lead_id: candidate.lead.id,
+        error: leadErr?.message ?? 'lead/email missing',
+      })
+      return null
+    }
+
+    if (!isDeliverySuppressedForAddress(currentLead.email, currentLead.delivery_suppressed_emails)) return currentLead.email
+
+    await supabase.from('follow_ups').update({ status: 'cancelled' })
+      .eq('lead_id', candidate.lead.id).eq('status', 'scheduled')
+    logger.warn('followup', 'FOLLOW_UP_SUPPRESSED_DELIVERY_FAILURE', {
+      lead_id: candidate.lead.id,
+      email_id: candidate.initialEmail.id,
+      email_type: type,
+    })
+    return null
+  }
+
+  if (!(await currentAddressIfAllowed())) return false
+
   // Idempotency re-check: the eligibility queue was built once at the start of
   // this run. If a second overlapping run (or a Trigger.dev retry) already
   // delivered this exact follow-up for this lead in the meantime, skip —
@@ -133,8 +164,13 @@ export async function sendFollowUp(
     source,
   })
 
+  // Final check immediately before the provider call closes the race between
+  // queue construction/content generation and a terminal webhook.
+  const sendTo = await currentAddressIfAllowed()
+  if (!sendTo) return false
+
   const result = await sendEmailFn({
-    to: candidate.lead.email!,
+    to: sendTo,
     subject,
     html,
     text: body,
@@ -337,6 +373,7 @@ export async function runFollowUpAgent(
     let skipNoInitialEmail  = 0
     let skipNotYetDue       = 0
     let skipAllSent         = 0
+    let skipDeliveryFailure = 0
 
     const now = new Date()
 
@@ -366,6 +403,12 @@ export async function runFollowUpAgent(
       for (const lead of batch as ContactedLead[]) {
         if (!lead.email) {
           skipNoEmail++
+          continue
+        }
+
+        if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
+          skipDeliveryFailure++
+          logger.warn('followup', 'FOLLOW_UP_SUPPRESSED_DELIVERY_FAILURE', { lead_id: lead.id })
           continue
         }
 
@@ -480,6 +523,7 @@ export async function runFollowUpAgent(
       skip_no_initial:      skipNoInitialEmail,
       skip_not_yet_due:     skipNotYetDue,
       skip_all_sent:        skipAllSent,
+      skip_delivery_failure: skipDeliveryFailure,
     })
 
     logger.info('followup', '[FOLLOWUP_QUEUE]', {

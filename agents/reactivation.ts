@@ -4,6 +4,7 @@ import { logger } from '@/lib/logger'
 import { generateStoredReactivation } from '@/lib/stored-sequence-templates'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
 import { getAnalyticsDayRange } from '@/lib/analytics'
+import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 
 interface LeadEmail {
   id: string
@@ -22,6 +23,7 @@ interface ContactedLead {
   suburb: string | null
   city: string | null
   content_type: string | null
+  delivery_suppressed_emails: string[] | null
   emails: LeadEmail[]
 }
 
@@ -93,7 +95,7 @@ export async function runReactivationAgent(): Promise<void> {
 
     const { data: contactedLeads } = await supabase
       .from('leads')
-      .select('id, business_name, email, reactivation_sent_at, category_id, category_name, suburb, city, content_type, emails(id, type, subject, sent_at)')
+      .select('id, business_name, email, reactivation_sent_at, category_id, category_name, suburb, city, content_type, delivery_suppressed_emails, emails(id, type, subject, sent_at, status)')
       .eq('status', 'contacted')
 
     if (!contactedLeads?.length) {
@@ -104,6 +106,7 @@ export async function runReactivationAgent(): Promise<void> {
     let eligible = 0
     let reactivationSent = 0
     let markedDead = 0
+    let suppressedDeliveryFailure = 0
 
     // Phase 1: walk every contacted lead — handle the dead-after-reactivation path
     // inline (unaffected by the daily send cap, since it never sends anything), and
@@ -113,6 +116,12 @@ export async function runReactivationAgent(): Promise<void> {
 
     for (const lead of contactedLeads as ContactedLead[]) {
       if (!lead.email) continue
+
+      if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
+        suppressedDeliveryFailure++
+        logger.warn('reactivation', 'REACTIVATION_SUPPRESSED_DELIVERY_FAILURE', { lead_id: lead.id })
+        continue
+      }
 
       try {
       const emailsList = lead.emails ?? []
@@ -185,6 +194,18 @@ export async function runReactivationAgent(): Promise<void> {
       if (!lead.email) continue // already guaranteed by the phase-1 filter; narrows the type for sendEmail() below
 
       try {
+      const { data: currentLead, error: currentLeadErr } = await supabase
+        .from('leads')
+        .select('email, delivery_suppressed_emails')
+        .eq('id', lead.id)
+        .maybeSingle()
+      if (currentLeadErr || !currentLead?.email) continue
+      if (isDeliverySuppressedForAddress(currentLead.email, currentLead.delivery_suppressed_emails)) {
+        suppressedDeliveryFailure++
+        logger.warn('reactivation', 'REACTIVATION_SUPPRESSED_DELIVERY_FAILURE', { lead_id: lead.id })
+        continue
+      }
+
       const emailResult = await generateStoredReactivation(
         supabase, lead.category_id, lead.business_name,
         lead.category_name ?? 'local business', lead.content_type ?? 'remote',
@@ -198,8 +219,20 @@ export async function runReactivationAgent(): Promise<void> {
       const body = emailResult.body
       const html = emailResult.html
 
+      const { data: sendTimeLead, error: sendTimeLeadErr } = await supabase
+        .from('leads')
+        .select('email, delivery_suppressed_emails')
+        .eq('id', lead.id)
+        .maybeSingle()
+      if (sendTimeLeadErr || !sendTimeLead?.email) continue
+      if (isDeliverySuppressedForAddress(sendTimeLead.email, sendTimeLead.delivery_suppressed_emails)) {
+        suppressedDeliveryFailure++
+        logger.warn('reactivation', 'REACTIVATION_SUPPRESSED_DELIVERY_FAILURE', { lead_id: lead.id })
+        continue
+      }
+
       const result = await sendEmail({
-        to: lead.email,
+        to: sendTimeLead.email,
         subject,
         html,
         text: body,
@@ -268,7 +301,7 @@ export async function runReactivationAgent(): Promise<void> {
       }
     }
 
-    logger.info('reactivation', 'Reactivation agent complete', { eligible, reactivationSent, markedDead, deferredForLimit })
+    logger.info('reactivation', 'Reactivation agent complete', { eligible, reactivationSent, markedDead, deferredForLimit, suppressedDeliveryFailure })
 
     await supabase.from('activity_log').insert({
       event_type: 'reactivation_complete',
@@ -279,6 +312,7 @@ export async function runReactivationAgent(): Promise<void> {
         marked_dead: markedDead,
         deferred_for_daily_limit: deferredForLimit,
         daily_reactivation_limit: dailyReactivationLimit,
+        suppressed_delivery_failure: suppressedDeliveryFailure,
       },
     })
   } catch (error) {

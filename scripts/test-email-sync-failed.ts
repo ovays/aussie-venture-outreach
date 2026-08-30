@@ -55,10 +55,11 @@ assert(EMAIL_STATUS.PENDING_SEND === 'pending_send',           'PENDING_SEND con
 assert(EMAIL_STATUS.SENT === 'sent',                           'SENT constant is correct')
 assert(EMAIL_STATUS.FAILED === 'failed',                       'FAILED constant is correct')
 assert(EMAIL_STATUS.BOUNCED === 'bounced',                     'BOUNCED constant is correct')
+assert(EMAIL_STATUS.SUPPRESSED === 'suppressed',               'SUPPRESSED constant is correct')
 
-// Ensure all 5 values exist — catches accidental removal
-const allStatuses: EmailStatus[] = ['pending_send', 'sent', 'failed', 'bounced', 'email_sync_failed']
-assert(Object.values(EMAIL_STATUS).length === allStatuses.length, 'All 5 statuses defined')
+// Ensure every value exists — catches accidental removal
+const allStatuses: EmailStatus[] = ['pending_send', 'sent', 'failed', 'bounced', 'suppressed', 'email_sync_failed']
+assert(Object.values(EMAIL_STATUS).length === allStatuses.length, 'All 6 statuses defined')
 
 // ── 2. Follow-up eligibility with email_sync_failed ──────────────────────────
 console.log('\n' + SEP)

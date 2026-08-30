@@ -10,10 +10,9 @@
  * are also UTC, so no timezone conversion is needed for elapsed-days math.
  * The same formula in every caller is the guarantee of consistency.
  *
- * "Sent" is determined by sent_at presence only — not email.status.
- * A dispatched email remains "sent" even if a bounce is recorded later
- * (status='bounced', sent_at still set), which prevents re-sending to
- * known-bad addresses.
+ * "Sent" sequencing is determined by sent_at presence only. Delivery
+ * suppression is enforced separately by the scheduler and final send-time
+ * guard because it is address-specific rather than a sequence stage.
  */
 
 export type FollowUpType = 'follow_up_1' | 'follow_up_2' | 'follow_up_3'
@@ -67,8 +66,8 @@ export function computeFollowUpEligibility(
 
 /**
  * Whether an email row counts as "sent" for follow-up eligibility purposes.
- * Checks sent_at only — not email.status — so bounced emails (which have
- * sent_at set) are correctly treated as delivered.
+ * Checks sent_at only; terminal delivery status is handled by the shared
+ * address-level suppression guard before a later stage can send.
  */
 export function isFuEmailSent(email: { sent_at: string | null }): boolean {
   return email.sent_at !== null

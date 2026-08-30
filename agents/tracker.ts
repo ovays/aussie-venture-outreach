@@ -2,6 +2,12 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail, getReceivedEmailHeaders } from '@/lib/resend'
 import { getDashboardMetrics, getLeadName, logAnalyticsMetrics } from '@/lib/analytics'
 import { logger } from '@/lib/logger'
+import {
+  isTerminalDeliveryStatus,
+  normalizeDeliveryEmail,
+  TERMINAL_RESEND_EVENTS,
+  type TerminalResendEvent,
+} from '@/lib/delivery-suppression'
 
 // supabaseOverride exists purely for tests to inject a fake client — every
 // production call site omits it and gets the real service-role client.
@@ -101,34 +107,130 @@ export async function handleInboundEmail(
   await handleEmailReply(leadId, supabaseOverride)
 }
 
+export async function handleTerminalDeliveryFailure(
+  params: {
+    taggedLeadId?: string | null
+    resendId: string
+    eventType: TerminalResendEvent
+    recipient?: string | null
+    providerReason?: unknown
+  },
+  supabaseOverride?: ReturnType<typeof createServiceClient>,
+): Promise<boolean> {
+  const supabase = supabaseOverride ?? createServiceClient()
+  const terminalStatus = TERMINAL_RESEND_EVENTS[params.eventType]
+
+  const { data: email, error: lookupErr } = await supabase
+    .from('emails')
+    .select('id, lead_id, type, status')
+    .eq('resend_id', params.resendId)
+    .limit(1)
+    .maybeSingle()
+
+  if (lookupErr || !email) {
+    logger.error('tracker', 'DELIVERY_TERMINAL_FAILURE: provider email could not be matched', {
+      lead_id: params.taggedLeadId ?? null,
+      resend_id: params.resendId,
+      provider_event: params.eventType,
+      error: lookupErr?.message ?? 'email row not found',
+    })
+    return false
+  }
+
+  const leadId = email.lead_id as string
+  const { data: lead } = await supabase
+    .from('leads')
+    .select('email, delivery_suppressed_emails')
+    .eq('id', leadId)
+    .maybeSingle()
+
+  const recipient = normalizeDeliveryEmail(params.recipient) ?? normalizeDeliveryEmail(lead?.email)
+  const affectsCurrentAddress = recipient !== null && recipient === normalizeDeliveryEmail(lead?.email)
+  const alreadySameTerminal = email.status === terminalStatus
+  const persistedStatus = isTerminalDeliveryStatus(email.status) ? email.status : terminalStatus
+
+  // Terminal states are absorbing: repeated terminal events are safe and no
+  // later weak event handled by this integration can regress the row.
+  let updateErr: { message: string } | null = null
+  if (!isTerminalDeliveryStatus(email.status)) {
+    const result = await supabase
+      .from('emails')
+      .update({ status: terminalStatus })
+      .eq('id', email.id)
+    updateErr = result.error
+  }
+
+  if (updateErr) {
+    logger.error('tracker', 'Failed to persist terminal email status', {
+      lead_id:   leadId,
+      email_id:  email.id,
+      resend_id: params.resendId,
+      provider_event: params.eventType,
+      error:     updateErr.message,
+    })
+    throw new Error(updateErr.message)
+  }
+
+  if (recipient) {
+    const { error: suppressErr } = await supabase.rpc('suppress_lead_delivery_email', {
+      p_lead_id: leadId,
+      p_email: recipient,
+    })
+    if (suppressErr) throw new Error(`Failed to suppress recipient address: ${suppressErr.message}`)
+  }
+
+  if (affectsCurrentAddress) {
+    const { error: cancelErr } = await supabase
+      .from('follow_ups')
+      .update({ status: 'cancelled' })
+      .eq('lead_id', leadId)
+      .eq('status', 'scheduled')
+    if (cancelErr) throw new Error(`Failed to cancel pending follow-ups: ${cancelErr.message}`)
+  }
+
+  const { error: logErr } = await supabase.from('activity_log').insert({
+    event_type: 'delivery_terminal_failure',
+    lead_id: leadId,
+    description: `Terminal Resend delivery failure (${params.eventType})`,
+    metadata: {
+      email_id: email.id,
+      email_type: email.type,
+      resend_id: params.resendId,
+      provider_event: params.eventType,
+      provider_status: terminalStatus,
+      persisted_status: persistedStatus,
+      provider_reason: params.providerReason ?? null,
+      recipient,
+      affects_current_address: affectsCurrentAddress,
+      duplicate: alreadySameTerminal,
+    },
+  })
+  if (logErr) throw new Error(`Failed to record terminal provider event: ${logErr.message}`)
+
+  logger.warn('tracker', 'DELIVERY_TERMINAL_FAILURE', {
+    lead_id: leadId,
+    email_id: email.id,
+    email_type: email.type,
+    resend_id: params.resendId,
+    provider_event: params.eventType,
+    provider_status: terminalStatus,
+    recipient,
+    affects_current_address: affectsCurrentAddress,
+    duplicate: alreadySameTerminal,
+  })
+  return true
+}
+
+// Backwards-compatible wrapper retained for existing callers/tests.
 export async function handleEmailBounce(
   leadId: string,
   resendId: string,
-  supabaseOverride?: ReturnType<typeof createServiceClient>
+  supabaseOverride?: ReturnType<typeof createServiceClient>,
 ): Promise<void> {
-  const supabase = supabaseOverride ?? createServiceClient()
-
-  const { error: updateErr } = await supabase
-    .from('emails')
-    .update({ status: 'bounced' })
-    .eq('resend_id', resendId)
-
-  if (updateErr) {
-    logger.error('tracker', 'Failed to mark email bounced', {
-      lead_id:   leadId,
-      resend_id: resendId,
-      error:     updateErr.message,
-    })
-  }
-
-  await supabase.from('activity_log').insert({
-    event_type: 'email_bounced',
-    lead_id: leadId,
-    description: `Email bounced for lead ${leadId}`,
-    metadata: { resend_id: resendId },
-  })
-
-  logger.info('tracker', 'Email bounced', { lead_id: leadId, resend_id: resendId })
+  await handleTerminalDeliveryFailure(
+    { taggedLeadId: leadId, resendId, eventType: 'email.bounced' },
+    supabaseOverride,
+  )
 }
 
 export async function sendDailyDigest(): Promise<void> {

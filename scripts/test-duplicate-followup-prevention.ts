@@ -56,6 +56,7 @@ function makeFakeSupabase(
       let limitN: number | undefined
       let mode: 'select' | 'update' | 'insert' = 'select'
       let insertRow: Row = {}
+      let updatePatch: Row = {}
 
       const rowsFor = () => (tables[table] ??= [])
 
@@ -77,6 +78,7 @@ function makeFakeSupabase(
           insertRow = row
           return builder
         },
+        update(patch: Row) { mode = 'update'; updatePatch = patch; return builder },
         async single() {
           if (mode === 'insert') {
             if (
@@ -103,8 +105,13 @@ function makeFakeSupabase(
           const matched = applyFilters(rowsFor())
           return matched.length === 1 ? { data: matched[0], error: null } : { data: null, error: { message: 'no rows' } }
         },
+        async maybeSingle() {
+          const matched = applyFilters(rowsFor())
+          return { data: matched[0] ?? null, error: null }
+        },
         then(resolve: (v: { data: unknown; error: unknown }) => unknown, reject?: (e: unknown) => unknown) {
           const matched = applyFilters(rowsFor())
+          if (mode === 'update') for (const row of matched) Object.assign(row, updatePatch)
           return Promise.resolve({ data: matched, error: null }).then(resolve, reject)
         },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -120,7 +127,7 @@ function makeCandidate(leadId: string) {
     lead: {
       id: leadId, business_name: 'Test Biz', email: 'biz@example.com',
       category_name: 'Nail Salons', content_type: 'remote', suburb: 'Bondi', city: 'Sydney',
-      website: '', description: '', services: '', notes: '', emails: [],
+      website: '', description: '', services: '', notes: '', delivery_suppressed_emails: [], emails: [],
     },
     initialEmail: { id: 'initial-1', type: 'initial_pitch', subject: 'Collab?', body_text: '', sent_at: '2026-01-01T00:00:00Z', status: 'sent', message_id: '<initial@aussieventure.com>' },
     daysSince: 10,
@@ -137,7 +144,7 @@ async function main() {
   // ── 1. Fresh lead — send proceeds normally ──────────────────────────────────
   console.log('\n  1. No prior delivered row — send proceeds')
   {
-    const db = makeFakeSupabase({ emails: [], follow_ups: [], activity_log: [] }, { enforceUniqueDeliveredPerLeadType: true })
+    const db = makeFakeSupabase({ leads: [{ id: 'lead-1', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [], follow_ups: [], activity_log: [] }, { enforceUniqueDeliveredPerLeadType: true })
     let sendCalls = 0
     const stubSendEmail = async () => { sendCalls++; return { id: 'rs_1', messageId: '<fu1@aussieventure.com>' } }
 
@@ -150,7 +157,7 @@ async function main() {
   console.log('\n  2. Already-delivered row for this lead+type — skipped before any send')
   {
     const db = makeFakeSupabase(
-      { emails: [{ id: 'e1', lead_id: 'lead-2', type: 'follow_up_1', status: 'sent' }], follow_ups: [], activity_log: [] },
+      { leads: [{ id: 'lead-2', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [{ id: 'e1', lead_id: 'lead-2', type: 'follow_up_1', status: 'sent' }], follow_ups: [], activity_log: [] },
       { enforceUniqueDeliveredPerLeadType: true }
     )
     let sendCalls = 0
@@ -168,7 +175,7 @@ async function main() {
   console.log('\n  3. email_sync_failed also counts as "already delivered"')
   {
     const db = makeFakeSupabase(
-      { emails: [{ id: 'e1', lead_id: 'lead-3', type: 'follow_up_2', status: 'email_sync_failed' }], follow_ups: [], activity_log: [] },
+      { leads: [{ id: 'lead-3', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [{ id: 'e1', lead_id: 'lead-3', type: 'follow_up_2', status: 'email_sync_failed' }], follow_ups: [], activity_log: [] },
       { enforceUniqueDeliveredPerLeadType: true }
     )
     let sendCalls = 0
@@ -186,7 +193,7 @@ async function main() {
     // for the same lead+type, before our own insert executes. This models
     // two overlapping scheduler runs racing on the exact same candidate and
     // losing the TOCTOU window between the check and the insert.
-    const tables: Record<string, Row[]> = { emails: [], follow_ups: [], activity_log: [] }
+    const tables: Record<string, Row[]> = { leads: [{ id: 'lead-4', email: 'biz@example.com', delivery_suppressed_emails: [] }], emails: [], follow_ups: [], activity_log: [] }
     let selectCallCount = 0
 
     const db = {
@@ -227,6 +234,10 @@ async function main() {
               return { data: inserted, error: null }
             }
             return { data: null, error: { message: 'no rows' } }
+          },
+          async maybeSingle() {
+            const matched = applyFilters(tables[table] ?? [])
+            return { data: matched[0] ?? null, error: null }
           },
           then(resolve: (v: { data: unknown; error: unknown }) => unknown, reject?: (e: unknown) => unknown) {
             const matched = applyFilters(tables[table] ?? [])
@@ -280,7 +291,38 @@ async function main() {
   }
 
   // ── 6. Static check: scheduler-level concurrency limit is configured ───────
-  console.log('\n  6. Trigger.dev schedule has concurrencyLimit: 1')
+  console.log('\n  6. Final send-time delivery suppression blocks a stale queued follow-up')
+  {
+    const tables = {
+      leads: [
+        { id: 'lead-6-remote', email: 'biz@example.com', delivery_suppressed_emails: ['biz@example.com'] },
+        { id: 'lead-6-visit', email: 'visit@example.com', delivery_suppressed_emails: ['visit@example.com'] },
+      ],
+      emails: [],
+      follow_ups: [
+        { id: 'pending-6-remote', lead_id: 'lead-6-remote', status: 'scheduled' },
+        { id: 'pending-6-visit', lead_id: 'lead-6-visit', status: 'scheduled' },
+      ],
+      activity_log: [],
+    }
+    const db = makeFakeSupabase(tables)
+    let sendCalls = 0
+    let aiCalls = 0
+    const remote = makeCandidate('lead-6-remote')
+    const visit = makeCandidate('lead-6-visit')
+    visit.lead.email = 'visit@example.com'
+    visit.lead.content_type = 'visit'
+    const results = await Promise.all([remote, visit].map((candidate) => sendFollowUp(
+      db, candidate, 'follow_up_1',
+      (async () => { aiCalls++; return { subject: 'x', body: 'x' } }) as never,
+      (async () => { sendCalls++; return { id: 'never', messageId: '<never>' } }) as never,
+    )))
+    assert(results.every((result) => result === false) && sendCalls === 0, 'Remote and visit candidates are both suppressed before provider send')
+    assert(aiCalls === 0, 'Suppression is checked before content generation')
+    assert(tables.follow_ups.every((row) => row.status === 'cancelled'), 'Stale scheduled follow-ups are marked cancelled')
+  }
+
+  console.log('\n  7. Trigger.dev schedule has concurrencyLimit: 1')
   {
     const src = fs.readFileSync(path.resolve(process.cwd(), 'trigger/daily-pipeline.ts'), 'utf8')
     const hasQueue = /queue:\s*\{\s*concurrencyLimit:\s*1/.test(src)

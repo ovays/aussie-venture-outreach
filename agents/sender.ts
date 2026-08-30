@@ -4,6 +4,7 @@ import { logger } from '@/lib/logger'
 import { getAnalyticsDayRange } from '@/lib/analytics'
 import { handleEmailSyncFailure } from '@/lib/email-status'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
+import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 
 // Held for the entire quota-check-then-send sequence below so two overlapping
 // invocations (a stuck old run, a manual script racing the scheduled
@@ -152,7 +153,7 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
 
 const { data: pendingEmailsRaw, error: pendingEmailsErr } = await supabase
   .from('emails')
-  .select('*, leads!inner(id, email, business_name, status, source)')
+  .select('*, leads!inner(id, email, business_name, status, source, delivery_suppressed_emails)')
   .eq('status', 'pending_send')
   .eq('type', 'initial_pitch')
   .order('created_at', { ascending: true })
@@ -194,12 +195,17 @@ console.log("FILTERED PENDING", pendingEmails)
 
   for (let i = 0; i < toSend.length; i++) {
     const emailRecord = toSend[i]
-    const lead = emailRecord.leads as { id: string; email: string | null; business_name: string; status: string; source: string | null } | null
+    const lead = emailRecord.leads as { id: string; email: string | null; business_name: string; status: string; source: string | null; delivery_suppressed_emails: string[] | null } | null
 
     if (!lead?.email) {
       logger.info('sender', `#${i + 1}/${total} SKIP — no email address for lead`, { lead_id: emailRecord.lead_id })
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
       failed++
+      continue
+    }
+
+    if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
+      logger.warn('sender', 'INITIAL_EMAIL_SUPPRESSED_DELIVERY_FAILURE', { lead_id: emailRecord.lead_id })
       continue
     }
 
@@ -223,8 +229,21 @@ console.log("FILTERED PENDING", pendingEmails)
     logger.info('sender', `#${i + 1}/${total} Sending to ${lead.email} (${lead.business_name})`, { subject: emailRecord.subject })
 
     try {
+const { data: sendTimeLead, error: sendTimeLeadErr } = await supabase
+  .from('leads')
+  .select('email, delivery_suppressed_emails')
+  .eq('id', emailRecord.lead_id)
+  .maybeSingle()
+if (sendTimeLeadErr || !sendTimeLead?.email) {
+  logger.warn('sender', 'Initial email skipped because current address could not be verified', { lead_id: emailRecord.lead_id })
+  continue
+}
+if (isDeliverySuppressedForAddress(sendTimeLead.email, sendTimeLead.delivery_suppressed_emails)) {
+  logger.warn('sender', 'INITIAL_EMAIL_SUPPRESSED_DELIVERY_FAILURE', { lead_id: emailRecord.lead_id })
+  continue
+}
 const result = await sendEmail({
-    to: lead.email,
+    to: sendTimeLead.email,
     subject: emailRecord.subject,
     html: emailRecord.body_html,
     text: emailRecord.body_text,

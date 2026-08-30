@@ -15,6 +15,7 @@ const EVENT_META: Record<string, { icon: string; color: string }> = {
   email_sent:           { icon: '📧', color: '#38bdf8' },
   email_failed:         { icon: '❌', color: '#f87171' },
   email_bounced:        { icon: '↩️', color: '#fb923c' },
+  delivery_terminal_failure: { icon: '⛔', color: '#f87171' },
   reply_received:       { icon: '🔥', color: '#4ade80' },
   follow_up_1_sent:     { icon: '📬', color: '#a78bfa' },
   follow_up_2_sent:     { icon: '📬', color: '#c084fc' },

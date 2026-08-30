@@ -27,6 +27,7 @@
     "test:email-sync-failed": "tsx scripts/test-email-sync-failed.ts",
     "test:webhook-signature": "tsx scripts/test-webhook-signature.ts",
     "test:webhook-handling": "tsx scripts/test-webhook-handling.ts",
+    "test:delivery-failures": "tsx scripts/test-delivery-failures.ts",
     "test:email-threading": "tsx scripts/test-email-threading.ts",
     "test:duplicate-followup-prevention": "tsx scripts/test-duplicate-followup-prevention.ts",
     "test:distributed-lock": "tsx scripts/test-distributed-lock.ts",
