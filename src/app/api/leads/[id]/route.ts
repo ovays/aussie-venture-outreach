@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isAuthErrorResponse, requireApiUser } from '@/lib/auth'
+import { deleteLeads, LeadIdsValidationError, normalizeLeadIds } from '@/lib/delete-leads'
 import { createClient } from '@/lib/supabase/server'
 
 export async function GET(
@@ -82,23 +84,24 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireApiUser()
+  if (isAuthErrorResponse(auth)) return auth
+
   const { id } = await params
   const supabase = await createClient()
 
-  const { data: lead } = await supabase.from('leads').select('id').eq('id', id).single()
-  if (!lead) return NextResponse.json({ error: 'Lead not found' }, { status: 404 })
-
-  // Delete child records in dependency order (follow_ups references emails via email_id)
-  await supabase.from('follow_ups').delete().eq('lead_id', id)
-  await supabase.from('dm_queue').delete().eq('lead_id', id)
-  await supabase.from('deals').delete().eq('lead_id', id)
-  // Preserve audit history. activity_log.lead_id uses ON DELETE SET NULL, so
-  // terminal delivery events remain available to the failure report after
-  // the lead and its cascading email rows are removed.
-  await supabase.from('emails').delete().eq('lead_id', id)
-
-  const { error } = await supabase.from('leads').delete().eq('id', id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  return NextResponse.json({ success: true })
+  try {
+    const [leadId] = normalizeLeadIds([id])
+    const result = await deleteLeads(supabase, [leadId])
+    if (result.deleted === 0) return NextResponse.json({ error: 'Lead not found' }, { status: 404 })
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    if (error instanceof LeadIdsValidationError) {
+      return NextResponse.json({ error: 'Invalid lead ID' }, { status: 400 })
+    }
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Could not delete lead' },
+      { status: 500 },
+    )
+  }
 }

@@ -28,6 +28,7 @@
     "test:webhook-signature": "tsx scripts/test-webhook-signature.ts",
     "test:webhook-handling": "tsx scripts/test-webhook-handling.ts",
     "test:delivery-failures": "tsx scripts/test-delivery-failures.ts",
+    "test:delivery-failure-bulk-delete": "tsx scripts/test-delivery-failure-bulk-delete.ts",
     "test:email-threading": "tsx scripts/test-email-threading.ts",
     "test:duplicate-followup-prevention": "tsx scripts/test-duplicate-followup-prevention.ts",
     "test:distributed-lock": "tsx scripts/test-distributed-lock.ts",
