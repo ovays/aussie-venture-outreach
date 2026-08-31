@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { deleteLeads, normalizeLeadIds } from '../src/lib/delete-leads'
+import { handleBulkDeleteRequest } from '../src/lib/bulk-delete-request'
+import { deleteLeads, LEAD_DELETE_BATCH_SIZE, normalizeLeadIds } from '../src/lib/delete-leads'
 import {
   selectableLeadIds,
   setLeadSelected,
@@ -80,11 +81,9 @@ for (const source of [helper, bulkRoute, migration]) {
   assert.doesNotMatch(source, /from\('(blacklist|exhausted_queries|search_cache)'\)|@\/lib\/write-lead|@\/lib\/finder/i)
 }
 
-// 14. The bulk endpoint has an explicit authenticated-user guard before deletion.
-const authIndex = bulkRoute.indexOf('await requireApiUser()')
-const deleteIndex = bulkRoute.indexOf('await deleteLeads')
-assert(authIndex >= 0 && deleteIndex > authIndex)
-assert.match(bulkRoute, /if \(isAuthErrorResponse\(auth\)\) return auth/)
+// 14. The route wires its authenticated-user guard into the request handler.
+assert.match(bulkRoute, /authenticate: async \(\) =>/)
+assert.match(bulkRoute, /await requireApiUser\(\)/)
 
 type DbRow = Record<string, string | null>
 
@@ -121,11 +120,26 @@ class FakeQuery implements PromiseLike<{ data: DbRow[] | null; error: { message:
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): PromiseLike<TResult1 | TResult2> {
     try {
+      if (this.values.length > LEAD_DELETE_BATCH_SIZE) {
+        return Promise.resolve({
+          data: null,
+          error: { message: 'Bad Request: oversized in() filter' },
+        }).then(onfulfilled, onrejected)
+      }
       const rows = this.tables[this.table] ?? []
       const matches = rows.filter((item) => this.values.includes(String(item[this.column])))
       if (this.operation === 'delete') {
         this.deleteCalls.push({ table: this.table, ids: [...this.values] })
         this.tables[this.table] = rows.filter((item) => !this.values.includes(String(item[this.column])))
+        if (this.table === 'leads') {
+          for (const childTable of ['follow_ups', 'dm_queue', 'deals', 'emails']) {
+            this.tables[childTable] = (this.tables[childTable] ?? [])
+              .filter((item) => !this.values.includes(String(item.lead_id)))
+          }
+          for (const item of this.tables.activity_log ?? []) {
+            if (this.values.includes(String(item.lead_id))) item.lead_id = null
+          }
+        }
       }
       return Promise.resolve({
         data: this.operation === 'select' || this.returnRows ? matches.map((item) => ({ ...item })) : null,
@@ -137,9 +151,9 @@ class FakeQuery implements PromiseLike<{ data: DbRow[] | null; error: { message:
   }
 }
 
-async function testBulkDeletion() {
+function fakeDatabase(leadIds: string[]) {
   const tables: Record<string, DbRow[]> = {
-    leads: [{ id: LEAD_A }, { id: LEAD_B }],
+    leads: leadIds.map((id) => ({ id })),
     follow_ups: [{ id: 'follow-a', lead_id: LEAD_A }, { id: 'follow-b', lead_id: LEAD_B }],
     dm_queue: [{ id: 'dm-a', lead_id: LEAD_A }],
     deals: [{ id: 'deal-b', lead_id: LEAD_B }],
@@ -153,16 +167,128 @@ async function testBulkDeletion() {
     },
   } as unknown as SupabaseClient
 
-  // 6. Delete Selected removes both selected leads with batched table calls.
+  return { fakeSupabase, tables, deleteCalls }
+}
+
+function uuid(index: number): string {
+  return `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`
+}
+
+function requestFor(leadIds: unknown): Request {
+  return new Request('http://localhost/api/leads/bulk-delete', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lead_ids: leadIds }),
+  })
+}
+
+async function authenticatedRequest(request: Request, supabase: SupabaseClient): Promise<Response> {
+  return handleBulkDeleteRequest(request, {
+    authenticate: async () => null,
+    createClient: async () => supabase,
+  })
+}
+
+async function testBulkDeletion() {
+  // 1. One lead can be deleted through the same bulk request handler.
+  const oneDb = fakeDatabase([LEAD_A])
+  const oneResponse = await authenticatedRequest(requestFor([LEAD_A]), oneDb.fakeSupabase)
+  assert.equal(oneResponse.status, 200)
+  assert.deepEqual(await oneResponse.json(), {
+    requested: 1,
+    matched: 1,
+    deleted: 1,
+    missing: 0,
+    deleted_ids: [LEAD_A],
+    missing_ids: [],
+  })
+
+  const { fakeSupabase, tables, deleteCalls } = fakeDatabase([LEAD_A, LEAD_B])
+
+  // 2. Multiple selected leads retain the established cascading semantics.
   const result = await deleteLeads(fakeSupabase, [LEAD_A, LEAD_B])
   assert.equal(result.deleted, 2)
   assert.equal(tables.leads.length, 0)
-  assert.deepEqual(deleteCalls.map(({ table }) => table), ['follow_ups', 'dm_queue', 'deals', 'emails', 'leads'])
-  assert(deleteCalls.every(({ ids }) => ids.length === 2), 'each table is deleted once for the full ID set')
+  assert.deepEqual(deleteCalls.map(({ table }) => table), ['leads'])
+  assert.equal(tables.emails.length, 0)
+  assert.equal(tables.follow_ups.length, 0)
+  assert.equal(tables.dm_queue.length, 0)
+  assert.equal(tables.deals.length, 0)
   assert.equal(tables.activity_log.length, 1, 'historical activity remains untouched')
+  assert.equal(tables.activity_log[0].lead_id, null, 'historical activity is detached from the lead')
 
-  // 8. An already-deleted/missing lead is a safe successful result.
-  const missing = await deleteLeads(fakeSupabase, [LEAD_A, LEAD_C])
+  // 3. Duplicate IDs are deduplicated before lookup and deletion.
+  const duplicateDb = fakeDatabase([LEAD_A, LEAD_B])
+  const duplicateResponse = await authenticatedRequest(
+    requestFor([LEAD_A, LEAD_A, LEAD_B]),
+    duplicateDb.fakeSupabase,
+  )
+  assert.equal(duplicateResponse.status, 200)
+  const duplicateResult = await duplicateResponse.json() as { requested: number; deleted: number }
+  assert.deepEqual(duplicateResult, {
+    requested: 2,
+    matched: 2,
+    deleted: 2,
+    missing: 0,
+    deleted_ids: [LEAD_A, LEAD_B],
+    missing_ids: [],
+  })
+
+  // 4 & 8. 841+ IDs stay in one client request and are safely batched server-side.
+  const largeIds = Array.from({ length: 842 }, (_, index) => uuid(index + 1))
+  const largeDb = fakeDatabase(largeIds)
+  const largeResponse = await authenticatedRequest(requestFor(largeIds), largeDb.fakeSupabase)
+  assert.equal(largeResponse.status, 200, 'selection size alone must not produce a 400')
+  const largeResult = await largeResponse.json() as { requested: number; deleted: number; missing: number }
+  assert.equal(largeResult.requested, 842)
+  assert.equal(largeResult.deleted, 842)
+  assert.equal(largeResult.missing, 0)
+  assert(largeDb.deleteCalls.length > 1, 'large deletion is split into database batches')
+  assert(
+    largeDb.deleteCalls.every(({ ids }) => ids.length <= LEAD_DELETE_BATCH_SIZE),
+    'no database filter exceeds the safe batch size',
+  )
+
+  // 5. An invalid UUID is a useful 400 and no database client is created.
+  let invalidCreatedClient = false
+  const invalidResponse = await handleBulkDeleteRequest(requestFor([LEAD_A, 'not-a-uuid']), {
+    authenticate: async () => null,
+    createClient: async () => {
+      invalidCreatedClient = true
+      return fakeDatabase([]).fakeSupabase
+    },
+  })
+  assert.equal(invalidResponse.status, 400)
+  assert.match((await invalidResponse.json() as { error: string }).error, /valid UUIDs/)
+  assert.equal(invalidCreatedClient, false)
+
+  // Database errors retain the failing phase/batch in both the response and logs.
+  const failingSupabase = {
+    from() {
+      return {
+        select() { return this },
+        in() {
+          return Promise.resolve({ data: null, error: { message: 'Bad Request from database proxy' } })
+        },
+      }
+    },
+  } as unknown as SupabaseClient
+  const loggedErrors: Array<{ message: string; context: unknown }> = []
+  const failedResponse = await handleBulkDeleteRequest(requestFor([LEAD_A]), {
+    authenticate: async () => null,
+    createClient: async () => failingSupabase,
+    logError: (message, context) => loggedErrors.push({ message, context }),
+  })
+  assert.equal(failedResponse.status, 500)
+  const failedBody = await failedResponse.json() as { error: string; phase: string; batch: number }
+  assert.match(failedBody.error, /lookup batch 1 of 1 failed: Bad Request from database proxy/)
+  assert.equal(failedBody.phase, 'lookup')
+  assert.equal(failedBody.batch, 1)
+  assert.equal(loggedErrors.length, 1)
+
+  // 6. An already-deleted/missing lead is safely reported as missing.
+  const missingDb = fakeDatabase([])
+  const missing = await deleteLeads(missingDb.fakeSupabase, [LEAD_A, LEAD_C])
   assert.deepEqual(missing, {
     requested: 2,
     matched: 0,
@@ -172,7 +298,19 @@ async function testBulkDeletion() {
     missing_ids: [LEAD_A, LEAD_C],
   })
 
-  // 7. Existing single Delete Lead still targets its established endpoint.
+  // 7. Authentication is checked before parsing or creating a database client.
+  let unauthCreatedClient = false
+  const unauthenticated = await handleBulkDeleteRequest(requestFor([LEAD_A]), {
+    authenticate: async () => Response.json({ error: 'Authentication required' }, { status: 401 }),
+    createClient: async () => {
+      unauthCreatedClient = true
+      return fakeDatabase([]).fakeSupabase
+    },
+  })
+  assert.equal(unauthenticated.status, 401)
+  assert.equal(unauthCreatedClient, false)
+
+  // Existing single Delete Lead still targets its established endpoint.
   assert.match(component, /fetch\(`\/api\/leads\/\$\{deleteTarget\.lead_id\}`/)
   assert.match(component, /title="Delete lead\?"/)
 
