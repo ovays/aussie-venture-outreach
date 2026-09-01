@@ -15,6 +15,7 @@ export async function handleEmailReply(
   leadId: string,
   supabaseOverride?: ReturnType<typeof createServiceClient>,
   matchedEmailId?: string,
+  repliedAt?: string,
 ): Promise<void> {
   const supabase = supabaseOverride ?? createServiceClient()
 
@@ -40,7 +41,7 @@ export async function handleEmailReply(
 
   let replyUpdate = supabase
     .from('emails')
-    .update({ replied_at: new Date().toISOString() })
+    .update({ replied_at: repliedAt ?? new Date().toISOString() })
     .eq('lead_id', leadId)
     .is('replied_at', null)
 
@@ -68,6 +69,55 @@ function inboundHeader(headers: Record<string, string> | null, name: string): st
   return Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1]?.trim() ?? ''
 }
 
+export interface NormalizedInboundMessage {
+  provider: 'resend' | 'hostinger'
+  providerMessageId: string
+  mailboxId?: string
+  folder?: string
+  uid?: number | string
+  from: string
+  to?: string[]
+  subject?: string
+  messageId?: string
+  inReplyTo?: string[]
+  references?: string[]
+  headers: Record<string, string>
+  receivedAt?: string
+}
+
+export type InboundReplyOutcome =
+  | 'processed'
+  | 'automated_ignored'
+  | 'unmatched'
+  | 'unmatched_ambiguous'
+
+export interface InboundReplyResult {
+  outcome: InboundReplyOutcome
+  leadId?: string
+  emailId?: string
+}
+
+const RELEVANT_REPLY_STATUSES = new Set(['contacted', 'dead', 'replied', 'negotiating', 'closed'])
+
+export function parseMessageIds(value: string | string[] | null | undefined): string[] {
+  const values = Array.isArray(value) ? value : value ? [value] : []
+  const ids: string[] = []
+
+  for (const item of values) {
+    for (const match of item.matchAll(/<[^<>\s@]+@[^<>\s@]+>/g)) {
+      if (!ids.includes(match[0])) ids.push(match[0])
+    }
+  }
+
+  return ids
+}
+
+export function normalizeInboundEmailAddress(value: string): string {
+  const angleAddress = value.match(/<([^<>\s]+@[^<>\s]+)>/)?.[1]
+  const plainAddress = value.match(/(?:^|[\s,(])([^\s<>,()]+@[^\s<>,()]+)(?:$|[\s,)])/i)?.[1]
+  return (angleAddress ?? plainAddress ?? value).trim().replace(/^mailto:/i, '').toLowerCase()
+}
+
 // Conservative, deterministic filtering for obvious machine-generated mail.
 // This intentionally does not attempt to classify the message body or infer
 // ambiguous replies; it only honors standard automation headers and familiar
@@ -85,11 +135,170 @@ export function isAutomatedInboundEmail(params: {
   const precedence = inboundHeader(params.headers, 'precedence').toLowerCase()
   if (['bulk', 'junk', 'list'].includes(precedence)) return true
 
-  const from = params.from.toLowerCase()
-  if (/(^|[<\s])(mailer-daemon|postmaster|no-?reply|bounce)[@+]/.test(from)) return true
+  const from = normalizeInboundEmailAddress(params.from)
+  const localPart = from.split('@', 1)[0] ?? ''
+  if (/^(mailer-daemon|postmaster|no-?reply|do-?not-?reply|bounce)(?:[+._-]|$)/.test(localPart)) return true
 
   const subject = params.subject?.trim().toLowerCase() ?? ''
-  return /^(automatic reply|auto(?:matic)?[ -]?reply|out of office|delivery status notification|undeliverable|delivery failure|mail delivery failed|returned mail|mail delivery subsystem)\b/.test(subject)
+  return /^(automatic reply|auto(?:matic)?[ -]?reply|out of office|away from (?:the )?office|delivery status notification|undeliverable|delivery failure|mail delivery failed|returned mail|mail delivery subsystem)\b/.test(subject)
+}
+
+type ServiceClient = ReturnType<typeof createServiceClient>
+
+async function findUniqueEmailByMessageIds(
+  messageIds: string[],
+  supabase: ServiceClient,
+): Promise<{ id: string; lead_id: string } | null> {
+  const matches = new Map<string, { id: string; lead_id: string }>()
+
+  for (const messageId of messageIds) {
+    const { data, error } = await supabase
+      .from('emails')
+      .select('id, lead_id')
+      .eq('message_id', messageId)
+      .limit(2)
+    if (error) throw new Error(`Inbound Message-ID lookup failed: ${error.message}`)
+
+    for (const row of data ?? []) matches.set(row.id, row)
+  }
+
+  return matches.size === 1 ? [...matches.values()][0] : null
+}
+
+async function findReferenceMatch(
+  messageIdsNewestFirst: string[],
+  supabase: ServiceClient,
+): Promise<{ id: string; lead_id: string } | null> {
+  for (const messageId of messageIdsNewestFirst) {
+    const { data, error } = await supabase
+      .from('emails')
+      .select('id, lead_id')
+      .eq('message_id', messageId)
+      .limit(2)
+    if (error) throw new Error(`Inbound References lookup failed: ${error.message}`)
+
+    if (data?.length === 1) return data[0]
+  }
+
+  return null
+}
+
+async function findUniqueSenderFallback(
+  sender: string,
+  supabase: ServiceClient,
+): Promise<{ leadId: string } | 'ambiguous' | null> {
+  const normalized = normalizeInboundEmailAddress(sender)
+  if (!normalized.includes('@')) return null
+
+  const { data: possibleLeads, error: leadLookupError } = await supabase
+    .from('leads')
+    .select('id, status')
+    .ilike('email', normalized)
+  if (leadLookupError) throw new Error(`Inbound sender lookup failed: ${leadLookupError.message}`)
+
+  const eligibleLeadIds: string[] = []
+  for (const lead of possibleLeads ?? []) {
+    if (!RELEVANT_REPLY_STATUSES.has(lead.status)) continue
+
+    const { data: priorEmails, error: emailLookupError } = await supabase
+      .from('emails')
+      .select('id, sent_at')
+      .eq('lead_id', lead.id)
+      .limit(100)
+    if (emailLookupError) throw new Error(`Inbound outreach history lookup failed: ${emailLookupError.message}`)
+
+    if (priorEmails?.some((email) => !!email.sent_at)) eligibleLeadIds.push(lead.id)
+  }
+
+  if (eligibleLeadIds.length > 1) return 'ambiguous'
+  return eligibleLeadIds.length === 1 ? { leadId: eligibleLeadIds[0] } : null
+}
+
+async function logUnmatchedInbound(
+  message: NormalizedInboundMessage,
+  outcome: 'unmatched' | 'unmatched_ambiguous',
+  supabase: ServiceClient,
+): Promise<void> {
+  const { error } = await supabase.from('activity_log').insert({
+    event_type: 'inbound_reply_unmatched',
+    lead_id: null,
+    description: outcome === 'unmatched_ambiguous'
+      ? 'Inbound reply matched multiple leads and was not applied'
+      : 'Inbound message could not be matched to an outreach lead',
+    metadata: {
+      provider: message.provider,
+      provider_message_id: message.providerMessageId,
+      mailbox_id: message.mailboxId ?? null,
+      folder: message.folder ?? null,
+      uid: message.uid ?? null,
+      status: outcome,
+    },
+  })
+  if (error) throw new Error(`Inbound unmatched marker could not be stored: ${error.message}`)
+}
+
+export async function processInboundReply(
+  message: NormalizedInboundMessage,
+  supabaseOverride?: ServiceClient,
+): Promise<InboundReplyResult> {
+  const supabase = supabaseOverride ?? createServiceClient()
+  const headers = message.headers ?? {}
+
+  if (isAutomatedInboundEmail({ from: message.from, subject: message.subject, headers })) {
+    logger.info('tracker', 'Automated inbound email ignored', {
+      provider: message.provider,
+      provider_message_id: message.providerMessageId,
+      mailbox_id: message.mailboxId ?? null,
+      folder: message.folder ?? null,
+      uid: message.uid ?? null,
+      outcome: 'automated_ignored',
+    })
+    return { outcome: 'automated_ignored' }
+  }
+
+  const inReplyTo = parseMessageIds([
+    ...(message.inReplyTo ?? []),
+    inboundHeader(headers, 'in-reply-to'),
+  ])
+  const referencesOldestFirst = parseMessageIds([
+    ...(message.references ?? []),
+    inboundHeader(headers, 'references'),
+  ])
+
+  let matchedEmail = await findUniqueEmailByMessageIds(inReplyTo, supabase)
+  if (!matchedEmail) {
+    matchedEmail = await findReferenceMatch([...referencesOldestFirst].reverse(), supabase)
+  }
+
+  let leadId = matchedEmail?.lead_id ?? null
+  if (!leadId) {
+    const senderMatch = await findUniqueSenderFallback(message.from, supabase)
+    if (senderMatch === 'ambiguous') {
+      await logUnmatchedInbound(message, 'unmatched_ambiguous', supabase)
+      logger.warn('tracker', 'Inbound reply matched multiple eligible leads', {
+        provider: message.provider,
+        provider_message_id: message.providerMessageId,
+        outcome: 'unmatched_ambiguous',
+      })
+      return { outcome: 'unmatched_ambiguous' }
+    }
+    leadId = senderMatch?.leadId ?? null
+  }
+
+  if (!leadId) {
+    await logUnmatchedInbound(message, 'unmatched', supabase)
+    logger.info('tracker', 'Inbound email received but no matching lead found', {
+      provider: message.provider,
+      provider_message_id: message.providerMessageId,
+      had_in_reply_to: inReplyTo.length > 0,
+      had_references: referencesOldestFirst.length > 0,
+      outcome: 'unmatched',
+    })
+    return { outcome: 'unmatched' }
+  }
+
+  await handleEmailReply(leadId, supabase, matchedEmail?.id, message.receivedAt)
+  return { outcome: 'processed', leadId, emailId: matchedEmail?.id }
 }
 
 // Matches an inbound email.received webhook event to a lead and, if found,
@@ -109,53 +318,17 @@ export async function handleInboundEmail(
   supabaseOverride?: ReturnType<typeof createServiceClient>,
   fetchHeaders: typeof getReceivedEmailHeaders = getReceivedEmailHeaders
 ): Promise<void> {
-  const supabase = supabaseOverride ?? createServiceClient()
-
   const headers = await fetchHeaders(params.emailId)
-  if (isAutomatedInboundEmail({ from: params.from, subject: params.subject, headers })) {
-    logger.info('tracker', 'Automated inbound email ignored', {
-      email_id: params.emailId,
-      from: params.from,
-    })
-    return
-  }
-
-  const inReplyTo = inboundHeader(headers, 'in-reply-to') || null
-
-  let leadId: string | null = null
-  let matchedEmailId: string | undefined
-
-  if (inReplyTo) {
-    const { data: matchedEmail } = await supabase
-      .from('emails')
-      .select('id, lead_id')
-      .eq('message_id', inReplyTo)
-      .limit(1)
-      .maybeSingle()
-    leadId = matchedEmail?.lead_id ?? null
-    matchedEmailId = matchedEmail?.id
-  }
-
-  if (!leadId && params.from) {
-    const { data: matchedLead } = await supabase
-      .from('leads')
-      .select('id')
-      .ilike('email', params.from)
-      .limit(1)
-      .maybeSingle()
-    leadId = matchedLead?.id ?? null
-  }
-
-  if (!leadId) {
-    logger.info('tracker', 'Inbound email received but no matching lead found', {
-      email_id: params.emailId,
-      from:     params.from,
-      had_in_reply_to: !!inReplyTo,
-    })
-    return
-  }
-
-  await handleEmailReply(leadId, supabaseOverride, matchedEmailId)
+  await processInboundReply({
+    provider: 'resend',
+    providerMessageId: params.emailId,
+    from: params.from,
+    subject: params.subject,
+    messageId: inboundHeader(headers, 'message-id') || undefined,
+    inReplyTo: parseMessageIds(inboundHeader(headers, 'in-reply-to')),
+    references: parseMessageIds(inboundHeader(headers, 'references')),
+    headers: headers ?? {},
+  }, supabaseOverride)
 }
 
 export async function handleTerminalDeliveryFailure(

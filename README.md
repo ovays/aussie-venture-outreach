@@ -96,6 +96,12 @@ GEMINI_API_KEY=
 RESEND_API_KEY=
 RESEND_WEBHOOK_SECRET=
 
+HOSTINGER_WEBHOOK_SECRET=
+HOSTINGER_MAIL_API_TOKEN=
+HOSTINGER_MAILBOX_ID=
+HOSTINGER_MAILBOX_ADDRESS=hello@aussieventure.com
+HOSTINGER_MAIL_API_BASE_URL=https://api.mail.hostinger.com
+
 GOOGLE_MAPS_API_KEY=
 OUTSCRAPER_API_KEY=
 
@@ -103,6 +109,12 @@ TRIGGER_SECRET_KEY=
 NEXT_PUBLIC_APP_URL=
 ADMIN_EMAIL=
 ```
+
+For inbound reply detection, create a Hostinger Agentic Mail webhook for
+`message.received` pointing to `/api/webhooks/hostinger`. Store the one-time
+webhook Bearer token as `HOSTINGER_WEBHOOK_SECRET`, and scope the Mail API token
+to the monitored mailbox. `HOSTINGER_MAILBOX_ID` is Hostinger's `AC...` mailbox
+resource ID, not the email address.
 
 Database-backed settings that affect discovery and quotas:
 

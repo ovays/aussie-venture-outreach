@@ -16,8 +16,15 @@
  * Run: npx tsx scripts/test-webhook-handling.ts
  */
 
-import { handleEmailBounce, handleEmailReply, handleInboundEmail, handleTerminalDeliveryFailure } from '../agents/tracker'
+import {
+  handleEmailBounce,
+  handleEmailReply,
+  handleInboundEmail,
+  handleTerminalDeliveryFailure,
+  processInboundReply,
+} from '../agents/tracker'
 import { isDeliverySuppressedForAddress } from '../src/lib/delivery-suppression'
+import { parseHostingerWebhookPayload, verifyHostingerBearerSecret } from '../src/lib/hostinger-webhook'
 
 const SEP = '═'.repeat(60)
 let passed = 0
@@ -236,7 +243,7 @@ async function main() {
   {
     const db = makeFakeSupabase({
       leads: [{ id: 'lead-1', business_name: 'Biz', status: 'contacted', email: 'owner@biz.com' }],
-      emails: [{ id: 'row-1', lead_id: 'lead-1', type: 'initial_pitch', message_id: '<abc@aussieventure.com>', replied_at: null }],
+      emails: [{ id: 'row-1', lead_id: 'lead-1', type: 'initial_pitch', message_id: '<abc@aussieventure.com>', sent_at: '2026-01-01T00:00:00Z', replied_at: null }],
       activity_log: [],
     })
     const fetchHeaders = async () => null // no headers available (e.g. fetch failed)
@@ -292,7 +299,96 @@ async function main() {
     assert(afterDeliveryNotice.data?.status === 'contacted', 'Delivery-system message does not mark the lead replied')
   }
 
-  console.log('\n  11. Terminal events suppress the address and cancel pending follow-ups')
+  console.log('\n  11. Hostinger payload parsing is defensive')
+  {
+    assert(verifyHostingerBearerSecret('Bearer webhook-secret', 'webhook-secret'), 'Valid Hostinger Bearer secret is accepted')
+    assert(!verifyHostingerBearerSecret('Bearer wrong', 'webhook-secret'), 'Invalid Hostinger Bearer secret is rejected')
+    assert(!verifyHostingerBearerSecret(null, 'webhook-secret') && !verifyHostingerBearerSecret('Bearer webhook-secret', undefined), 'Missing header or configured secret fails closed')
+
+    const locator = parseHostingerWebhookPayload({
+      event: 'message.received',
+      mailbox: { resourceId: 'AC_mailbox', address: 'hello@aussieventure.com' },
+      message: {
+        uid: 42,
+        path: 'INBOX',
+        message_id: '<reply@example.com>',
+        from: { name: 'Owner', address: 'Owner@Biz.com' },
+        to: [{ address: 'hello@aussieventure.com' }],
+        subject: 'Re: Collab',
+      },
+      timestamp: '2026-09-01T00:00:00Z',
+    })
+    assert(locator.eventType === 'message.received', 'Hostinger event type is parsed')
+    assert(locator.mailboxId === 'AC_mailbox' && locator.uid === 42 && locator.folder === 'INBOX', 'Mailbox resource ID, UID, and folder are parsed')
+    assert(locator.from === 'Owner@Biz.com' && locator.providerMessageId === '<reply@example.com>', 'Nested sender and provider Message-ID are parsed')
+
+    const alternate = parseHostingerWebhookPayload({
+      type: 'message.received',
+      data: { account_resource_id: 'AC_alternate', folder_path: 'INBOX.Support', message_uid: '77' },
+    })
+    assert(alternate.mailboxId === 'AC_alternate' && alternate.uid === 77 && alternate.folder === 'INBOX.Support', 'Alternate documented-style identifier names are accepted safely')
+  }
+
+  console.log('\n  12. References are matched newest-first')
+  {
+    const db = makeFakeSupabase({
+      leads: [{ id: 'lead-ref', business_name: 'Ref Biz', status: 'contacted', email: 'owner@ref.test' }],
+      emails: [
+        { id: 'old-ref', lead_id: 'lead-ref', type: 'initial_pitch', message_id: '<old@aussieventure.com>', sent_at: '2026-01-01T00:00:00Z', replied_at: null },
+        { id: 'new-ref', lead_id: 'lead-ref', type: 'follow_up_1', message_id: '<new@aussieventure.com>', sent_at: '2026-02-01T00:00:00Z', replied_at: null },
+      ],
+      activity_log: [],
+    })
+    const result = await processInboundReply({
+      provider: 'hostinger', providerMessageId: 'hostinger-1', from: 'Owner <owner@ref.test>',
+      references: ['<old@aussieventure.com> <new@aussieventure.com>'], headers: {},
+      receivedAt: '2026-09-01T01:02:03Z',
+    }, db)
+    const oldEmail = await db.from('emails').select().eq('id', 'old-ref').maybeSingle()
+    const newEmail = await db.from('emails').select().eq('id', 'new-ref').maybeSingle()
+    assert(result.outcome === 'processed' && result.emailId === 'new-ref', 'Newest unique References match is selected')
+    assert(oldEmail.data?.replied_at === null && newEmail.data?.replied_at === '2026-09-01T01:02:03Z', 'Only the exact referenced email receives the Hostinger timestamp')
+  }
+
+  console.log('\n  13. Ambiguous sender fallback never chooses arbitrarily')
+  {
+    const db = makeFakeSupabase({
+      leads: [
+        { id: 'lead-a', business_name: 'A', status: 'contacted', email: 'shared@biz.test' },
+        { id: 'lead-b', business_name: 'B', status: 'dead', email: 'SHARED@biz.test' },
+      ],
+      emails: [
+        { id: 'email-a', lead_id: 'lead-a', type: 'initial_pitch', sent_at: '2026-01-01T00:00:00Z', replied_at: null },
+        { id: 'email-b', lead_id: 'lead-b', type: 'initial_pitch', sent_at: '2026-01-02T00:00:00Z', replied_at: null },
+      ],
+      activity_log: [],
+    })
+    const result = await processInboundReply({
+      provider: 'hostinger', providerMessageId: 'hostinger-ambiguous', from: 'Person <shared@biz.test>', headers: {},
+    }, db)
+    const leadA = await db.from('leads').select().eq('id', 'lead-a').maybeSingle()
+    const leadB = await db.from('leads').select().eq('id', 'lead-b').maybeSingle()
+    const marker = (await db.from('activity_log').select().eq('event_type', 'inbound_reply_unmatched').maybeSingle()).data
+    assert(result.outcome === 'unmatched_ambiguous', 'Ambiguous sender returns unmatched_ambiguous')
+    assert(leadA.data?.status === 'contacted' && leadB.data?.status === 'dead', 'Neither ambiguous lead status is changed')
+    assert((marker?.metadata as Row | undefined)?.status === 'unmatched_ambiguous', 'Ambiguous inbound message is marked in activity_log')
+  }
+
+  console.log('\n  14. Sender fallback requires prior sent outreach')
+  {
+    const db = makeFakeSupabase({
+      leads: [{ id: 'lead-unsent', business_name: 'Unsent', status: 'contacted', email: 'unsent@biz.test' }],
+      emails: [{ id: 'email-unsent', lead_id: 'lead-unsent', type: 'initial_pitch', sent_at: null, replied_at: null }],
+      activity_log: [],
+    })
+    const result = await processInboundReply({
+      provider: 'hostinger', providerMessageId: 'hostinger-unsent', from: 'unsent@biz.test', headers: {},
+    }, db)
+    const lead = await db.from('leads').select().eq('id', 'lead-unsent').maybeSingle()
+    assert(result.outcome === 'unmatched' && lead.data?.status === 'contacted', 'A matching address without sent outreach is a safe no-op')
+  }
+
+  console.log('\n  15. Terminal events suppress the address and cancel pending follow-ups')
   {
     const db = makeFakeSupabase({
       leads: [{ id: 'lead-t', email: 'Owner@Biz.com', delivery_suppressed_emails: [] }],
