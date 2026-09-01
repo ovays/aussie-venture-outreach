@@ -8,6 +8,7 @@ import { Modal } from '@/components/ui/Modal'
 import { StatusBadge } from '@/components/ui/Badge'
 import { useLeadDrawer } from '@/lib/lead-drawer-context'
 import type { DataQualityLeadDetail, DataQualityOwnership } from '@/lib/data-quality-report'
+import { DuplicateConsolidationModal } from '@/components/data-quality/DuplicateConsolidationModal'
 
 type IssueType = 'duplicate_lead' | 'shared_email' | 'uncertain_email_group' | 'already_contacted_email' | 'placeholder_email' | 'technical_email' | 'invalid_email'
 
@@ -121,6 +122,7 @@ export function DataQualityDashboard() {
   const [busy, setBusy] = useState(false)
   const [removeTargets, setRemoveTargets] = useState<DataQualityLeadDetail[] | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<DataQualityLeadDetail | null>(null)
+  const [consolidationTarget, setConsolidationTarget] = useState<ReportRow | null>(null)
   const [protectedConfirmed, setProtectedConfirmed] = useState(false)
   const [lastResolution, setLastResolution] = useState<{ row: ReportRow } | null>(null)
   const sequence = useRef(0)
@@ -343,7 +345,8 @@ export function DataQualityDashboard() {
                   selected={selected.has(key)} selectable={isSafelySelectable(row)} busy={busy}
                   onToggle={() => toggleExpanded(row)} onSelect={(checked) => toggleSelected(row, checked)}
                   onResolve={() => void resolveRow(row)} onRemove={(lead) => setRemoveTargets([lead])}
-                  onDelete={(lead) => { setDeleteTarget(lead); setProtectedConfirmed(false) }} onOpenLead={openDrawer} />
+                  onDelete={(lead) => { setDeleteTarget(lead); setProtectedConfirmed(false) }} onOpenLead={openDrawer}
+                  onConsolidate={() => setConsolidationTarget(row)} />
               })}
           </tbody>
         </table>
@@ -358,6 +361,8 @@ export function DataQualityDashboard() {
         </div>
       </div>
     </Card>
+
+    <DuplicateConsolidationModal group={consolidationTarget} onClose={() => setConsolidationTarget(null)} onOpenLead={openDrawer} />
 
     <Modal open={!!removeTargets} onClose={() => !busy && setRemoveTargets(null)} title={`Remove ${removeTargets?.length ?? 0} invalid email${removeTargets?.length === 1 ? '' : 's'}?`}>
       <div className="space-y-4">
@@ -380,10 +385,11 @@ export function DataQualityDashboard() {
   </div>
 }
 
-function RowFragment({ row, open, owner, statuses, protectedRow, selected, selectable, busy, onToggle, onSelect, onResolve, onRemove, onDelete, onOpenLead }: {
+function RowFragment({ row, open, owner, statuses, protectedRow, selected, selectable, busy, onToggle, onSelect, onResolve, onRemove, onDelete, onOpenLead, onConsolidate }: {
   row: ReportRow; open: boolean; owner: DataQualityOwnership | null; statuses: string[]; protectedRow: boolean
   selected: boolean; selectable: boolean; busy: boolean; onToggle: () => void; onSelect: (checked: boolean) => void
   onResolve: () => void; onRemove: (lead: DataQualityLeadDetail) => void; onDelete: (lead: DataQualityLeadDetail) => void; onOpenLead: (id: string) => void
+  onConsolidate: () => void
 }) {
   function stop(event: MouseEvent) { event.stopPropagation() }
   return <>
@@ -405,7 +411,9 @@ function RowFragment({ row, open, owner, statuses, protectedRow, selected, selec
         {row.issue_type === 'duplicate_lead' && <div className="rounded-lg p-3 text-xs" style={{ color: '#fde68a', background: '#78350f22', border: '1px solid #78350f' }}><strong>Recommendation only:</strong> “Preferred to Keep” is a comparison aid, not an automatic merge decision. Potential duplicates are never deleted or merged automatically.</div>}
         {row.issue_type === 'shared_email' && <div className="rounded-lg p-3 text-xs" style={{ color: '#ddd6fe', background: '#4c1d9522', border: '1px solid #4c1d95' }}><strong>Shared Inbox:</strong> these businesses remain separate. Shared email does not mean duplicate, and no merge action is available.</div>}
         {owner?.owner_lead_id && <div className="rounded-lg p-3 text-xs" style={{ color: '#bae6fd', background: '#0c4a6e22', border: '1px solid #0c4a6e' }}><strong>Outreach owner:</strong> {owner.owner_business_name}. ReachAgent allows one active outreach lifecycle per recipient email to prevent duplicate emails. Other associated leads cannot start independent email outreach.</div>}
+        {row.issue_type === 'duplicate_lead' && row.preferred_lead_id !== owner?.owner_lead_id && <div className="rounded-lg p-3 text-xs" style={{ color: '#fde68a', background: '#78350f22', border: '1px solid #92400e' }}><strong>Warning:</strong> Calculated preferred lead differs from the current recipient owner. Selecting a non-owner keep lead requires an atomic ownership transfer.</div>}
         <div className="grid gap-3 xl:grid-cols-2">{row.leads.map((lead) => <LeadComparison key={lead.id} lead={lead} row={row} onRemove={onRemove} onDelete={onDelete} onOpenLead={onOpenLead} />)}</div>
+        {row.issue_type === 'duplicate_lead' && <div className="flex justify-end"><Button size="sm" onClick={onConsolidate}>Consolidate Duplicate</Button></div>}
       </div>
     </td></tr>}
   </>
@@ -429,11 +437,10 @@ function LeadComparison({ lead, row, onRemove, onDelete, onOpenLead }: { lead: D
       {lead.outreach_blocked && <span className="text-[11px] px-2 py-1 rounded-full bg-red-500/15 text-red-300">Independent email outreach blocked</span>}
     </div>
     {lead.protection_reasons.length > 0 && <div className="mt-3 text-xs text-amber-200">Protected because: {lead.protection_reasons.join(' · ')}</div>}
-    <div className="flex flex-wrap gap-2 mt-4"><Button size="sm" variant="secondary" onClick={() => onOpenLead(lead.id)}>Open Lead</Button>{JUNK_ISSUES.has(row.issue_type) && <Button size="sm" variant="ghost" disabled={lead.protected_from_auto_delete || lead.is_outreach_owner} title={lead.is_outreach_owner ? 'Current outreach owners cannot have email removed here.' : lead.protected_from_auto_delete ? 'Protected leads cannot use Remove Email.' : undefined} onClick={() => onRemove(lead)}>Remove Email</Button>}<Button size="sm" variant="danger" disabled={lead.is_outreach_owner} title={lead.is_outreach_owner ? 'Current outreach owners cannot be deleted here.' : undefined} onClick={() => onDelete(lead)}>Delete Lead</Button></div>
+    <div className="flex flex-wrap gap-2 mt-4"><Button size="sm" variant="secondary" onClick={() => onOpenLead(lead.id)}>Open Lead</Button>{JUNK_ISSUES.has(row.issue_type) && <Button size="sm" variant="ghost" disabled={lead.protected_from_auto_delete || lead.is_outreach_owner} title={lead.is_outreach_owner ? 'Current outreach owners cannot have email removed here.' : lead.protected_from_auto_delete ? 'Protected leads cannot use Remove Email.' : undefined} onClick={() => onRemove(lead)}>Remove Email</Button>}{row.issue_type !== 'duplicate_lead' && <Button size="sm" variant="danger" disabled={lead.is_outreach_owner} title={lead.is_outreach_owner ? 'Current outreach owners cannot be deleted here.' : undefined} onClick={() => onDelete(lead)}>Delete Lead</Button>}</div>
   </div>
 }
 
 function Detail({ label, value }: { label: string; value: string | null | undefined }) {
   return <div className="min-w-0"><dt style={{ color: '#64748b' }}>{label}</dt><dd className="mt-0.5 text-slate-300 break-words">{value || '—'}</dd></div>
 }
-

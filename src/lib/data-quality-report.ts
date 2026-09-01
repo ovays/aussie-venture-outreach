@@ -12,11 +12,30 @@ export interface DataQualityLeadDetail {
   website: string | null
   phone: string | null
   instagram: string | null
+  facebook: string | null
+  address: string | null
+  state: string | null
+  notes: string | null
   created_at: string | null
+  updated_at: string | null
   outreach_count: number
+  email_history_count: number
+  reply_count: number
+  latest_replied_at: string | null
+  latest_reply_activity_at: string | null
+  reply_lifecycle_state: 'verified_reply' | 'lifecycle_only' | 'none'
   latest_outreach: string | null
   has_reply: boolean
   has_deal: boolean
+  deal_count: number
+  deals: Array<{
+    id: string
+    deal_value: number | null
+    deal_type: string | null
+    closed_at: string | null
+    created_at: string | null
+    notes: string | null
+  }>
   has_notes: boolean
   has_email_history: boolean
   protected_from_auto_delete: boolean
@@ -67,16 +86,17 @@ export async function enrichDataQualityRows(
   const normalizedEmails = [...new Set(rows.map((row) => row.normalized_email).filter((email): email is string => !!email))]
   if (leadIds.length === 0) return rows.map((row) => ({ ...row, leads: [], ownership: null }))
 
-  const [leadResult, emailResult, dealResult, ownershipResult] = await Promise.all([
-    supabase.from('leads').select('id,business_name,email,status,city,suburb,category_name,website,phone,instagram_handle,created_at,notes').in('id', leadIds),
+  const [leadResult, emailResult, dealResult, ownershipResult, replyActivityResult] = await Promise.all([
+    supabase.from('leads').select('id,business_name,email,status,city,suburb,state,address,category_name,website,phone,instagram_handle,facebook_url,created_at,updated_at,notes').in('id', leadIds),
     supabase.from('emails').select('id,lead_id,status,sent_at,replied_at,created_at').in('lead_id', leadIds),
-    supabase.from('deals').select('id,lead_id').in('lead_id', leadIds),
+    supabase.from('deals').select('id,lead_id,deal_value,deal_type,closed_at,created_at,notes').in('lead_id', leadIds),
     normalizedEmails.length > 0
       ? supabase.from('recipient_outreach_ownership').select('normalized_email,owner_lead_id,state,last_activity_at').in('normalized_email', normalizedEmails)
       : Promise.resolve({ data: [], error: null }),
+    supabase.from('activity_log').select('id,lead_id,created_at').in('lead_id', leadIds).eq('event_type', 'reply_received'),
   ])
 
-  const firstError = leadResult.error ?? emailResult.error ?? dealResult.error ?? ownershipResult.error
+  const firstError = leadResult.error ?? emailResult.error ?? dealResult.error ?? ownershipResult.error ?? replyActivityResult.error
   if (firstError) throw new Error(firstError.message)
 
   const ownershipRows = (ownershipResult.data ?? []) as Array<Record<string, unknown>>
@@ -98,7 +118,17 @@ export async function enrichDataQualityRows(
     const id = String(email.lead_id)
     emailsByLead.set(id, [...(emailsByLead.get(id) ?? []), email])
   }
-  const dealLeadIds = new Set(((dealResult.data ?? []) as Array<Record<string, unknown>>).map((deal) => String(deal.lead_id)))
+  const dealsByLead = new Map<string, Array<Record<string, unknown>>>()
+  for (const deal of (dealResult.data ?? []) as Array<Record<string, unknown>>) {
+    const id = String(deal.lead_id)
+    dealsByLead.set(id, [...(dealsByLead.get(id) ?? []), deal])
+  }
+  const replyActivityByLead = new Map<string, string[]>()
+  for (const activity of (replyActivityResult.data ?? []) as Array<Record<string, unknown>>) {
+    const id = String(activity.lead_id)
+    const at = typeof activity.created_at === 'string' ? activity.created_at : null
+    if (at) replyActivityByLead.set(id, [...(replyActivityByLead.get(id) ?? []), at])
+  }
   const ownershipByEmail = new Map<string, DataQualityOwnership>()
   for (const ownership of ownershipRows) {
     const normalizedEmail = String(ownership.normalized_email)
@@ -116,6 +146,7 @@ export async function enrichDataQualityRows(
   for (const lead of leads) {
     const id = String(lead.id)
     const emails = emailsByLead.get(id) ?? []
+    const deals = dealsByLead.get(id) ?? []
     const sent = emails.filter((email) => ['sent', 'email_sync_failed'].includes(String(email.status)))
     const latestOutreach = sent
       .map((email) => String(email.sent_at ?? email.created_at ?? ''))
@@ -123,8 +154,10 @@ export async function enrichDataQualityRows(
       .sort()
       .at(-1) ?? null
     const status = String(lead.status ?? 'new')
-    const hasReply = emails.some((email) => !!email.replied_at) || status === 'replied'
-    const hasDeal = dealLeadIds.has(id) || ['closed', 'closed_won'].includes(status)
+    const repliedDates = emails.map((email) => typeof email.replied_at === 'string' ? email.replied_at : null).filter((date): date is string => !!date).sort()
+    const hasVerifiedReply = repliedDates.length > 0
+    const hasReply = hasVerifiedReply || ['replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual'].includes(status)
+    const hasDeal = deals.length > 0 || ['closed', 'closed_won', 'closed_manual'].includes(status)
     const hasNotes = typeof lead.notes === 'string' && lead.notes.trim().length > 0
     const hasEmailHistory = emails.length > 0
     const reasons = protectionReasons({ status, hasReply, hasDeal, hasNotes, hasEmailHistory })
@@ -142,11 +175,30 @@ export async function enrichDataQualityRows(
       website: typeof lead.website === 'string' ? lead.website : null,
       phone: typeof lead.phone === 'string' ? lead.phone : null,
       instagram: typeof lead.instagram_handle === 'string' ? lead.instagram_handle : null,
+      facebook: typeof lead.facebook_url === 'string' ? lead.facebook_url : null,
+      address: typeof lead.address === 'string' ? lead.address : null,
+      state: typeof lead.state === 'string' ? lead.state : null,
+      notes: typeof lead.notes === 'string' ? lead.notes : null,
       created_at: typeof lead.created_at === 'string' ? lead.created_at : null,
+      updated_at: typeof lead.updated_at === 'string' ? lead.updated_at : null,
       outreach_count: sent.length,
+      email_history_count: emails.length,
+      reply_count: repliedDates.length,
+      latest_replied_at: repliedDates.at(-1) ?? null,
+      latest_reply_activity_at: (replyActivityByLead.get(id) ?? []).sort().at(-1) ?? null,
+      reply_lifecycle_state: hasVerifiedReply ? 'verified_reply' : hasReply ? 'lifecycle_only' : 'none',
       latest_outreach: latestOutreach,
       has_reply: hasReply,
       has_deal: hasDeal,
+      deal_count: deals.length,
+      deals: deals.map((deal) => ({
+        id: String(deal.id),
+        deal_value: typeof deal.deal_value === 'number' ? deal.deal_value : deal.deal_value == null ? null : Number(deal.deal_value),
+        deal_type: typeof deal.deal_type === 'string' ? deal.deal_type : null,
+        closed_at: typeof deal.closed_at === 'string' ? deal.closed_at : null,
+        created_at: typeof deal.created_at === 'string' ? deal.created_at : null,
+        notes: typeof deal.notes === 'string' ? deal.notes : null,
+      })),
       has_notes: hasNotes,
       has_email_history: hasEmailHistory,
       protected_from_auto_delete: isProtectedFromAutoDelete({
@@ -165,4 +217,3 @@ export async function enrichDataQualityRows(
     ownership: row.normalized_email ? ownershipByEmail.get(row.normalized_email) ?? null : null,
   }))
 }
-
