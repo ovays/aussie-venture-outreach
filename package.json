@@ -10,6 +10,7 @@
     "test:finder": "tsx scripts/test-finder.ts",
     "test:data-quality": "tsx scripts/test-data-quality.ts",
     "test:data-quality-p2": "tsx scripts/test-data-quality-p2.ts",
+    "test:data-quality-classifier-fix": "tsx scripts/test-data-quality-classifier-fix.ts",
     "audit:data-quality": "tsx scripts/data-quality-dry-run.ts",
     "test:finder-suburb-priorities": "tsx scripts/test-finder-suburb-priorities.ts",
     "test:finder-category-suburb-cooldown": "tsx scripts/test-finder-category-suburb-cooldown.ts",

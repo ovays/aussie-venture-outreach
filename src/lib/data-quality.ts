@@ -75,16 +75,52 @@ export type DuplicateSignalLead = {
 }
 
 function compact(value: string | null | undefined): string {
-  return (value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const present = normalizeDataQualityValue(value)
+  return present?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? ''
 }
 
-function websiteDomain(value: string | null | undefined): string {
-  if (!value) return ''
-  try {
-    return new URL(value.match(/^https?:\/\//i) ? value : `https://${value}`).hostname.toLowerCase().replace(/^www\./, '')
-  } catch {
-    return value.toLowerCase().replace(/^https?:\/\//, '').split('/')[0].replace(/^www\./, '')
-  }
+const DATA_QUALITY_PLACEHOLDERS = new Set([
+  'not found',
+  'not mentioned',
+  'not available',
+  'unknown',
+  'n/a',
+  '-',
+])
+
+export function normalizeDataQualityValue(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed || DATA_QUALITY_PLACEHOLDERS.has(trimmed.toLowerCase())) return null
+  return trimmed
+}
+
+export function normalizeWebsiteIdentity(value: string | null | undefined): string | null {
+  const present = normalizeDataQualityValue(value)
+  if (!present) return null
+  const normalized = present.toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+    .replace(/^www\./, '')
+    .replace(/[?#].*$/, '')
+    .replace(/\/{2,}/g, '/')
+    .replace(/\/+$/, '')
+  return normalized || null
+}
+
+function meaningfulWebsiteIdentity(value: string | null | undefined): string {
+  const identity = normalizeWebsiteIdentity(value)
+  return identity?.includes('/') ? identity : ''
+}
+
+export function normalizeSocialIdentity(value: string | null | undefined): string | null {
+  const present = normalizeDataQualityValue(value)
+  if (!present) return null
+  const normalized = present.toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+    .replace(/^www\./, '')
+    .replace(/^(?:instagram\.com\/)?@?/, '')
+    .replace(/[/?#].*$/, '')
+    .replace(/[^a-z0-9._]/g, '')
+  return normalized || null
 }
 
 export function classifyDuplicateGroup(leads: DuplicateSignalLead[]): {
@@ -93,25 +129,31 @@ export function classifyDuplicateGroup(leads: DuplicateSignalLead[]): {
 } {
   if (leads.length < 2) return { issueType: 'uncertain_email_group', reasons: ['Only one lead was supplied.'] }
   const names = leads.map((lead) => compact(lead.business_name)).filter(Boolean)
-  const domains = leads.map((lead) => websiteDomain(lead.website)).filter(Boolean)
+  const websites = leads.map((lead) => meaningfulWebsiteIdentity(lead.website)).filter(Boolean)
   const phones = leads.map((lead) => compact(lead.phone)).filter(Boolean)
-  const socials = leads.map((lead) => compact(lead.instagram_handle)).filter(Boolean)
-  const addresses = leads.map((lead) => compact(`${lead.address ?? ''}${lead.suburb ?? ''}`)).filter(Boolean)
+  const socials = leads.map((lead) => normalizeSocialIdentity(lead.instagram_handle) ?? '').filter(Boolean)
+  const addresses = leads.map((lead) => {
+    const address = normalizeDataQualityValue(lead.address)
+    if (!address) return ''
+    return compact(`${address}${normalizeDataQualityValue(lead.suburb) ?? ''}`)
+  }).filter(Boolean)
   const allSame = (values: string[]) => values.length === leads.length && new Set(values).size === 1
 
   const strong: string[] = []
-  if (allSame(names)) strong.push('same_normalized_business_name')
-  if (allSame(domains)) strong.push('same_website_domain')
+  const sameName = allSame(names)
+  if (sameName) strong.push('same_normalized_business_name')
+  if (allSame(websites)) strong.push('same_meaningful_website_path')
   if (allSame(phones)) strong.push('same_phone')
   if (allSame(socials)) strong.push('same_social_handle')
-  if (strong.length >= 2 || strong.includes('same_normalized_business_name')) {
+  if (allSame(addresses)) strong.push('same_address')
+  if (sameName && strong.length >= 2) {
     return { issueType: 'duplicate_lead', reasons: ['same_normalized_email', ...strong] }
   }
 
-  if (new Set(names).size === leads.length && (addresses.length === 0 || new Set(addresses).size > 1)) {
-    return { issueType: 'shared_email', reasons: ['same_normalized_email', 'different_business_names', ...(new Set(addresses).size > 1 ? ['different_addresses'] : [])] }
+  if (names.length === leads.length && new Set(names).size > 1) {
+    return { issueType: 'shared_email', reasons: ['same_normalized_email', 'different_business_names', ...(allSame(addresses) ? ['same_address'] : [])] }
   }
-  return { issueType: 'uncertain_email_group', reasons: ['same_normalized_email', 'insufficient_deterministic_signals'] }
+  return { issueType: 'uncertain_email_group', reasons: ['same_normalized_email', 'insufficient_or_conflicting_identity_evidence'] }
 }
 
 export type CleanupCandidate = DuplicateSignalLead & {

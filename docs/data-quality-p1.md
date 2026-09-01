@@ -8,11 +8,14 @@ Application code uses `normalizeEmail()` (`trim` + lowercase + empty-to-null). M
 
 ## Classification
 
-Repeated normalized-email groups are classified deterministically:
+Repeated normalized-email groups are classified conservatively and deterministically:
 
-- `duplicate_lead`: all normalized business names match, or both website+phone or website+social match.
-- `shared_email`: all normalized business names differ and addresses are absent or differ.
-- `uncertain_email_group`: a repeated recipient lacks enough consistent signals for either rule.
+- `duplicate_lead`: every normalized business name matches and every lead has a matching phone, meaningful website path, address, or real social identity.
+- `shared_email`: populated business names identify different entities, including entities at the same address.
+- `uncertain_email_group`: identity evidence is missing or conflicting.
+
+Missing and placeholder identity values never count as matches. Website paths are
+preserved; a shared root domain is not duplicate evidence by itself.
 
 Single-lead rules emit `invalid_email`, `placeholder_email`, or `technical_email`. `already_contacted_email` is emitted for every non-owner lead after a recipient has meaningful delivered history or an owner is claimed. Generic business locals such as `info`, `hello`, `admin`, `bookings`, `marketing`, and `sales` are not blocked.
 
