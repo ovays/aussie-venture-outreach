@@ -7,6 +7,7 @@ import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
 import { generateFollowUpEmail } from '@/lib/followup-generation'
 import { buildEmailHistory, buildReferenceChain } from '@/lib/email-sequence'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
+import { claimRecipientOutreach } from '@/lib/data-quality'
 
 // Re-exported for scripts/test-email-threading.ts, which verifies this
 // function against the live sender's exact behavior.
@@ -115,6 +116,18 @@ export async function sendFollowUp(
   }
 
   if (!(await currentAddressIfAllowed())) return false
+
+  const ownership = await claimRecipientOutreach(supabase, candidate.lead.id, 'follow_up')
+  if (!ownership.allowed) {
+    await supabase.from('follow_ups').update({ status: 'cancelled' })
+      .eq('lead_id', candidate.lead.id).eq('status', 'scheduled')
+    logger.warn('followup', 'FOLLOW_UP_SUPPRESSED_RECIPIENT_OWNERSHIP', {
+      lead_id: candidate.lead.id,
+      owner_lead_id: ownership.ownerLeadId,
+      reason: ownership.reason,
+    })
+    return false
+  }
 
   // Idempotency re-check: the eligibility queue was built once at the start of
   // this run. If a second overlapping run (or a Trigger.dev retry) already

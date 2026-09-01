@@ -50,6 +50,14 @@ function makeFakeSupabase(
   opts: { enforceUniqueDeliveredPerLeadType?: boolean } = {}
 ) {
   return {
+    async rpc(name: string, args: Record<string, unknown>) {
+      if (name === 'claim_recipient_outreach') {
+        const leadId = String(args.p_lead_id)
+        const lead = (tables.leads ?? []).find((row) => row.id === leadId)
+        return { data: { allowed: true, owner_lead_id: leadId, normalized_email: lead?.email ?? null, reason: null }, error: null }
+      }
+      return { data: null, error: { message: `Unexpected RPC ${name}` } }
+    },
     from(table: string) {
       const eqFilters: [string, unknown][] = []
       const inFilters: [string, unknown[]][] = []
@@ -197,6 +205,10 @@ async function main() {
     let selectCallCount = 0
 
     const db = {
+      async rpc(name: string, args: Record<string, unknown>) {
+        if (name === 'claim_recipient_outreach') return { data: { allowed: true, owner_lead_id: args.p_lead_id, normalized_email: 'biz@example.com', reason: null }, error: null }
+        return { data: null, error: { message: `Unexpected RPC ${name}` } }
+      },
       from(table: string) {
         const eqFilters: [string, unknown][] = []
         const inFilters: [string, unknown[]][] = []

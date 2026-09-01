@@ -5,6 +5,7 @@ import { getAnalyticsDayRange } from '@/lib/analytics'
 import { handleEmailSyncFailure } from '@/lib/email-status'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
+import { claimRecipientOutreach } from '@/lib/data-quality'
 
 // Held for the entire quota-check-then-send sequence below so two overlapping
 // invocations (a stuck old run, a manual script racing the scheduled
@@ -206,6 +207,18 @@ console.log("FILTERED PENDING", pendingEmails)
 
     if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
       logger.warn('sender', 'INITIAL_EMAIL_SUPPRESSED_DELIVERY_FAILURE', { lead_id: emailRecord.lead_id })
+      continue
+    }
+
+    const ownership = await claimRecipientOutreach(supabase, emailRecord.lead_id, 'initial')
+    if (!ownership.allowed) {
+      logger.warn('sender', 'INITIAL_EMAIL_SUPPRESSED_RECIPIENT_OWNERSHIP', {
+        lead_id: emailRecord.lead_id,
+        owner_lead_id: ownership.ownerLeadId,
+        reason: ownership.reason,
+      })
+      await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
+      failed++
       continue
     }
 

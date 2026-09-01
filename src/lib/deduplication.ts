@@ -1,4 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { normalizeEmail } from '@/lib/data-quality'
+
+export { normalizeEmail } from '@/lib/data-quality'
 
 export const PIPELINE_DEDUPE_STATUSES = [
   'new',
@@ -83,12 +86,6 @@ const MULTI_PART_PUBLIC_SUFFIXES = new Set([
   'ac.uk',
 ])
 
-export function normalizeEmail(email: string | null | undefined): string | null {
-  const normalized = email?.trim().toLowerCase()
-  if (!normalized || !normalized.includes('@')) return null
-  return normalized
-}
-
 export function extractRootDomainFromEmail(email: string | null | undefined): string | null {
   const normalized = normalizeEmail(email)
   const domain = normalized?.split('@')[1]?.replace(/\.+$/, '')
@@ -149,7 +146,8 @@ export function addLeadToDedupeIndex(index: LeadDedupeIndex, lead: DedupeLead): 
 export function checkLeadDedupe(
   emailInput: string | null | undefined,
   index: LeadDedupeIndex,
-  currentLeadId?: string
+  currentLeadId?: string,
+  candidateBusinessName?: string | null,
 ): DedupeDecision {
   const email = normalizeEmail(emailInput)
   const rootDomain = extractRootDomainFromEmail(email)
@@ -158,6 +156,11 @@ export function checkLeadDedupe(
 
   const emailMatch = getCanonicalDuplicate(index.byEmail.get(email) ?? [], currentLeadId)
   if (emailMatch) {
+    const normalizedCandidateName = normalizeBusinessName(candidateBusinessName)
+    const normalizedMatchedName = normalizeBusinessName(emailMatch.businessName)
+    if (normalizedCandidateName && normalizedMatchedName && normalizedCandidateName !== normalizedMatchedName) {
+      return { duplicate: false, email, rootDomain }
+    }
     return {
       duplicate: true,
       reason: 'DUPLICATE_EMAIL_SKIPPED',
@@ -181,6 +184,10 @@ export function checkLeadDedupe(
   }
 
   return { duplicate: false, email, rootDomain }
+}
+
+function normalizeBusinessName(value: string | null | undefined): string {
+  return (value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
 function getCanonicalDuplicate(matches: DedupeMatch[], currentLeadId?: string): DedupeMatch | undefined {

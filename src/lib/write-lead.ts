@@ -3,6 +3,7 @@ import { logger } from '@/lib/logger'
 import { addLeadToDedupeIndex, checkLeadDedupe, type LeadDedupeIndex } from '@/lib/deduplication'
 import { routeInitialEmail } from '@/lib/initial-email-router'
 import type { InitialEmailMode } from '@/lib/settingsDefaults'
+import { classifyEmailQuality } from '@/lib/data-quality'
 
 export type WriteableLeadRow = {
   id: string
@@ -52,8 +53,19 @@ export async function writeOneLead(
     return { success: true, channel: 'dead' }
   }
 
+  const emailQuality = classifyEmailQuality(lead.email)
+  if (emailQuality.issueType) {
+    await supabase.from('activity_log').insert({
+      event_type: 'data_quality_email_suppressed',
+      lead_id: lead.id,
+      description: `Initial outreach not queued for ${lead.business_name}: ${emailQuality.issueType}`,
+      metadata: { issue_type: emailQuality.issueType, normalized_email: emailQuality.normalizedEmail },
+    })
+    return { success: true, channel: 'duplicate' }
+  }
+
   try {
-    const dedupeDecision = checkLeadDedupe(lead.email, dedupeIndex, lead.id)
+    const dedupeDecision = checkLeadDedupe(lead.email, dedupeIndex, lead.id, lead.business_name)
     if (dedupeDecision.duplicate) {
       const duplicateMeta = {
         candidate_lead_id: lead.id,

@@ -5,6 +5,7 @@ import { generateStoredReactivation } from '@/lib/stored-sequence-templates'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
 import { getAnalyticsDayRange } from '@/lib/analytics'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
+import { claimRecipientOutreach } from '@/lib/data-quality'
 
 interface LeadEmail {
   id: string
@@ -203,6 +204,16 @@ export async function runReactivationAgent(): Promise<void> {
       if (isDeliverySuppressedForAddress(currentLead.email, currentLead.delivery_suppressed_emails)) {
         suppressedDeliveryFailure++
         logger.warn('reactivation', 'REACTIVATION_SUPPRESSED_DELIVERY_FAILURE', { lead_id: lead.id })
+        continue
+      }
+
+      const ownership = await claimRecipientOutreach(supabase, lead.id, 'reactivation')
+      if (!ownership.allowed) {
+        logger.warn('reactivation', 'REACTIVATION_SUPPRESSED_RECIPIENT_OWNERSHIP', {
+          lead_id: lead.id,
+          owner_lead_id: ownership.ownerLeadId,
+          reason: ownership.reason,
+        })
         continue
       }
 

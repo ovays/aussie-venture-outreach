@@ -8,6 +8,8 @@
     "build": "next build",
     "start": "next start",
     "test:finder": "tsx scripts/test-finder.ts",
+    "test:data-quality": "tsx scripts/test-data-quality.ts",
+    "audit:data-quality": "tsx scripts/data-quality-dry-run.ts",
     "test:finder-suburb-priorities": "tsx scripts/test-finder-suburb-priorities.ts",
     "test:finder-category-suburb-cooldown": "tsx scripts/test-finder-category-suburb-cooldown.ts",
     "test:settings-suburb-priorities": "tsx scripts/test-settings-suburb-priorities.ts",

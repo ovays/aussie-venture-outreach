@@ -9,6 +9,7 @@ import { determineNextEmailType, buildEmailHistory, buildReferenceChain } from '
 import { FOLLOW_UP_NUMBER } from '@/lib/stage-import'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
+import { claimRecipientOutreach } from '@/lib/data-quality'
 
 // Generation + send + DB write normally completes in a few seconds; 3 minutes
 // gives ample headroom before a stale lock is reclaimed from a crashed request.
@@ -75,6 +76,17 @@ export async function POST(
   }
 
   const emailType = decision.kind === 'initial' ? 'initial_pitch' : decision.type
+
+  const ownership = await claimRecipientOutreach(supabase, id, decision.kind === 'initial' ? 'initial' : 'follow_up')
+  if (!ownership.allowed) {
+    return NextResponse.json({
+      error: ownership.reason === 'email_already_contacted'
+        ? 'This recipient already has an outreach lifecycle owned by another lead.'
+        : `This recipient is suppressed: ${ownership.reason ?? 'data quality issue'}.`,
+      reason: ownership.reason,
+      owner_lead_id: ownership.ownerLeadId,
+    }, { status: 409 })
+  }
 
   // Block re-sends of this exact stage when a previous attempt was delivered
   // but not recorded cleanly. Re-sending would cause a duplicate delivery.

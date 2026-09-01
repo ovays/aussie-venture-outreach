@@ -14,6 +14,7 @@ import {
   type LeadsBulkOutcome,
 } from '@/lib/leads-bulk-progress'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
+import { claimRecipientOutreach } from '@/lib/data-quality'
 
 // Same protection agents/sender.ts (idempotency re-check) and
 // resend/route.ts (per-lead lock) already apply to their send paths — this
@@ -110,6 +111,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           const skip = { lead_id, business_name: lead.business_name, reason: 'Already sent — skipped to avoid duplicate delivery' }
           skipped.push(skip)
           outcomes.push({ ...skip, status: 'skipped' })
+          continue
+        }
+
+        const ownership = await claimRecipientOutreach(supabase, lead_id, 'initial')
+        if (!ownership.allowed) {
+          const skip = { lead_id, business_name: lead.business_name, reason: ownership.reason === 'email_already_contacted' ? 'Email already contacted through another lead' : `Recipient suppressed: ${ownership.reason ?? 'data quality'}` }
+          skipped.push(skip)
+          outcomes.push({ ...skip, status: 'skipped' })
+          await supabase.from('emails').update({ status: 'failed' }).eq('lead_id', lead_id).eq('type', 'initial_pitch').eq('status', 'pending_send')
           continue
         }
 

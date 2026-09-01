@@ -19,6 +19,7 @@ import type { FollowUpType } from '@/lib/followup-eligibility'
 import { routeInitialEmail } from '@/lib/initial-email-router'
 import type { InitialEmailMode } from '@/lib/settingsDefaults'
 import { saveInitialEmailModeSnapshot } from '@/lib/initial-email-mode-snapshot'
+import { claimRecipientOutreach, classifyEmailQuality } from '@/lib/data-quality'
 
 export type InitialEmailCreationPolicy =
   | { mode: InitialEmailMode; action: 'generate_now' }
@@ -58,7 +59,8 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
   } = input
 
   const normalizedEmail = normalizeEmail(email)
-  if (!normalizedEmail) {
+  const emailQuality = classifyEmailQuality(email)
+  if (!normalizedEmail || emailQuality.issueType === 'invalid_email') {
     return { ok: false, status: 400, error: 'Invalid email address' }
   }
 
@@ -70,18 +72,10 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
     .limit(1)
     .maybeSingle()
 
-  if (emailDupe) {
-    return {
-      ok: false,
-      status: 409,
-      type: 'email_duplicate',
-      error: 'Lead already exists',
-      existing: { id: emailDupe.id, business_name: emailDupe.business_name },
-    }
-  }
-
   // Root domain duplicate check (warning — skipped if force = true)
-  if (!force) {
+  // Do not reject an exact recipient match. Different businesses can share an
+  // agency or booking inbox; recipient ownership prevents competing outreach.
+  if (!force && !emailDupe) {
     const rootDomain = extractRootDomainFromEmail(email)
     if (rootDomain && !PERSONAL_EMAIL_PROVIDER_DOMAINS.has(rootDomain)) {
       const { data: domainDupe } = await supabase
@@ -114,7 +108,7 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
     .from('leads')
     .insert({
       business_name,
-      email,
+      email: normalizedEmail,
       website:       website || null,
       suburb:        suburb || null,
       city,
@@ -133,6 +127,26 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
 
   if (leadErr || !lead) {
     return { ok: false, status: 500, error: leadErr?.message ?? 'Insert failed' }
+  }
+
+  // Keep junk addresses for audit/cleanup, but never prepare them for email
+  // outreach. The database trigger attached the deterministic quality flag.
+  if (emailQuality.issueType === 'placeholder_email' || emailQuality.issueType === 'technical_email') {
+    return { ok: true, status: 201, lead: lead as Record<string, unknown> }
+  }
+
+  if (current_stage !== 'new' && stage_completed_date) {
+    const ownership = await claimRecipientOutreach(supabase, lead.id, 'initial')
+    if (!ownership.allowed) {
+      return {
+        ok: true,
+        status: 201,
+        lead: lead as Record<string, unknown>,
+        generationError: ownership.reason === 'email_already_contacted'
+          ? 'Stage history not imported because this email already has an outreach owner.'
+          : `Stage history not imported: ${ownership.reason ?? 'recipient suppressed'}.`,
+      }
+    }
   }
 
   // Staged import: the lead has already progressed past "new" outside this

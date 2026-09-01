@@ -1,3 +1,5 @@
+import { normalizeEmail } from '@/lib/data-quality'
+
 export const TERMINAL_DELIVERY_STATUSES = ['bounced', 'failed', 'suppressed'] as const
 export type TerminalDeliveryStatus = (typeof TERMINAL_DELIVERY_STATUSES)[number]
 
@@ -16,8 +18,7 @@ export function isTerminalDeliveryStatus(status: string | null | undefined): sta
 export function normalizeDeliveryEmail(value: string | null | undefined): string | null {
   if (!value) return null
   const angleAddress = value.match(/<([^<>]+)>/)?.[1]
-  const normalized = (angleAddress ?? value).trim().toLowerCase()
-  return normalized || null
+  return normalizeEmail(angleAddress ?? value)
 }
 
 export function isDeliverySuppressedForAddress(

@@ -2149,7 +2149,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                 continue
               }
 
-              const dedupeDecision = checkLeadDedupe(foundEmail, dedupeIndex)
+              const dedupeDecision = checkLeadDedupe(foundEmail, dedupeIndex, undefined, name)
               if (dedupeDecision.duplicate) {
                 const matchType = dedupeDecision.reason === 'DUPLICATE_EMAIL_SKIPPED'
                   ? 'emailExactMatch'
@@ -2206,7 +2206,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                 city:                 city,
                 state:                state,
                 phone:                result.phone  || null,
-                email:                foundEmail,
+                email:                dedupeDecision.email,
                 website:              normalizedWebsite,
                 address:              result.address || null,
                 google_rating:        result.rating  || null,
