@@ -19,7 +19,6 @@ export const EMAIL_REPORT_PUBLIC_DOMAINS = new Set([
   'protonmail.com',
 ])
 
-const LEAD_QUERY_BATCH_SIZE = 40
 const LEAD_QUERY_PAGE_SIZE = 1_000
 
 export type EmailReportDirection = 'received' | 'sent'
@@ -79,8 +78,14 @@ interface Activity {
   messageId: string
 }
 
+export function normalizeEmailReportDomain(value: string | null | undefined): string | null {
+  if (!value) return null
+  const domain = value.trim().toLocaleLowerCase('en-AU')
+  return domain && !domain.includes('@') && !/\s/.test(domain) ? domain : null
+}
+
 function emailDomain(email: string): string {
-  return email.slice(email.lastIndexOf('@') + 1)
+  return normalizeEmailReportDomain(email.slice(email.lastIndexOf('@') + 1)) ?? ''
 }
 
 export function emailReportGroupKey(email: string): string {
@@ -261,33 +266,50 @@ export function buildEmailReportActivityRows(
   })
 }
 
-function escapePostgrestLikeLiteral(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/[%_]/g, '\\$&').replace(/"/g, '\\"')
+export function emailReportBusinessDomain(addresses: string[]): string | null {
+  const domains = new Set(
+    addresses
+      .map(normalizeEmailReportAddress)
+      .filter((email): email is string => !!email)
+      .map(emailDomain)
+      .filter(Boolean),
+  )
+  if (domains.size !== 1) return null
+  const domain = [...domains][0]
+  return EMAIL_REPORT_PUBLIC_DOMAINS.has(domain) ? null : domain
 }
 
 export async function fetchEmailReportLeads(
   supabase: SupabaseClient,
-  addresses: string[],
+  activityRows: EmailReportRow[],
 ): Promise<EmailReportLead[]> {
-  const uniqueAddresses = [...new Set(addresses.map(normalizeEmailReportAddress).filter((item): item is string => !!item))]
+  const uniqueAddresses = [...new Set(
+    activityRows
+      .flatMap((row) => row.email_addresses?.length ? row.email_addresses : [row.email])
+      .map(normalizeEmailReportAddress)
+      .filter((item): item is string => !!item),
+  )]
+  const uniqueDomains = [...new Set(
+    activityRows
+      .map((row) => emailReportBusinessDomain(row.email_addresses?.length ? row.email_addresses : [row.email]))
+      .filter((domain): domain is string => !!domain),
+  )]
+  if (uniqueAddresses.length === 0) return []
+
   const leads: EmailReportLead[] = []
 
-  for (let batchStart = 0; batchStart < uniqueAddresses.length; batchStart += LEAD_QUERY_BATCH_SIZE) {
-    const batch = uniqueAddresses.slice(batchStart, batchStart + LEAD_QUERY_BATCH_SIZE)
-    const filter = batch.map((email) => `email.ilike."${escapePostgrestLikeLiteral(email)}"`).join(',')
+  for (let pageStart = 0; ; pageStart += LEAD_QUERY_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .rpc('get_email_report_leads', {
+        p_addresses: uniqueAddresses,
+        p_domains: uniqueDomains,
+      })
+      .range(pageStart, pageStart + LEAD_QUERY_PAGE_SIZE - 1)
+    if (error) throw new Error(`Failed to match ReachAgent leads: ${error.message}`)
 
-    for (let pageStart = 0; ; pageStart += LEAD_QUERY_PAGE_SIZE) {
-      const { data, error } = await supabase
-        .from('leads')
-        .select('id, business_name, email, status')
-        .or(filter)
-        .range(pageStart, pageStart + LEAD_QUERY_PAGE_SIZE - 1)
-      if (error) throw new Error(`Failed to match ReachAgent leads: ${error.message}`)
-
-      const page = (data ?? []) as EmailReportLead[]
-      leads.push(...page)
-      if (page.length < LEAD_QUERY_PAGE_SIZE) break
-    }
+    const page = (data ?? []) as EmailReportLead[]
+    leads.push(...page)
+    if (page.length < LEAD_QUERY_PAGE_SIZE) break
   }
 
   return leads
@@ -299,18 +321,34 @@ export function completeEmailReport(
   leads: EmailReportLead[],
 ): EmailReportResponse {
   const leadsByEmail = new Map<string, EmailReportLead[]>()
+  const leadsByDomain = new Map<string, EmailReportLead[]>()
   for (const lead of leads) {
     const email = normalizeEmailReportAddress(lead.email)
     if (!email) continue
-    const matches = leadsByEmail.get(email) ?? []
-    matches.push(lead)
-    leadsByEmail.set(email, matches)
+    const emailMatches = leadsByEmail.get(email) ?? []
+    emailMatches.push(lead)
+    leadsByEmail.set(email, emailMatches)
+
+    const domain = emailDomain(email)
+    const domainMatches = leadsByDomain.get(domain) ?? []
+    domainMatches.push(lead)
+    leadsByDomain.set(domain, domainMatches)
   }
 
   const rows = activityRows.map((row) => {
     const associatedAddresses = row.email_addresses?.length ? row.email_addresses : [row.email]
-    const matches = associatedAddresses.flatMap((email) => leadsByEmail.get(email) ?? [])
-    const uniqueMatches = [...new Map(matches.map((lead) => [lead.id, lead])).values()]
+    const exactMatches = associatedAddresses
+      .map(normalizeEmailReportAddress)
+      .filter((email): email is string => !!email)
+      .flatMap((email) => leadsByEmail.get(email) ?? [])
+    const uniqueExactMatches = [...new Map(exactMatches.map((lead) => [lead.id, lead])).values()]
+    const businessDomain = emailReportBusinessDomain(associatedAddresses)
+    const domainMatches = uniqueExactMatches.length === 0 && businessDomain
+      ? leadsByDomain.get(businessDomain) ?? []
+      : []
+    const uniqueMatches = uniqueExactMatches.length > 0
+      ? uniqueExactMatches
+      : [...new Map(domainMatches.map((lead) => [lead.id, lead])).values()]
     if (uniqueMatches.length === 0) return { ...row, email_addresses: associatedAddresses }
     if (uniqueMatches.length > 1) {
       return {

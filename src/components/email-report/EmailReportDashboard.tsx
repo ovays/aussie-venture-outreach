@@ -19,6 +19,7 @@ import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/Badge'
+import { EmailAddressList } from '@/components/email-report/EmailAddressList'
 
 const PRESETS: Array<{ value: EmailReportPreset; label: string }> = [
   { value: 'today', label: 'Today' },
@@ -260,7 +261,7 @@ function MessageRow({ message, tone = 'muted' }: { message: string; tone?: 'mute
 function ReportRow({ row, openLead }: { row: EmailReportRow; openLead: (leadId: string) => void }) {
   const business = row.business_name || '—'
   const addresses = row.email_addresses?.length ? row.email_addresses : [row.email]
-  const additionalAddressCount = addresses.length - 1
+  const [addressesExpanded, setAddressesExpanded] = useState(false)
   return (
     <tr className="border-b last:border-b-0" style={{ borderColor: '#1e2130' }}>
       <td className="max-w-52 px-4 py-3 font-medium text-white">
@@ -269,12 +270,11 @@ function ReportRow({ row, openLead }: { row: EmailReportRow; openLead: (leadId: 
           : business}
       </td>
       <td className="max-w-60 px-4 py-3">
-        <span className="block truncate" title={addresses.join('\n')} style={{ color: '#cbd5e1' }}>{addresses[0]}</span>
-        {additionalAddressCount > 0 && (
-          <span className="block text-xs" title={addresses.slice(1).join('\n')} style={{ color: '#64748b' }}>
-            +{additionalAddressCount} more
-          </span>
-        )}
+        <EmailAddressList
+          addresses={addresses}
+          expanded={addressesExpanded}
+          onToggle={() => setAddressesExpanded((current) => !current)}
+        />
       </td>
       <td className="px-4 py-3">
         {row.reachagent_status === 'not_found' || row.reachagent_status === 'ambiguous'

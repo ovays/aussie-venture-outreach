@@ -6,8 +6,11 @@ import {
   completeEmailReport,
   EMAIL_REPORT_MAX_DAYS,
   EMAIL_REPORT_PUBLIC_DOMAINS,
+  emailReportBusinessDomain,
   EmailReportValidationError,
+  fetchEmailReportLeads,
   normalizeEmailReportAddress,
+  normalizeEmailReportDomain,
   parseEmailReportDateRange,
   type EmailReportLead,
 } from '../src/lib/email-report'
@@ -129,6 +132,65 @@ assert.equal(matchedReport.rows[0].business_name, 'ABC Company')
 assert.equal(matchedReport.rows[0].reachagent_status, 'dead', 'current ReachAgent status is returned exactly')
 assert.deepEqual(matchedReport.summary.reachagent_status_counts, { dead: 1 }, 'status totals are dynamic')
 
+const vrQuestRow = rowFor(
+  [received(10, '2026-09-01T05:00:00.000Z', 'admin@vrquest.com.au')],
+  [],
+)
+const vrQuestReport = completeEmailReport(range, [vrQuestRow], [{
+  id: 'lead-vr-quest',
+  business_name: 'VR Quest',
+  email: 'Enquiry@VRQUEST.COM.AU',
+  status: 'replied',
+}])
+assert.equal(vrQuestReport.rows[0].lead_id, 'lead-vr-quest', 'a unique business-domain lead resolves a different mailbox')
+assert.equal(vrQuestReport.rows[0].business_name, 'VR Quest', 'domain fallback uses the ReachAgent business name')
+assert.equal(vrQuestReport.rows[0].reachagent_status, 'replied', 'domain fallback uses the current ReachAgent status')
+assert.equal(vrQuestReport.rows[0].email, 'admin@vrquest.com.au', 'the actual communication email remains primary')
+assert.deepEqual(vrQuestReport.rows[0].email_addresses, ['admin@vrquest.com.au'])
+
+const exactPrecedenceReport = completeEmailReport(range, [vrQuestRow], [
+  { id: 'lead-exact', business_name: 'Exact VR Quest', email: 'admin@vrquest.com.au', status: 'contacted' },
+  { id: 'lead-domain', business_name: 'Other VR Quest', email: 'enquiry@vrquest.com.au', status: 'replied' },
+])
+assert.equal(exactPrecedenceReport.rows[0].lead_id, 'lead-exact', 'one exact email match wins over conflicting domain leads')
+assert.equal(exactPrecedenceReport.rows[0].reachagent_status, 'contacted')
+
+const sameDomainLeadReport = completeEmailReport(range, [vrQuestRow], [
+  { id: 'lead-vr-quest', business_name: 'VR Quest', email: 'enquiry@vrquest.com.au', status: 'replied' },
+  { id: 'lead-vr-quest', business_name: 'VR Quest', email: 'bookings@vrquest.com.au', status: 'replied' },
+])
+assert.equal(sameDomainLeadReport.rows[0].lead_id, 'lead-vr-quest', 'multiple domain addresses for the same lead ID remain safe')
+
+const ambiguousDomainFallback = completeEmailReport(range, [vrQuestRow], [
+  { id: 'lead-vr-one', business_name: 'VR One', email: 'enquiry@vrquest.com.au', status: 'contacted' },
+  { id: 'lead-vr-two', business_name: 'VR Two', email: 'bookings@vrquest.com.au', status: 'replied' },
+])
+assert.equal(ambiguousDomainFallback.rows[0].reachagent_status, 'ambiguous', 'distinct domain-only leads are ambiguous')
+assert.equal(ambiguousDomainFallback.rows[0].lead_id, null)
+assert.equal(ambiguousDomainFallback.rows[0].matching_lead_count, 2)
+
+for (const domain of EMAIL_REPORT_PUBLIC_DOMAINS) {
+  const publicRow = rowFor(
+    [received(11, '2026-09-01T06:00:00.000Z', `communication@${domain}`)],
+    [],
+  )
+  const publicFallbackReport = completeEmailReport(range, [publicRow], [{
+    id: `lead-${domain}`,
+    business_name: 'Unrelated public mailbox',
+    email: `different@${domain}`,
+    status: 'replied',
+  }])
+  assert.equal(publicFallbackReport.rows[0].reachagent_status, 'not_found', `${domain} never uses domain fallback`)
+}
+
+assert.equal(normalizeEmailReportDomain('  VRQUEST.COM.AU  '), 'vrquest.com.au', 'domains normalize case and whitespace')
+assert.equal(emailReportBusinessDomain(['ADMIN@VRQUEST.COM.AU']), 'vrquest.com.au')
+const substringDomainReport = completeEmailReport(range, [vrQuestRow], [
+  { id: 'lead-prefix', business_name: 'Prefix', email: 'hello@fakevrquest.com.au', status: 'replied' },
+  { id: 'lead-suffix', business_name: 'Suffix', email: 'hello@vrquest.com.au.example.com', status: 'replied' },
+])
+assert.equal(substringDomainReport.rows[0].reachagent_status, 'not_found', 'domain comparison is exact rather than substring based')
+
 const groupedLeadReport = completeEmailReport(range, [businessDomainRow], [
   { id: 'lead-gamebox', business_name: 'Immersive Gamebox Sydney', email: 'marketing@immersivegamebox.com', status: 'contacted' },
 ])
@@ -194,13 +256,35 @@ async function testPaginationAndReadOnlyContract(): Promise<void> {
 
   const reportSource = readFileSync(resolve('src/lib/email-report.ts'), 'utf8')
   const routeSource = readFileSync(resolve('src/app/api/email-report/route.ts'), 'utf8')
+  const migrationSource = readFileSync(resolve('supabase/migrations/047_email_report_lead_domain_lookup.sql'), 'utf8')
   assert.doesNotMatch(
     `${reportSource}\n${routeSource}`,
     /\.\s*(?:insert|update|upsert|delete)\s*\(/,
     'email report logic contains no Supabase write methods',
   )
-  assert.match(reportSource, /\.from\('leads'\)[\s\S]*\.select\(/, 'lead matching uses a single batched read path')
+  assert.match(reportSource, /\.rpc\('get_email_report_leads'/, 'lead matching uses the report-scoped batched RPC')
+  assert.match(migrationSource, /leads_email_report_address_idx/, 'exact email lookup has an expression index')
+  assert.match(migrationSource, /leads_email_report_domain_idx/, 'domain lookup has an expression index')
+  assert.match(migrationSource, /= ANY \(p_domains\)/, 'eligible domains are compared as a batch')
   assert.doesNotMatch(reportSource, /from\('emails'\)|from\('activity_log'\)/, 'report does not touch outreach or reply records')
+
+  const rpcCalls: Array<{ name: string; args: { p_addresses: string[]; p_domains: string[] } }> = []
+  const fakeSupabase = {
+    rpc(name: string, args: { p_addresses: string[]; p_domains: string[] }) {
+      rpcCalls.push({ name, args })
+      return {
+        async range() {
+          return { data: [], error: null }
+        },
+      }
+    },
+  }
+  await fetchEmailReportLeads(fakeSupabase as never, [vrQuestRow, ...publicDomainRows])
+  assert.equal(rpcCalls.length, 1, 'all report rows use one lookup request rather than N+1 requests')
+  assert.equal(rpcCalls[0].name, 'get_email_report_leads')
+  assert.deepEqual(rpcCalls[0].args.p_domains, ['vrquest.com.au'], 'only eligible unique business domains are sent')
+  assert.ok(rpcCalls[0].args.p_addresses.includes('admin@vrquest.com.au'), 'exact addresses are included in the same lookup')
+  assert.ok(rpcCalls[0].args.p_addresses.includes('business-one@gmail.com'), 'public addresses remain eligible for exact matching')
 
   console.log('Email report tests passed')
 }

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { createElement, isValidElement, type ReactElement, type ReactNode } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import type { EmailReportRow } from '../src/lib/email-report'
+import { EmailAddressList } from '../src/components/email-report/EmailAddressList'
 import {
   EMAIL_REPORT_DISPLAY_TIME_ZONE,
   emailStatusLabel,
@@ -83,6 +86,53 @@ const rows: EmailReportRow[] = [
     last_activity_at: '2026-08-04T00:00:00.000Z',
   },
 ]
+
+function renderEmailAddresses(addresses: string[], expanded = false, onToggle = () => {}) {
+  return renderToStaticMarkup(createElement(EmailAddressList, { addresses, expanded, onToggle }))
+}
+
+function findButton(node: ReactNode): ReactElement<{ onClick: () => void }> | null {
+  if (!isValidElement(node)) return null
+  if (node.type === 'button') return node as ReactElement<{ onClick: () => void }>
+  const children = (node.props as { children?: ReactNode }).children
+  for (const child of Array.isArray(children) ? children : [children]) {
+    const button = findButton(child)
+    if (button) return button
+  }
+  return null
+}
+
+const oneAddress = ['hello@alpha.example']
+const twoAddresses = ['hello@alpha.example', 'sales@alpha.example']
+const threeAddresses = ['hello@alpha.example', 'sales@alpha.example', 'team@alpha.example']
+
+assert.doesNotMatch(renderEmailAddresses(oneAddress), /more/, 'one-address row shows no +N more control')
+assert.match(renderEmailAddresses(twoAddresses), /\+1 more/, 'two-address row shows +1 more')
+assert.match(renderEmailAddresses(threeAddresses), /\+2 more/, 'three-address row shows +2 more')
+
+let expanded = false
+const toggle = () => { expanded = !expanded }
+const collapsedElement = EmailAddressList({ addresses: threeAddresses, expanded, onToggle: toggle })
+const expandButton = findButton(collapsedElement)
+assert.ok(expandButton, 'multi-address rows render an interactive control')
+expandButton.props.onClick()
+assert.equal(expanded, true, 'clicking +N more expands the address list')
+
+const expandedMarkup = renderEmailAddresses(threeAddresses, expanded, toggle)
+assert.match(expandedMarkup, /Show less/, 'expanded rows provide a collapse control')
+const expandedText = expandedMarkup.replace(/<[^>]+>/g, ' ')
+for (const address of threeAddresses) {
+  assert.equal(expandedText.split(address).length - 1, 1, `${address} is visible exactly once when expanded`)
+}
+
+const expandedElement = EmailAddressList({ addresses: threeAddresses, expanded, onToggle: toggle })
+const collapseButton = findButton(expandedElement)
+assert.ok(collapseButton, 'expanded rows retain the interactive control')
+collapseButton.props.onClick()
+assert.equal(expanded, false, 'clicking again collapses the address list')
+const collapsedMarkup = renderEmailAddresses(threeAddresses, expanded, toggle)
+assert.match(collapsedMarkup, /hello@alpha\.example/, 'the first address remains visible when collapsed')
+assert.doesNotMatch(collapsedMarkup, /sales@alpha\.example|team@alpha\.example/, 'secondary addresses are hidden when collapsed')
 
 assert.deepEqual(filterEmailReportRows(rows, 'alpha', '', '').map((row) => row.email), ['hello@alpha.example'], 'searches by business')
 assert.deepEqual(filterEmailReportRows(rows, 'sales@alpha.example', '', '').map((row) => row.email), ['hello@alpha.example'], 'searches secondary associated emails')
