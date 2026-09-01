@@ -3,6 +3,7 @@ import 'server-only'
 import type { NormalizedInboundMessage } from '../../agents/tracker'
 import { normalizeInboundEmailAddress, parseMessageIds } from '../../agents/tracker'
 import type { HostingerWebhookLocator } from '@/lib/hostinger-webhook'
+import { collectHostingerPages } from '@/lib/hostinger-pagination'
 
 type JsonObject = Record<string, unknown>
 
@@ -11,15 +12,47 @@ interface HostingerAddress {
   address?: string
 }
 
-interface HostingerMessageMetadata {
+export interface HostingerMessageMetadata {
   uid: number
   path: string
   date?: string
   subject?: string | null
   from?: HostingerAddress | null
   to?: HostingerAddress[]
+  cc?: HostingerAddress[]
+  bcc?: HostingerAddress[]
   messageId?: string | null
   inReplyTo?: string | null
+  references?: string | string[] | null
+  headers?: Record<string, string | string[] | null> | null
+  autoSubmitted?: string | null
+  precedence?: string | null
+  xAutoreply?: string | null
+  xAutorespond?: string | null
+  flags?: string[]
+  unseen?: boolean
+}
+
+interface HostingerFolder {
+  path: string
+  specialUse?: string | null
+}
+
+interface HostingerPagination {
+  page: number
+  totalPages: number
+}
+
+export interface HostingerReportMailboxMessages {
+  mailboxAddress: string
+  sentFolder: string
+  received: HostingerMessageMetadata[]
+  sent: HostingerMessageMetadata[]
+}
+
+export interface HostingerReportSearchRange {
+  startInclusive: Date
+  endExclusive: Date
 }
 
 interface HostingerMailConfig {
@@ -28,8 +61,6 @@ interface HostingerMailConfig {
   mailboxAddress: string
   baseUrl: string
 }
-
-const MAX_HEADER_BYTES = 256 * 1024
 
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim()
@@ -54,12 +85,15 @@ async function hostingerFetchJson(
   url: string,
   config: HostingerMailConfig,
   fetchImpl: typeof fetch,
+  init: RequestInit = {},
 ): Promise<unknown> {
   const response = await fetchImpl(url, {
-    method: 'GET',
+    ...init,
+    method: init.method ?? 'GET',
     headers: {
       Authorization: `Bearer ${config.token}`,
       Accept: 'application/json',
+      ...init.headers,
     },
     cache: 'no-store',
   })
@@ -76,6 +110,112 @@ function isMessageMetadata(value: unknown): value is HostingerMessageMetadata {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const row = value as JsonObject
   return typeof row.uid === 'number' && typeof row.path === 'string'
+}
+
+function isFolder(value: unknown): value is HostingerFolder {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const row = value as JsonObject
+  return typeof row.path === 'string'
+    && (row.specialUse === undefined || row.specialUse === null || typeof row.specialUse === 'string')
+}
+
+function responsePagination(value: unknown): HostingerPagination | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const pagination = (value as JsonObject).pagination
+  if (!pagination || typeof pagination !== 'object' || Array.isArray(pagination)) return null
+  const row = pagination as JsonObject
+  return typeof row.page === 'number' && Number.isInteger(row.page) && row.page > 0
+    && typeof row.totalPages === 'number' && Number.isInteger(row.totalPages) && row.totalPages >= 0
+    ? { page: row.page, totalPages: row.totalPages }
+    : null
+}
+
+async function listAllFolders(
+  config: HostingerMailConfig,
+  fetchImpl: typeof fetch,
+): Promise<HostingerFolder[]> {
+  return collectHostingerPages(async (page) => {
+    const url = `${config.baseUrl}/api/v1/mailboxes/${encodeURIComponent(config.mailboxId)}/folders?page=${page}&perPage=100`
+    const payload = await hostingerFetchJson(url, config, fetchImpl)
+    const data = responseData(payload)
+    if (!Array.isArray(data) || !data.every(isFolder)) {
+      throw new Error('Hostinger Mail API returned invalid folder metadata')
+    }
+    const pagination = responsePagination(payload)
+    return { items: data, totalPages: pagination?.totalPages ?? null }
+  })
+}
+
+export function detectHostingerSentFolder(folders: HostingerFolder[]): string {
+  const specialUseMatch = folders.find((folder) => folder.specialUse?.toLowerCase() === '\\sent')
+  if (specialUseMatch) return specialUseMatch.path
+
+  const canonicalMatch = folders.find((folder) => folder.path.toLowerCase() === 'inbox.sent')
+  if (canonicalMatch) return canonicalMatch.path
+
+  throw new Error('Hostinger Sent folder could not be identified')
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 86_400_000)
+}
+
+async function searchAllMessages(
+  folder: string,
+  range: HostingerReportSearchRange,
+  config: HostingerMailConfig,
+  fetchImpl: typeof fetch,
+): Promise<HostingerMessageMetadata[]> {
+  // Hostinger's search filter accepts dates, not instants. Use a deliberately
+  // broad UTC-date window, then enforce exact Sydney boundaries from metadata.
+  const since = range.startInclusive.toISOString().slice(0, 10)
+  const before = addUtcDays(range.endExclusive, 1).toISOString().slice(0, 10)
+  const messages = new Map<string, HostingerMessageMetadata>()
+  const matching = await collectHostingerPages(async (page) => {
+    const url = `${hostingerUrl(config, folder, '/search')}?page=${page}&perPage=100&sort=uid`
+    const payload = await hostingerFetchJson(url, config, fetchImpl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ since, before }),
+    })
+    const data = responseData(payload)
+    if (!Array.isArray(data) || !data.every(isMessageMetadata)) {
+      throw new Error('Hostinger Mail API returned invalid message metadata')
+    }
+    const pagination = responsePagination(payload)
+    return { items: data, totalPages: pagination?.totalPages ?? null }
+  })
+
+  for (const message of matching) {
+    const timestamp = message.date ? Date.parse(message.date) : Number.NaN
+    if (Number.isFinite(timestamp)
+      && timestamp >= range.startInclusive.getTime()
+      && timestamp < range.endExclusive.getTime()) {
+      messages.set(`${message.path}:${message.uid}`, message)
+    }
+  }
+
+  return [...messages.values()]
+}
+
+export async function fetchHostingerReportMessages(
+  range: HostingerReportSearchRange,
+  fetchImpl: typeof fetch = fetch,
+): Promise<HostingerReportMailboxMessages> {
+  const config = configFromEnv()
+  const folders = await listAllFolders(config, fetchImpl)
+  const sentFolder = detectHostingerSentFolder(folders)
+  const [received, sent] = await Promise.all([
+    searchAllMessages('INBOX', range, config, fetchImpl),
+    searchAllMessages(sentFolder, range, config, fetchImpl),
+  ])
+
+  return {
+    mailboxAddress: config.mailboxAddress,
+    sentFolder,
+    received,
+    sent,
+  }
 }
 
 async function listRecentMessages(
@@ -139,77 +279,32 @@ async function getMessageMetadata(
   return match
 }
 
-function headerBoundary(value: string): number {
-  const crlf = value.indexOf('\r\n\r\n')
-  const lf = value.indexOf('\n\n')
-  if (crlf < 0) return lf < 0 ? -1 : lf + 2
-  if (lf < 0) return crlf + 4
-  return Math.min(crlf + 4, lf + 2)
-}
-
-async function readHeaderSection(response: Response): Promise<string> {
-  if (!response.body) throw new Error('Hostinger message source response had no body stream')
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder('utf-8')
-  let headers = ''
-  let bytesRead = 0
-
-  try {
-    while (bytesRead < MAX_HEADER_BYTES) {
-      const { done, value } = await reader.read()
-      if (done) break
-      bytesRead += value.byteLength
-      headers += decoder.decode(value, { stream: true })
-      const boundary = headerBoundary(headers)
-      if (boundary >= 0) return headers.slice(0, boundary)
-    }
-  } finally {
-    await reader.cancel().catch(() => undefined)
-  }
-
-  throw new Error('Hostinger message headers were missing or exceeded the safety limit')
-}
-
-function parseRfcHeaders(source: string): Record<string, string> {
-  const result: Record<string, string> = {}
-  let currentName: string | null = null
-
-  for (const line of source.replace(/\r\n/g, '\n').split('\n')) {
-    if (!line) break
-    if (/^[ \t]/.test(line) && currentName) {
-      result[currentName] = `${result[currentName]} ${line.trim()}`
-      continue
-    }
-
-    const separator = line.indexOf(':')
-    if (separator <= 0) continue
-    const name = line.slice(0, separator).trim().toLowerCase()
-    const value = line.slice(separator + 1).trim()
-    result[name] = result[name] ? `${result[name]}, ${value}` : value
-    currentName = name
-  }
-
-  return result
-}
-
-async function getMessageHeaders(
+function metadataHeaders(
   message: HostingerMessageMetadata,
-  config: HostingerMailConfig,
-  fetchImpl: typeof fetch,
-): Promise<Record<string, string>> {
-  const response = await fetchImpl(
-    hostingerUrl(config, message.path, `/${message.uid}/source`),
-    {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${config.token}`,
-        Accept: 'message/rfc822',
-      },
-      cache: 'no-store',
-    },
-  )
-  if (!response.ok) throw new Error(`Hostinger message header request failed with status ${response.status}`)
-  return parseRfcHeaders(await readHeaderSection(response))
+  locator: HostingerWebhookLocator,
+): Record<string, string> {
+  const headers: Record<string, string> = { ...locator.headers }
+  for (const [name, value] of Object.entries(message.headers ?? {})) {
+    if (typeof value === 'string' && value.trim()) headers[name.toLowerCase()] = value.trim()
+    if (Array.isArray(value)) {
+      const values = value.filter((item): item is string => typeof item === 'string' && !!item.trim())
+      if (values.length) headers[name.toLowerCase()] = values.join(', ')
+    }
+  }
+
+  const known: Array<[string, string | null | undefined]> = [
+    ['message-id', message.messageId],
+    ['in-reply-to', message.inReplyTo],
+    ['references', Array.isArray(message.references) ? message.references.join(' ') : message.references],
+    ['auto-submitted', message.autoSubmitted],
+    ['precedence', message.precedence],
+    ['x-autoreply', message.xAutoreply],
+    ['x-autorespond', message.xAutorespond],
+  ]
+  for (const [name, value] of known) {
+    if (value?.trim() && !headers[name]) headers[name] = value.trim()
+  }
+  return headers
 }
 
 export async function fetchHostingerInboundMessage(
@@ -218,7 +313,9 @@ export async function fetchHostingerInboundMessage(
 ): Promise<NormalizedInboundMessage> {
   const config = configFromEnv()
   const message = await getMessageMetadata(locator, config, fetchImpl)
-  const headers = await getMessageHeaders(message, config, fetchImpl)
+  // The metadata endpoint does not return message bodies and does not change
+  // flags. Never call /text (documented to set \Seen) or /source here.
+  const headers = metadataHeaders(message, locator)
   const from = message.from?.address ?? locator.from
   if (!from) throw new Error('Hostinger message metadata did not include a sender')
 
@@ -232,10 +329,17 @@ export async function fetchHostingerInboundMessage(
     to: message.to?.map((recipient) => recipient.address).filter((item): item is string => !!item) ?? [],
     subject: message.subject ?? locator.subject,
     messageId: message.messageId ?? headers['message-id'],
-    inReplyTo: parseMessageIds([message.inReplyTo ?? '', headers['in-reply-to'] ?? '']),
-    references: parseMessageIds(headers.references),
+    inReplyTo: parseMessageIds([
+      ...(locator.inReplyTo ?? []),
+      message.inReplyTo ?? '',
+      headers['in-reply-to'] ?? '',
+    ]),
+    references: parseMessageIds([
+      ...(locator.references ?? []),
+      ...(Array.isArray(message.references) ? message.references : [message.references ?? '']),
+      headers.references ?? '',
+    ]),
     headers,
     receivedAt: message.date ?? locator.receivedAt,
   }
 }
-

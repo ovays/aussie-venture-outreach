@@ -1,62 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { processInboundReply } from '../../../../../agents/tracker'
-import { fetchHostingerInboundMessage } from '@/lib/hostinger-mail'
-import { parseHostingerWebhookPayload, verifyHostingerBearerSecret } from '@/lib/hostinger-webhook'
+import { auth, tasks } from '@trigger.dev/sdk/v3'
+import type { hostingerInboundTask } from '../../../../../trigger/hostinger-inbound'
+import { acceptHostingerInboundEvent } from '@/lib/hostinger-inbound-queue'
+import { createHostingerInboundReceiptStore } from '@/lib/hostinger-inbound-receipts'
+import { handleHostingerWebhookRequest } from '@/lib/hostinger-webhook-handler'
 import { logger } from '@/lib/logger'
 
 export const runtime = 'nodejs'
 
-function sameMailbox(value: string | undefined, expected: string | undefined): boolean {
-  return !value || !expected || value.trim().toLowerCase() === expected.trim().toLowerCase()
-}
-
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  if (!verifyHostingerBearerSecret(request.headers.get('authorization'), process.env.HOSTINGER_WEBHOOK_SECRET)) {
-    logger.warn('webhook', 'Hostinger webhook authentication failed')
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  let locator
-  try {
-    locator = parseHostingerWebhookPayload(await request.json())
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  }
-
-  logger.info('webhook', 'Hostinger webhook received', {
-    event_type: locator.eventType,
-    mailbox_id: locator.mailboxId ?? null,
-    folder: locator.folder,
-    uid: locator.uid ?? null,
-    provider_message_id: locator.providerMessageId ?? null,
+  const store = createHostingerInboundReceiptStore()
+  const response = await handleHostingerWebhookRequest(request, {
+    webhookSecret: process.env.HOSTINGER_WEBHOOK_SECRET,
+    mailboxId: process.env.HOSTINGER_MAILBOX_ID,
+    mailboxAddress: process.env.HOSTINGER_MAILBOX_ADDRESS,
+    accept: (locator) => acceptHostingerInboundEvent(locator, store, async (receiptId, idempotencyKey) => {
+      const secretKey = process.env.TRIGGER_SECRET_KEY_PROD ?? process.env.TRIGGER_SECRET_KEY ?? ''
+      return auth.withAuth(
+        { accessToken: secretKey },
+        () => tasks.trigger<typeof hostingerInboundTask>(
+          'hostinger-inbound-message',
+          { receiptId },
+          { idempotencyKey, idempotencyKeyTTL: '5m' },
+        ),
+      )
+    }),
+    log: {
+      info: (message, metadata) => logger.info('webhook', message, metadata),
+      warn: (message, metadata) => logger.warn('webhook', message, metadata),
+      error: (message, metadata) => logger.error('webhook', message, metadata),
+    },
   })
-
-  if (locator.eventType !== 'message.received') {
-    return NextResponse.json({ ok: true, ignored: true })
-  }
-
-  if (!sameMailbox(locator.mailboxId, process.env.HOSTINGER_MAILBOX_ID)
-    || !sameMailbox(locator.mailboxAddress, process.env.HOSTINGER_MAILBOX_ADDRESS)) {
-    logger.warn('webhook', 'Hostinger webhook ignored for an unexpected mailbox', {
-      mailbox_id: locator.mailboxId ?? null,
-      mailbox_address: locator.mailboxAddress ?? null,
-    })
-    return NextResponse.json({ ok: true, ignored: true })
-  }
-
-  try {
-    const message = await fetchHostingerInboundMessage(locator)
-    const result = await processInboundReply(message)
-    return NextResponse.json({ ok: true, outcome: result.outcome })
-  } catch (error) {
-    logger.error('webhook', 'Error handling Hostinger webhook event', {
-      event_type: locator.eventType,
-      mailbox_id: locator.mailboxId ?? process.env.HOSTINGER_MAILBOX_ID ?? null,
-      folder: locator.folder,
-      uid: locator.uid ?? null,
-      provider_message_id: locator.providerMessageId ?? null,
-      error: error instanceof Error ? error.message : String(error),
-    })
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
-  }
+  return new NextResponse(response.body, {
+    status: response.status,
+    headers: response.headers,
+  })
 }

@@ -11,6 +11,9 @@ export interface HostingerWebhookLocator {
   to?: string[]
   subject?: string
   receivedAt?: string
+  inReplyTo?: string[]
+  references?: string[]
+  headers: Record<string, string>
 }
 
 type JsonObject = Record<string, unknown>
@@ -58,6 +61,40 @@ function addresses(value: unknown): string[] | undefined {
   return result.length ? result : undefined
 }
 
+function stringValues(value: unknown): string[] | undefined {
+  const values = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]
+  const strings = values
+    .filter((item): item is string => typeof item === 'string' && !!item.trim())
+    .map((item) => item.trim())
+  return strings.length ? strings : undefined
+}
+
+function webhookHeaders(message: JsonObject): Record<string, string> {
+  const headersObject = asObject(message.headers)
+  const headers: Record<string, string> = {}
+
+  for (const [name, value] of Object.entries(headersObject ?? {})) {
+    const values = stringValues(value)
+    if (values?.length) headers[name.toLowerCase()] = values.join(', ')
+  }
+
+  const knownHeaders: Array<[string, string[]]> = [
+    ['message-id', ['messageId', 'message_id']],
+    ['in-reply-to', ['inReplyTo', 'in_reply_to']],
+    ['references', ['references']],
+    ['auto-submitted', ['autoSubmitted', 'auto_submitted']],
+    ['precedence', ['precedence']],
+    ['x-autoreply', ['xAutoreply', 'x_autoreply']],
+    ['x-autorespond', ['xAutorespond', 'x_autorespond']],
+  ]
+  for (const [headerName, keys] of knownHeaders) {
+    const value = stringAt([message], keys)
+    if (value && !headers[headerName]) headers[headerName] = value
+  }
+
+  return headers
+}
+
 export function parseHostingerWebhookPayload(payload: unknown): HostingerWebhookLocator {
   const root = asObject(payload) ?? {}
   const data = asObject(root.data)
@@ -80,6 +117,7 @@ export function parseHostingerWebhookPayload(payload: unknown): HostingerWebhook
     'provider_message_id',
     'id',
   ])
+  const headers = webhookHeaders(message)
 
   return {
     eventType: stringAt([root], ['event', 'type', 'eventType', 'event_type']) ?? null,
@@ -104,5 +142,15 @@ export function parseHostingerWebhookPayload(payload: unknown): HostingerWebhook
     to: addresses(message.to ?? message.recipient ?? message.recipients),
     subject: stringAt([message], ['subject']),
     receivedAt: stringAt(objects, ['receivedAt', 'received_at', 'timestamp', 'date', 'createdAt', 'created_at']),
+    inReplyTo: stringValues(message.inReplyTo ?? message.in_reply_to ?? headers['in-reply-to']),
+    references: stringValues(message.references ?? headers.references),
+    headers,
   }
+}
+
+export function validateHostingerMessageLocator(locator: HostingerWebhookLocator): string | null {
+  if (!locator.mailboxId) return 'Missing mailbox identifier'
+  if (!locator.folder.trim()) return 'Missing folder identifier'
+  if (!locator.uid && !locator.providerMessageId) return 'Missing message identifier'
+  return null
 }

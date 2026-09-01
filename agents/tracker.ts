@@ -16,6 +16,7 @@ export async function handleEmailReply(
   supabaseOverride?: ReturnType<typeof createServiceClient>,
   matchedEmailId?: string,
   repliedAt?: string,
+  inboundReceiptId?: string,
 ): Promise<void> {
   const supabase = supabaseOverride ?? createServiceClient()
 
@@ -54,12 +55,15 @@ export async function handleEmailReply(
 
   await replyUpdate
 
-  await supabase.from('activity_log').insert({
+  const { error: activityError } = await supabase.from('activity_log').insert({
     event_type: 'reply_received',
     lead_id: leadId,
     description: `Reply received from ${lead.business_name}`,
-    metadata: {},
+    metadata: inboundReceiptId ? { inbound_receipt_id: inboundReceiptId } : {},
   })
+  if (activityError && activityError.code !== '23505') {
+    throw new Error(`Reply activity could not be stored: ${activityError.message}`)
+  }
 
   logger.info('tracker', `Reply received from ${lead.business_name}`, { lead_id: leadId })
 }
@@ -83,6 +87,7 @@ export interface NormalizedInboundMessage {
   references?: string[]
   headers: Record<string, string>
   receivedAt?: string
+  receiptId?: string
 }
 
 export type InboundReplyOutcome =
@@ -232,9 +237,10 @@ async function logUnmatchedInbound(
       folder: message.folder ?? null,
       uid: message.uid ?? null,
       status: outcome,
+      inbound_receipt_id: message.receiptId ?? null,
     },
   })
-  if (error) throw new Error(`Inbound unmatched marker could not be stored: ${error.message}`)
+  if (error && error.code !== '23505') throw new Error(`Inbound unmatched marker could not be stored: ${error.message}`)
 }
 
 export async function processInboundReply(
@@ -297,7 +303,7 @@ export async function processInboundReply(
     return { outcome: 'unmatched' }
   }
 
-  await handleEmailReply(leadId, supabase, matchedEmail?.id, message.receivedAt)
+  await handleEmailReply(leadId, supabase, matchedEmail?.id, message.receivedAt, message.receiptId)
   return { outcome: 'processed', leadId, emailId: matchedEmail?.id }
 }
 
