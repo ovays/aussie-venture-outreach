@@ -43,7 +43,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     const supabase = await createClient()
-    const leads = await fetchEmailReportLeads(supabase, activityRows.map((row) => row.email))
+    const leads = await fetchEmailReportLeads(supabase, activityRows.flatMap((row) => row.email_addresses))
     return NextResponse.json(completeEmailReport(range, activityRows, leads))
   } catch (error) {
     logger.error('email-report', 'Failed to match current ReachAgent leads', {

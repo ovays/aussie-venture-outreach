@@ -1,12 +1,13 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Search } from 'lucide-react'
+import { Download, Search } from 'lucide-react'
 import type { EmailReportResponse, EmailReportRow, EmailReportStatus } from '@/lib/email-report'
 import {
   emailStatusLabel,
   filterEmailReportRows,
   formatSydneyTimestamp,
+  generateEmailReportCsv,
   getEmailReportPresetRange,
   reachAgentStatusLabel,
   type EmailReportPreset,
@@ -112,6 +113,18 @@ export function EmailReportDashboard() {
     setAppliedRange((current) => current.from === next.from && current.to === next.to ? current : next)
   }
 
+  function exportCsv() {
+    const csv = generateEmailReportCsv(filteredRows)
+    const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `email-report-${appliedRange.from}-to-${appliedRange.to}.csv`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="space-y-5" data-testid="email-report-page">
       <Card>
@@ -137,7 +150,7 @@ export function EmailReportDashboard() {
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          { label: 'Unique Contacts', value: report?.summary.unique_contacts ?? 0, color: '#38bdf8' },
+          { label: 'Unique Businesses', value: report?.summary.unique_contacts ?? 0, color: '#38bdf8' },
           { label: 'Replied', value: report?.summary.replied ?? 0, color: '#4ade80' },
           { label: 'Awaiting Reply', value: report?.summary.awaiting_reply ?? 0, color: '#fbbf24' },
           { label: 'Sent Only', value: report?.summary.sent_only ?? 0, color: '#a78bfa' },
@@ -195,8 +208,17 @@ export function EmailReportDashboard() {
               ...reachagentStatuses.map((status) => ({ value: status, label: reachAgentStatusLabel(status) })),
             ]}
           />
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={loading || !report || filteredRows.length === 0}
+            onClick={exportCsv}
+          >
+            <Download size={15} />
+            Export CSV
+          </Button>
           <span className="self-center text-xs" style={{ color: '#64748b' }}>
-            {filteredRows.length} contact{filteredRows.length === 1 ? '' : 's'}
+            {filteredRows.length} business{filteredRows.length === 1 ? '' : 'es'}
           </span>
         </div>
 
@@ -237,6 +259,8 @@ function MessageRow({ message, tone = 'muted' }: { message: string; tone?: 'mute
 
 function ReportRow({ row, openLead }: { row: EmailReportRow; openLead: (leadId: string) => void }) {
   const business = row.business_name || '—'
+  const addresses = row.email_addresses?.length ? row.email_addresses : [row.email]
+  const additionalAddressCount = addresses.length - 1
   return (
     <tr className="border-b last:border-b-0" style={{ borderColor: '#1e2130' }}>
       <td className="max-w-52 px-4 py-3 font-medium text-white">
@@ -244,7 +268,14 @@ function ReportRow({ row, openLead }: { row: EmailReportRow; openLead: (leadId: 
           ? <button className="text-left text-sky-400 hover:text-sky-300 hover:underline" onClick={() => openLead(row.lead_id!)}>{business}</button>
           : business}
       </td>
-      <td className="max-w-60 px-4 py-3"><span className="block truncate" title={row.email} style={{ color: '#cbd5e1' }}>{row.email}</span></td>
+      <td className="max-w-60 px-4 py-3">
+        <span className="block truncate" title={addresses.join('\n')} style={{ color: '#cbd5e1' }}>{addresses[0]}</span>
+        {additionalAddressCount > 0 && (
+          <span className="block text-xs" title={addresses.slice(1).join('\n')} style={{ color: '#64748b' }}>
+            +{additionalAddressCount} more
+          </span>
+        )}
+      </td>
       <td className="px-4 py-3">
         {row.reachagent_status === 'not_found' || row.reachagent_status === 'ambiguous'
           ? <span className="inline-flex rounded-full bg-gray-500/20 px-2.5 py-1 text-xs font-medium text-gray-300">{reachAgentStatusLabel(row.reachagent_status, row.matching_lead_count)}</span>

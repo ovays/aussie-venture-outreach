@@ -4,6 +4,20 @@ import { isAutomatedInboundEmail, normalizeInboundEmailAddress } from '../../age
 
 export const EMAIL_REPORT_TIME_ZONE = 'Australia/Sydney'
 export const EMAIL_REPORT_MAX_DAYS = 366
+export const EMAIL_REPORT_PUBLIC_DOMAINS = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'outlook.com',
+  'hotmail.com',
+  'live.com',
+  'yahoo.com',
+  'yahoo.com.au',
+  'icloud.com',
+  'me.com',
+  'msn.com',
+  'proton.me',
+  'protonmail.com',
+])
 
 const LEAD_QUERY_BATCH_SIZE = 40
 const LEAD_QUERY_PAGE_SIZE = 1_000
@@ -27,6 +41,7 @@ export interface EmailReportLead {
 
 export interface EmailReportRow {
   email: string
+  email_addresses: string[]
   business_name: string | null
   lead_id: string | null
   reachagent_status: string
@@ -62,6 +77,15 @@ interface Activity {
   uid: number
   path: string
   messageId: string
+}
+
+function emailDomain(email: string): string {
+  return email.slice(email.lastIndexOf('@') + 1)
+}
+
+export function emailReportGroupKey(email: string): string {
+  const domain = emailDomain(email)
+  return EMAIL_REPORT_PUBLIC_DOMAINS.has(domain) ? `email:${email}` : `domain:${domain}`
 }
 
 function parseCalendarDate(value: string | null, name: 'from' | 'to'): { year: number; month: number; day: number } {
@@ -204,13 +228,15 @@ export function buildEmailReportActivityRows(
 
   const grouped = new Map<string, Activity[]>()
   for (const activity of activities) {
-    const group = grouped.get(activity.email) ?? []
+    const key = emailReportGroupKey(activity.email)
+    const group = grouped.get(key) ?? []
     group.push(activity)
-    grouped.set(activity.email, group)
+    grouped.set(key, group)
   }
 
-  return [...grouped.entries()].map(([email, group]) => {
+  return [...grouped.values()].map((group) => {
     group.sort(compareActivity)
+    const emailAddresses = [...new Set(group.map((activity) => activity.email))].sort()
     const receivedCount = group.filter((activity) => activity.direction === 'received').length
     const sentCount = group.length - receivedCount
     const first = group[0]
@@ -220,7 +246,8 @@ export function buildEmailReportActivityRows(
       : last.direction === 'sent' ? 'replied' : 'awaiting_reply'
 
     return {
-      email,
+      email: emailAddresses[0],
+      email_addresses: emailAddresses,
       business_name: null,
       lead_id: null,
       reachagent_status: 'not_found',
@@ -281,21 +308,25 @@ export function completeEmailReport(
   }
 
   const rows = activityRows.map((row) => {
-    const matches = leadsByEmail.get(row.email) ?? []
-    if (matches.length === 0) return { ...row }
-    if (matches.length > 1) {
+    const associatedAddresses = row.email_addresses?.length ? row.email_addresses : [row.email]
+    const matches = associatedAddresses.flatMap((email) => leadsByEmail.get(email) ?? [])
+    const uniqueMatches = [...new Map(matches.map((lead) => [lead.id, lead])).values()]
+    if (uniqueMatches.length === 0) return { ...row, email_addresses: associatedAddresses }
+    if (uniqueMatches.length > 1) {
       return {
         ...row,
-        business_name: null,
+        email_addresses: associatedAddresses,
+        business_name: row.business_name,
         lead_id: null,
         reachagent_status: 'ambiguous',
-        matching_lead_count: matches.length,
+        matching_lead_count: uniqueMatches.length,
       }
     }
 
-    const lead = matches[0]
+    const lead = uniqueMatches[0]
     return {
       ...row,
+      email_addresses: associatedAddresses,
       business_name: lead.business_name,
       lead_id: lead.id,
       reachagent_status: lead.status ?? 'unknown',

@@ -7,6 +7,7 @@ import {
   emailStatusLabel,
   filterEmailReportRows,
   formatSydneyTimestamp,
+  generateEmailReportCsv,
   getEmailReportPresetRange,
   getSydneyCalendarDate,
   reachAgentStatusLabel,
@@ -45,6 +46,7 @@ assert.equal(validateEmailReportUiRange({ from: '2026-01-01', to: '2026-12-31' }
 
 const baseRow: EmailReportRow = {
   email: 'hello@alpha.example',
+  email_addresses: ['hello@alpha.example', 'sales@alpha.example'],
   business_name: 'Alpha Adventures',
   lead_id: 'lead-1',
   reachagent_status: 'contacted',
@@ -60,6 +62,7 @@ const rows: EmailReportRow[] = [
   {
     ...baseRow,
     email: 'contact@beta.example',
+    email_addresses: ['contact@beta.example'],
     business_name: 'Beta Bakery',
     lead_id: null,
     reachagent_status: 'not_found',
@@ -70,6 +73,7 @@ const rows: EmailReportRow[] = [
   {
     ...baseRow,
     email: 'team@gamma.example',
+    email_addresses: ['team@gamma.example'],
     business_name: null,
     lead_id: null,
     reachagent_status: 'ambiguous',
@@ -81,6 +85,7 @@ const rows: EmailReportRow[] = [
 ]
 
 assert.deepEqual(filterEmailReportRows(rows, 'alpha', '', '').map((row) => row.email), ['hello@alpha.example'], 'searches by business')
+assert.deepEqual(filterEmailReportRows(rows, 'sales@alpha.example', '', '').map((row) => row.email), ['hello@alpha.example'], 'searches secondary associated emails')
 assert.deepEqual(filterEmailReportRows(rows, 'beta.example', '', '').map((row) => row.email), ['contact@beta.example'], 'searches by email')
 assert.deepEqual(filterEmailReportRows(rows, '', 'awaiting_reply', '').map((row) => row.email), ['team@gamma.example'], 'filters Email Status')
 assert.deepEqual(filterEmailReportRows(rows, '', '', 'contacted').map((row) => row.email), ['hello@alpha.example'], 'filters ReachAgent status')
@@ -90,6 +95,20 @@ assert.equal(emailStatusLabel('awaiting_reply'), 'Awaiting Reply')
 assert.equal(emailStatusLabel('sent_only'), 'Sent Only')
 assert.equal(reachAgentStatusLabel('not_found'), 'Not in ReachAgent')
 assert.equal(reachAgentStatusLabel('ambiguous', 2), 'Multiple Leads (2)')
+
+const filteredCsv = generateEmailReportCsv(filterEmailReportRows(rows, '', 'replied', 'contacted'))
+assert.match(filteredCsv, /^Business,Email Addresses,ReachAgent Status,Received,Sent,Email Status,Last Activity,Last Direction\r\n/)
+assert.match(filteredCsv, /Alpha Adventures,hello@alpha\.example; sales@alpha\.example,Contacted,1,2,Replied,"2 Aug 2026, 10:00 am",Sent/)
+assert.doesNotMatch(filteredCsv, /Beta Bakery|gamma\.example/, 'CSV is generated from rows after active filters')
+assert.equal(filteredCsv.split('\r\n').length, 2, 'grouped business exports as one CSV record')
+
+const escapedCsv = generateEmailReportCsv([{
+  ...baseRow,
+  business_name: 'Alpha, "Adventure"\nSydney',
+}])
+assert.match(escapedCsv, /"Alpha, ""Adventure""\nSydney"/, 'CSV safely escapes commas, quotes, and newlines')
+assert.match(escapedCsv, /hello@alpha\.example; sales@alpha\.example/, 'multiple addresses share one CSV field')
+assert.match(escapedCsv, /"2 Aug 2026, 10:00 am"/, 'CSV timestamps use the Sydney formatter')
 
 const pageSource = readFileSync(resolve('src/app/dashboard/email-report/page.tsx'), 'utf8')
 const componentSource = readFileSync(resolve('src/components/email-report/EmailReportDashboard.tsx'), 'utf8')
@@ -108,5 +127,8 @@ assert.match(componentSource, /No email activity found for this date range/, 'em
 assert.match(componentSource, /Unable to load email activity from Hostinger Mail/, 'Hostinger error state is rendered')
 assert.match(componentSource, /formatSydneyTimestamp\(row\.last_activity_at\)/, 'all report timestamps use the Sydney formatter')
 assert.match(componentSource, /row\.last_direction/, 'backend communication direction is displayed directly')
+assert.match(componentSource, /Export CSV/, 'CSV export control exists')
+assert.match(componentSource, /generateEmailReportCsv\(filteredRows\)/, 'CSV export respects currently filtered grouped rows')
+assert.match(componentSource, /row\.email_addresses/, 'grouped addresses are displayed by the report UI')
 
 console.log('Email report UI tests passed')

@@ -118,9 +118,42 @@ export function filterEmailReportRows(
   const query = search.trim().toLocaleLowerCase('en-AU')
   return rows
     .filter((row) => !query
-      || row.email.toLocaleLowerCase('en-AU').includes(query)
+      || (row.email_addresses?.length ? row.email_addresses : [row.email])
+        .some((email) => email.toLocaleLowerCase('en-AU').includes(query))
       || (row.business_name ?? '').toLocaleLowerCase('en-AU').includes(query))
     .filter((row) => !emailStatus || row.email_status === emailStatus)
     .filter((row) => !reachagentStatus || row.reachagent_status === reachagentStatus)
     .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at) || a.email.localeCompare(b.email))
+}
+
+function escapeCsvField(value: string | number): string {
+  const text = String(value)
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+export function generateEmailReportCsv(rows: EmailReportRow[]): string {
+  const columns = [
+    'Business',
+    'Email Addresses',
+    'ReachAgent Status',
+    'Received',
+    'Sent',
+    'Email Status',
+    'Last Activity',
+    'Last Direction',
+  ]
+  const records = rows.map((row) => [
+    row.business_name ?? '—',
+    (row.email_addresses?.length ? row.email_addresses : [row.email]).join('; '),
+    reachAgentStatusLabel(row.reachagent_status, row.matching_lead_count),
+    row.received_count,
+    row.sent_count,
+    emailStatusLabel(row.email_status),
+    formatSydneyTimestamp(row.last_activity_at),
+    row.last_direction === 'received' ? 'Received' : 'Sent',
+  ])
+
+  return [columns, ...records]
+    .map((record) => record.map(escapeCsvField).join(','))
+    .join('\r\n')
 }
