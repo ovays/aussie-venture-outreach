@@ -193,7 +193,7 @@ async function main() {
   assert.deepEqual(historicalLeads, leadsBefore, 'backfill does not mutate or delete leads')
 
   const route = read('src/app/api/data-quality/route.ts')
-  assert(route.includes("supabase.rpc('get_data_quality_report'"))
+  assert(/supabase\.rpc\('get_data_quality_report(?:_v2)?'/.test(route))
   assert(route.includes("supabase.rpc('get_data_quality_summary'"))
   assert(!route.includes(".from('leads')"), 'report route must not scan leads or perform per-row calls')
 

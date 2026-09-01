@@ -13,6 +13,7 @@ import {
   Settings,
   Bot,
   Shield,
+  ShieldCheck,
   Activity,
   BarChart3,
   X,
@@ -34,6 +35,7 @@ const navItems = [
   { href: '/dashboard/settings/ai', label: 'AI Settings', icon: Bot,          adminOnly: false },
   { href: '/dashboard/settings/ai/analytics', label: 'AI Analytics', icon: BarChart3, adminOnly: true },
   { href: '/dashboard/admin',     label: 'Admin',     icon: Shield,          adminOnly: true  },
+  { href: '/dashboard/admin/data-quality', label: 'Data Quality', icon: ShieldCheck, adminOnly: true },
 ]
 
 export default function Sidebar({ role }: { role: UserRole }) {
@@ -91,6 +93,7 @@ export default function Sidebar({ role }: { role: UserRole }) {
           {visibleNavItems.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || (
               href !== '/dashboard' &&
+              href !== '/dashboard/admin' &&
               href !== '/dashboard/settings' &&
               href !== '/dashboard/settings/ai' &&
               pathname.startsWith(`${href}/`)
