@@ -6,10 +6,10 @@ import { STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
 import { STAGE_VALUES } from '@/lib/stage-import'
 import { createLead } from '@/lib/create-lead'
 import { readInitialEmailMode } from '@/lib/initial-email-router'
-import { resolvePagination, toSupabaseRange } from '@/lib/pagination'
+import { resolvePagination } from '@/lib/pagination'
+import { normalizeSearchTerm } from '@/lib/search'
 import {
   FILTERED_IDS_PAGE_SIZE,
-  LEADS_LIST_PROJECTION,
   LEADS_MAX_PAGE_SIZE,
   LEADS_PAGE_SIZE,
 } from '@/lib/leads-list'
@@ -106,7 +106,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const stage = searchParams.get('stage') as LeadStage | null
   const category = searchParams.get('category')
   const city = searchParams.get('city')
-  const search = searchParams.get('search')
+  const search = normalizeSearchTerm(searchParams.get('search'))
   const idsOnly = searchParams.get('ids_only') === 'true'
   const pagination = resolvePagination(
     {
@@ -117,39 +117,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ? { defaultPageSize: FILTERED_IDS_PAGE_SIZE, maxPageSize: FILTERED_IDS_PAGE_SIZE }
       : { defaultPageSize: LEADS_PAGE_SIZE, maxPageSize: LEADS_MAX_PAGE_SIZE },
   )
-  const { from, to } = toSupabaseRange(pagination)
-
-  let query = supabase
-    .from('leads')
-    .select(idsOnly ? 'id' : LEADS_LIST_PROJECTION, { count: 'exact' })
-
-  // `stage` expands to all canonical statuses for that stage (e.g. negotiating → negotiating+interested)
-  // `status` is an exact single-status match (backward compat)
+  let statuses: string[] | null = null
   if (stage && STAGE_STATUSES[stage]) {
-    query = query.in('status', STAGE_STATUSES[stage] as string[])
+    statuses = [...STAGE_STATUSES[stage]]
   } else if (status) {
-    query = query.eq('status', status)
+    statuses = [status]
   }
-  if (category) query = query.eq('category_name', category)
-  if (city) query = query.eq('city', city)
-  if (search) query = query.ilike('business_name', `%${search}%`)
 
-  // Stable ordering is required for both visible pages and the separately
-  // paginated ID-only regeneration lookup.
-  query = query
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: true })
-    .range(from, to)
-
-  const { data, error, count } = await query
+  const { data: result, error } = await supabase.rpc('get_leads_search_page', {
+    p_statuses: statuses,
+    p_category: category,
+    p_city: city,
+    p_search: search,
+    p_page: pagination.page,
+    p_page_size: pagination.pageSize,
+    p_ids_only: idsOnly,
+  })
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  const report = result && typeof result === 'object' ? result as { data?: unknown; total?: unknown } : {}
   return NextResponse.json({
-    data,
-    count,
+    data: Array.isArray(report.data) ? report.data : [],
+    count: Number(report.total ?? 0) || 0,
     page: pagination.page,
     limit: pagination.pageSize,
   })

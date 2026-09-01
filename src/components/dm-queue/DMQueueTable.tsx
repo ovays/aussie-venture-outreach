@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Copy, Check } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Copy, Check, Search } from 'lucide-react'
 import { PlatformBadge, StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { formatDate } from '@/lib/utils'
+import { SEARCH_DEBOUNCE_MS } from '@/lib/search'
 
 interface DMItem {
   id: string
@@ -25,20 +26,52 @@ export function DMQueueTable() {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState('pending')
   const [platformFilter, setPlatformFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const requestSequence = useRef(0)
 
-  const fetchItems = useCallback(async () => {
+  const fetchItems = useCallback(async (signal?: AbortSignal) => {
+    const sequence = ++requestSequence.current
     setLoading(true)
     const params = new URLSearchParams()
+    params.set('page', String(page))
+    params.set('page_size', '50')
     if (statusFilter) params.set('status', statusFilter)
     if (platformFilter) params.set('platform', platformFilter)
+    if (debouncedSearch) params.set('search', debouncedSearch)
 
-    const res = await fetch(`/api/dm-queue?${params}`)
-    const json = await res.json() as { data: DMItem[] }
-    setItems(json.data ?? [])
-    setLoading(false)
-  }, [statusFilter, platformFilter])
+    try {
+      const res = await fetch(`/api/dm-queue?${params}`, { signal })
+      const json = await res.json() as { data: DMItem[]; total?: number; error?: string }
+      if (!res.ok) throw new Error(json.error ?? 'DM Queue request failed')
+      if (sequence !== requestSequence.current) return
+      setItems(json.data ?? [])
+      setTotal(json.total ?? 0)
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError') && sequence === requestSequence.current) {
+        setItems([])
+        setTotal(0)
+      }
+    } finally {
+      if (sequence === requestSequence.current) setLoading(false)
+    }
+  }, [debouncedSearch, page, statusFilter, platformFilter])
 
-  useEffect(() => { fetchItems() }, [fetchItems])
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetchItems(controller.signal)
+    return () => controller.abort()
+  }, [fetchItems])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1)
+      setDebouncedSearch(search.trim())
+    }, SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [search])
 
   async function updateStatus(id: string, status: 'sent' | 'skipped') {
     await fetch('/api/dm-queue', {
@@ -80,10 +113,14 @@ export function DMQueueTable() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 md:gap-3 px-4 py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
+        <div className="relative w-full sm:max-w-xs">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#64748b' }} />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search business or Instagram..." aria-label="Search business or Instagram" className="w-full rounded-lg py-2 pl-9 pr-3 text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
+        </div>
         {(['', 'pending', 'sent', 'skipped'] as const).map((s) => (
           <button
             key={s}
-            onClick={() => setStatusFilter(s)}
+            onClick={() => { setStatusFilter(s); setPage(1) }}
             className="px-3 py-2 rounded-full text-xs font-medium transition-colors min-h-[36px]"
             style={{
               background: statusFilter === s ? '#0284c7' : '#1e2130',
@@ -97,7 +134,7 @@ export function DMQueueTable() {
           {(['', 'instagram', 'facebook'] as const).map((p) => (
             <button
               key={p}
-              onClick={() => setPlatformFilter(p)}
+              onClick={() => { setPlatformFilter(p); setPage(1) }}
               className="px-3 py-2 rounded-full text-xs font-medium transition-colors min-h-[36px]"
               style={{
                 background: platformFilter === p ? '#2a2d3e' : 'transparent',
@@ -248,6 +285,12 @@ export function DMQueueTable() {
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="flex items-center justify-between border-t p-4" style={{ borderColor: '#2a2d3e' }}>
+        <Button size="sm" variant="secondary" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}>Previous</Button>
+        <span className="text-xs" style={{ color: '#64748b' }}>Page {page} of {Math.max(1, Math.ceil(total / 50))}</span>
+        <Button size="sm" variant="secondary" disabled={page * 50 >= total || loading} onClick={() => setPage((value) => value + 1)}>Next</Button>
       </div>
 
       {/* Message Modal */}

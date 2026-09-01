@@ -27,6 +27,7 @@
     "test:email-sync-failed": "tsx scripts/test-email-sync-failed.ts",
     "test:email-report": "tsx scripts/test-email-report.ts",
     "test:email-report-ui": "tsx scripts/test-email-report-ui.ts",
+    "test:global-search": "tsx scripts/test-global-search.ts",
     "test:webhook-signature": "tsx scripts/test-webhook-signature.ts",
     "test:webhook-handling": "tsx scripts/test-webhook-handling.ts",
     "test:hostinger-webhook": "tsx --conditions=react-server scripts/test-hostinger-webhook.ts",

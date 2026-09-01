@@ -135,8 +135,11 @@ assert.match(collapsedMarkup, /hello@alpha\.example/, 'the first address remains
 assert.doesNotMatch(collapsedMarkup, /sales@alpha\.example|team@alpha\.example/, 'secondary addresses are hidden when collapsed')
 
 assert.deepEqual(filterEmailReportRows(rows, 'alpha', '', '').map((row) => row.email), ['hello@alpha.example'], 'searches by business')
+assert.deepEqual(filterEmailReportRows(rows, 'ALPHA ADVENTURES', '', '').map((row) => row.email), ['hello@alpha.example'], 'uppercase business search matches mixed-case data')
+assert.deepEqual(filterEmailReportRows(rows, 'beta bakery', '', '').map((row) => row.email), ['contact@beta.example'], 'lowercase business search matches title-case data')
 assert.deepEqual(filterEmailReportRows(rows, 'sales@alpha.example', '', '').map((row) => row.email), ['hello@alpha.example'], 'searches secondary associated emails')
 assert.deepEqual(filterEmailReportRows(rows, 'beta.example', '', '').map((row) => row.email), ['contact@beta.example'], 'searches by email')
+assert.deepEqual(filterEmailReportRows(rows, '@alpha.', '', '').map((row) => row.email), ['hello@alpha.example'], 'special email characters are treated as ordinary client-side text')
 assert.deepEqual(filterEmailReportRows(rows, '', 'awaiting_reply', '').map((row) => row.email), ['team@gamma.example'], 'filters Email Status')
 assert.deepEqual(filterEmailReportRows(rows, '', '', 'contacted').map((row) => row.email), ['hello@alpha.example'], 'filters ReachAgent status')
 assert.equal(filterEmailReportRows(rows, '', '', '')[0].email, 'team@gamma.example', 'newest activity sorts first')

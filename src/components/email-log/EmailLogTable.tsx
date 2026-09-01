@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { formatDate, formatDateTime } from '@/lib/utils'
+import { Search } from 'lucide-react'
+import { SEARCH_DEBOUNCE_MS } from '@/lib/search'
 
 interface EmailRecord {
   id: string
@@ -13,7 +15,7 @@ interface EmailRecord {
   sent_at: string | null
   replied_at: string | null
   created_at: string
-  leads: { business_name: string; category_name: string; city: string } | null
+  leads: { business_name: string; category_name: string; city: string; email: string | null } | null
 }
 
 interface EmailDetail extends EmailRecord {
@@ -48,6 +50,8 @@ export function EmailLogTable() {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<EmailSummary | null>(null)
@@ -61,6 +65,7 @@ export function EmailLogTable() {
     const params = new URLSearchParams({ page: String(page), page_size: '50' })
     if (typeFilter) params.set('type', typeFilter)
     if (statusFilter) params.set('status', statusFilter)
+    if (debouncedSearch) params.set('search', debouncedSearch)
     try {
       const response = await fetch(`/api/email-log?${params}`, { signal })
       const json = await response.json() as { data?: EmailRecord[]; total?: number; summary?: EmailSummary; error?: string }
@@ -75,7 +80,7 @@ export function EmailLogTable() {
     } finally {
       if (sequence === listSequence.current) setLoading(false)
     }
-  }, [page, statusFilter, typeFilter])
+  }, [debouncedSearch, page, statusFilter, typeFilter])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -84,7 +89,13 @@ export function EmailLogTable() {
     return () => controller.abort()
   }, [fetchEmails])
 
-  useEffect(() => setPage(1), [typeFilter, statusFilter])
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1)
+      setDebouncedSearch(search.trim())
+    }, SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [search])
 
   async function fetchEmailDetail(id: string) {
     detailController.current?.abort()
@@ -145,10 +156,21 @@ export function EmailLogTable() {
       </div>
 
       <div className="flex flex-wrap gap-2 px-4 py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
-        <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
+        <div className="relative min-w-[240px] flex-1 sm:max-w-sm">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#64748b' }} />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search business, email or subject..."
+            aria-label="Search business, email or subject"
+            className="w-full rounded-lg py-2 pl-9 pr-3 text-sm text-white outline-none"
+            style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+          />
+        </div>
+        <select value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); setPage(1) }} className="px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
           <option value="">All Types</option><option value="initial_pitch">Initial</option><option value="follow_up_1">Follow-up 1</option><option value="follow_up_2">Follow-up 2</option><option value="follow_up_3">Follow-up 3</option>
         </select>
-        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
+        <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1) }} className="px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
           <option value="">All Statuses</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="bounced">Bounced</option><option value="suppressed">Suppressed</option><option value="pending_send">Pending</option><option value="email_sync_failed">Sync Failed</option>
         </select>
         <span className="ml-auto self-center text-xs" style={{ color: '#64748b' }}>{total} email{total === 1 ? '' : 's'}</span>

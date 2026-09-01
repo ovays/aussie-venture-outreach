@@ -69,7 +69,7 @@ assert.match(component, /if \(!allFilteredSelected\) clearSelection\(\)[\s\S]*se
 // 12. Select-all-filtered uses the same current status/type/search filters.
 const selectionRoute = readFileSync(resolve('src/app/api/delivery-failures/lead-selection/route.ts'), 'utf8')
 assert.match(selectionRoute, /parseDeliveryFailureFilters\(request\.nextUrl\.searchParams\)/)
-assert.match(selectionRoute, /p_status: filters\.status[\s\S]*p_email_type: filters\.emailType[\s\S]*p_search: filters\.search/)
+assert.match(selectionRoute, /p_status: filters\.status[\s\S]*p_email_type: filters\.emailType[\s\S]*p_search: escapePostgresLikeTerm\(filters\.search\)/)
 const migration = readFileSync(resolve('supabase/migrations/045_delivery_failure_lead_selection.sql'), 'utf8')
 assert.match(migration, /SELECT DISTINCT eligible\.lead_id/, 'filtered selection deduplicates lead_id in SQL')
 assert.match(migration, /JOIN public\.leads/, 'historical lead-less rows are excluded from filtered selection')

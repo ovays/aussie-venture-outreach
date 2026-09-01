@@ -404,7 +404,7 @@ export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
           </svg>
           <input
             type="text"
-            placeholder="Search name or email…"
+            placeholder="Search business, email or domain…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-8 pr-3 py-1.5 rounded-md text-xs outline-none"

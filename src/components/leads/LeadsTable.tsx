@@ -817,7 +817,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
           <Search size={14} style={{ color: '#64748b' }} />
           <input
             type="text"
-            placeholder="Search business name..."
+            placeholder="Search business, email or domain..."
             value={search}
             onChange={(e) => { invalidateFilteredIdsLookup(); setSearch(e.target.value); setPage(1) }}
             className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none min-w-0"

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { KanbanCard } from './KanbanCard'
 import { useLeadDrawer } from '@/lib/lead-drawer-context'
 import { STAGE_STATUSES } from '@/lib/lead-status'
+import { Search } from 'lucide-react'
+import { SEARCH_DEBOUNCE_MS } from '@/lib/search'
 
 interface Lead {
   id: string
@@ -43,6 +45,8 @@ export function KanbanBoard() {
   const controllers = useRef(new Map<string, AbortController>())
   const mutations = useRef(new Set<string>())
   const [mutatingLeadIds, setMutatingLeadIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
 
   const cleanupMutation = useCallback((leadId: string) => {
     mutations.current.delete(leadId)
@@ -64,6 +68,7 @@ export function KanbanBoard() {
     }))
     try {
       const params = new URLSearchParams({ stage: key, page: String(page), page_size: '50' })
+      if (debouncedSearch) params.set('search', debouncedSearch)
       const response = await fetch(`/api/pipeline?${params}`, { signal: controller.signal })
       const json = await response.json() as { data?: Lead[]; total?: number; error?: string }
       if (!response.ok) throw new Error(json.error ?? 'Pipeline request failed')
@@ -84,7 +89,12 @@ export function KanbanBoard() {
         [key]: { ...current[key], loading: false, error: error instanceof Error ? error.message : 'Pipeline request failed' },
       }))
     }
-  }, [])
+  }, [debouncedSearch])
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [search])
 
   useEffect(() => {
     for (const { key } of COLUMNS) void loadColumn(key)
@@ -144,7 +154,14 @@ export function KanbanBoard() {
   }
 
   return (
-    <div className="flex gap-3 overflow-x-auto pb-4 p-3 md:p-6 min-h-0 flex-1 snap-x snap-mandatory">
+    <>
+      <div className="border-b px-3 py-3 md:px-6" style={{ borderColor: '#2a2d3e' }}>
+        <div className="relative w-full max-w-sm">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#64748b' }} />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search business, email or domain..." aria-label="Search business, email or domain" className="w-full rounded-lg py-2 pl-9 pr-3 text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
+        </div>
+      </div>
+      <div className="flex gap-3 overflow-x-auto pb-4 p-3 md:p-6 min-h-0 flex-1 snap-x snap-mandatory">
       {COLUMNS.map(({ key, label, color }) => {
         const column = columns[key]
         return (
@@ -171,6 +188,7 @@ export function KanbanBoard() {
           </div>
         )
       })}
-    </div>
+      </div>
+    </>
   )
 }

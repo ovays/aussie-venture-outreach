@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { resolvePagination } from '@/lib/pagination'
+import { normalizeSearchTerm } from '@/lib/search'
 
 const FILTERS = new Set([
   'all', 'fu1_due', 'fu2_due', 'fu3_due', 'fu1', 'fu2', 'fu3',
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await supabase.rpc('get_lifecycle_page', {
     p_as_of: asOf,
     p_filter: FILTERS.has(requestedFilter) ? requestedFilter : 'all',
-    p_search: (searchParams.get('search') ?? '').trim(),
+    p_search: normalizeSearchTerm(searchParams.get('search')),
     p_sort_key: SORT_KEYS.has(requestedSort) ? requestedSort : 'next_action_date',
     p_sort_dir: sortDir,
     p_page: pagination.page,

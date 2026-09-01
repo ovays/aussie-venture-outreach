@@ -182,7 +182,7 @@ export function EmailReportDashboard() {
               aria-label="Search business or email"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search business or email"
+              placeholder="Search business, email or domain..."
               className="w-full rounded-lg py-2 pl-9 pr-3 text-sm text-white outline-none focus:ring-2 focus:ring-sky-500"
               style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
             />

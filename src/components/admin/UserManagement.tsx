@@ -196,7 +196,7 @@ export function UserManagement({ initialUsers, currentUserId }: UserManagementPr
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search users"
+            placeholder="Search name, email or role..."
             className="pl-9"
           />
         </div>

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { resolvePagination, toSupabaseRange } from '@/lib/pagination'
+import { resolvePagination } from '@/lib/pagination'
 import { STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
+import { normalizeSearchTerm } from '@/lib/search'
 
-const PIPELINE_FIELDS = 'id, business_name, category_name, city, suburb, status, deal_value, created_at'
 const NEW_STATUSES = ['new'] as const
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -21,26 +21,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     page: searchParams.get('page'),
     pageSize: searchParams.get('page_size'),
   })
-  const { from, to } = toSupabaseRange(pagination)
   const supabase = await createClient()
-  let query = supabase
-    .from('leads')
-    .select(PIPELINE_FIELDS, { count: 'exact' })
-    .in('status', [...statuses])
-
-  const search = (searchParams.get('search') ?? '').trim()
-  if (search) query = query.ilike('business_name', `%${search}%`)
-
-  const { data, error, count } = await query
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: true })
-    .range(from, to)
+  const { data: result, error } = await supabase.rpc('get_pipeline_search_page', {
+    p_statuses: [...statuses],
+    p_search: normalizeSearchTerm(searchParams.get('search')),
+    p_page: pagination.page,
+    p_page_size: pagination.pageSize,
+  })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  const report = result && typeof result === 'object' ? result as { data?: unknown; total?: unknown } : {}
   return NextResponse.json({
-    data: data ?? [],
-    total: count ?? 0,
+    data: Array.isArray(report.data) ? report.data : [],
+    total: Number(report.total ?? 0) || 0,
     page: pagination.page,
     page_size: pagination.pageSize,
   })

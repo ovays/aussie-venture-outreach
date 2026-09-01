@@ -29,7 +29,7 @@ export interface LeadsFilterSnapshot {
 }
 
 export function normalizeLeadsSearch(search: string): string {
-  return search.trim()
+  return normalizeSearchTerm(search)
 }
 
 export function createLeadsFilterSnapshot(controls: {
@@ -74,3 +74,4 @@ export function createUniqueIdBatches(
   }
   return batches
 }
+import { normalizeSearchTerm } from '@/lib/search'

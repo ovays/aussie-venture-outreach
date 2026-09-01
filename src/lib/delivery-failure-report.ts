@@ -1,4 +1,5 @@
 import { resolvePagination } from '@/lib/pagination'
+import { normalizeSearchTerm } from '@/lib/search'
 
 export const DELIVERY_FAILURE_STATUSES = ['bounced', 'failed', 'suppressed'] as const
 export const DELIVERY_FAILURE_EMAIL_TYPES = ['initial_pitch', 'follow_up_1', 'follow_up_2', 'follow_up_3', 'reactivation'] as const
@@ -70,7 +71,7 @@ export function parseDeliveryFailureFilters(searchParams: SearchParamsLike): Del
   return {
     status: includedValue(searchParams.get('status'), DELIVERY_FAILURE_STATUSES),
     emailType: includedValue(searchParams.get('type'), DELIVERY_FAILURE_EMAIL_TYPES),
-    search: (searchParams.get('search') ?? '').trim().slice(0, 200),
+    search: normalizeSearchTerm(searchParams.get('search')),
     page: pagination.page,
     pageSize: pagination.pageSize,
   }

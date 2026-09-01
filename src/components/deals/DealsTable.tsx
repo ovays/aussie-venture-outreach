@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { Search } from 'lucide-react'
 import { Toggle } from '@/components/ui/Toggle'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { formatDate, formatCurrency } from '@/lib/utils'
+import { SEARCH_DEBOUNCE_MS } from '@/lib/search'
 
 interface Deal {
   id: string
@@ -14,8 +16,18 @@ interface Deal {
   payment_received: boolean
   notes: string | null
   closed_at: string
-  leads: { business_name: string; category_name: string; city: string; suburb: string | null } | null
+  leads: { business_name: string; category_name: string; city: string; suburb: string | null; email: string | null } | null
 }
+
+interface DealSummary {
+  total_revenue: number
+  month_revenue: number
+  week_revenue: number
+  average_value: number
+  total_deals: number
+}
+
+const EMPTY_SUMMARY: DealSummary = { total_revenue: 0, month_revenue: 0, week_revenue: 0, average_value: 0, total_deals: 0 }
 
 const DEAL_TYPE_LABELS: Record<string, string> = {
   visit_content: 'Visit + Content',
@@ -28,17 +40,38 @@ export function DealsTable() {
   const [loading, setLoading] = useState(true)
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null)
   const [editNotes, setEditNotes] = useState('')
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [summary, setSummary] = useState<DealSummary>(EMPTY_SUMMARY)
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1)
+      setDebouncedSearch(search.trim())
+    }, SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  useEffect(() => {
+    const controller = new AbortController()
     async function fetchDeals() {
       setLoading(true)
-      const res = await fetch('/api/deals')
-      const json = await res.json() as { data: Deal[] }
+      const params = new URLSearchParams({ page: String(page), page_size: '50' })
+      if (debouncedSearch) params.set('search', debouncedSearch)
+      const res = await fetch(`/api/deals?${params}`, { signal: controller.signal })
+      const json = await res.json() as { data: Deal[]; total?: number; summary?: Partial<DealSummary> }
       setDeals(json.data ?? [])
+      setTotal(json.total ?? 0)
+      setSummary({ ...EMPTY_SUMMARY, ...json.summary })
       setLoading(false)
     }
-    fetchDeals()
-  }, [])
+    void fetchDeals().catch((error) => {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) setLoading(false)
+    })
+    return () => controller.abort()
+  }, [debouncedSearch, page])
 
   async function toggleDeal(id: string, field: 'content_created' | 'payment_received', value: boolean) {
     await fetch('/api/deals', {
@@ -60,28 +93,32 @@ export function DealsTable() {
     setEditingDeal(null)
   }
 
-  const totalRevenue = deals.reduce((s, d) => s + d.deal_value, 0)
-  const now = Date.now()
-  const thisMonth = deals.filter((d) => now - new Date(d.closed_at).getTime() < 30 * 86_400_000)
-  const thisWeek = deals.filter((d) => now - new Date(d.closed_at).getTime() < 7 * 86_400_000)
-  const avgValue = deals.length > 0 ? totalRevenue / deals.length : 0
+  const totalPages = Math.max(1, Math.ceil(total / 50))
 
   return (
     <div>
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-5 border-b" style={{ borderColor: '#2a2d3e' }}>
         {[
-          { label: 'Total Revenue', value: formatCurrency(totalRevenue), color: '#fbbf24' },
-          { label: 'This Month', value: formatCurrency(thisMonth.reduce((s, d) => s + d.deal_value, 0)), color: '#4ade80' },
-          { label: 'This Week', value: formatCurrency(thisWeek.reduce((s, d) => s + d.deal_value, 0)), color: '#38bdf8' },
-          { label: 'Avg Deal', value: formatCurrency(avgValue), color: '#a78bfa' },
-          { label: 'Total Deals', value: deals.length, color: '#e2e8f0' },
+          { label: 'Total Revenue', value: formatCurrency(summary.total_revenue), color: '#fbbf24' },
+          { label: 'This Month', value: formatCurrency(summary.month_revenue), color: '#4ade80' },
+          { label: 'This Week', value: formatCurrency(summary.week_revenue), color: '#38bdf8' },
+          { label: 'Avg Deal', value: formatCurrency(summary.average_value), color: '#a78bfa' },
+          { label: 'Total Deals', value: summary.total_deals, color: '#e2e8f0' },
         ].map(({ label, value, color }) => (
           <div key={label}>
             <p className="text-xs" style={{ color: '#64748b' }}>{label}</p>
             <p className="text-xl font-bold mt-0.5" style={{ color }}>{value}</p>
           </div>
         ))}
+      </div>
+
+      <div className="flex items-center gap-3 border-b px-4 py-3" style={{ borderColor: '#2a2d3e' }}>
+        <div className="relative w-full max-w-sm">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#64748b' }} />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search business, email or domain..." aria-label="Search business, email or domain" className="w-full rounded-lg py-2 pl-9 pr-3 text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
+        </div>
+        <span className="ml-auto whitespace-nowrap text-xs" style={{ color: '#64748b' }}>{total} matching</span>
       </div>
 
       {/* Table */}
@@ -145,6 +182,12 @@ export function DealsTable() {
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="flex items-center justify-between border-t p-4" style={{ borderColor: '#2a2d3e' }}>
+        <Button size="sm" variant="secondary" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}>Previous</Button>
+        <span className="text-xs" style={{ color: '#64748b' }}>Page {page} of {totalPages}</span>
+        <Button size="sm" variant="secondary" disabled={page >= totalPages || loading} onClick={() => setPage((value) => value + 1)}>Next</Button>
       </div>
 
       {/* Edit Notes Modal */}

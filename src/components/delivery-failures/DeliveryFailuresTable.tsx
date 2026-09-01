@@ -326,7 +326,7 @@ export function DeliveryFailuresTable() {
           {Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
         <form onSubmit={submitSearch} className="flex gap-2 flex-1 min-w-64">
-          <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search business or email" aria-label="Search business or email" className="min-w-0 flex-1 px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
+          <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search business or email..." aria-label="Search business or email" className="min-w-0 flex-1 px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
           <Button size="sm" variant="secondary" type="submit">Search</Button>
           {search && <Button size="sm" variant="ghost" type="button" onClick={clearSearch}>Clear</Button>}
         </form>

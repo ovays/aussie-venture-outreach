@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isAuthErrorResponse, requireApiUser } from '@/lib/auth'
 import { parseDeliveryFailureFilters } from '@/lib/delivery-failure-report'
+import { escapePostgresLikeTerm } from '@/lib/search'
 import { createClient } from '@/lib/supabase/server'
 
 interface LeadSelectionRpcResult {
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await supabase.rpc('get_delivery_failure_lead_selection', {
     p_status: filters.status,
     p_email_type: filters.emailType,
-    p_search: filters.search,
+    p_search: escapePostgresLikeTerm(filters.search),
     p_include_ids: includeIds,
   })
 

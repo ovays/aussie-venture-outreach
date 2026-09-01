@@ -5,6 +5,7 @@ import {
   normalizeDeliveryFailureSummary,
   parseDeliveryFailureFilters,
 } from '@/lib/delivery-failure-report'
+import { escapePostgresLikeTerm } from '@/lib/search'
 
 interface ReportRpcResult {
   data?: unknown
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await supabase.rpc('get_delivery_failure_report', {
     p_status: filters.status,
     p_email_type: filters.emailType,
-    p_search: filters.search,
+    p_search: escapePostgresLikeTerm(filters.search),
     p_page: filters.page,
     p_page_size: filters.pageSize,
   })
