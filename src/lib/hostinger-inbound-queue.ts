@@ -30,9 +30,15 @@ export interface HostingerInboundReceiptStore {
 }
 
 export function hostingerInboundReceiptKey(locator: HostingerWebhookLocator): string {
-  const mailbox = locator.mailboxId?.trim().toLowerCase() ?? ''
+  const mailbox = (locator.mailboxId ?? locator.mailboxAddress ?? '').trim().toLowerCase()
   const folder = locator.folder.trim().toLowerCase()
-  const message = locator.uid ? `uid:${locator.uid}` : `message-id:${locator.providerMessageId?.trim() ?? ''}`
+  const message = locator.uid
+    ? `uid:${locator.uid}`
+    : locator.providerMessageId
+      ? `message-id:${locator.providerMessageId.trim()}`
+      : locator.eventId
+        ? `event-id:${locator.eventId.trim()}`
+        : `thread:${locator.threadId?.trim() ?? ''}\nreceived:${locator.receivedAt?.trim() ?? ''}\nfrom:${locator.from?.trim().toLowerCase() ?? ''}`
   return createHash('sha256').update(`hostinger\n${mailbox}\n${folder}\n${message}`).digest('hex')
 }
 

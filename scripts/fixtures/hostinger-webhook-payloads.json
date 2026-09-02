@@ -1,0 +1,62 @@
+{
+  "hostingerTest": {
+    "event": "message.received",
+    "test": true,
+    "mailbox": "hello@example.test",
+    "message": {
+      "from": "sender@example.test",
+      "subject": "Hostinger webhook test"
+    }
+  },
+  "realMessageReceived": {
+    "event": "message.received",
+    "mailbox": "hello@example.test",
+    "timestamp": "2026-09-02T01:02:03Z",
+    "message": {
+      "from": "owner@example.test",
+      "subject": "Re: Partnership",
+      "thread_id": "thr_8fk2m01x"
+    }
+  },
+  "malformed": {
+    "mailbox": "hello@example.test",
+    "message": {}
+  },
+  "wrongMailbox": {
+    "event": "message.received",
+    "mailbox": "other@example.test",
+    "timestamp": "2026-09-02T01:02:03Z",
+    "message": {
+      "from": "owner@example.test",
+      "subject": "Re: Partnership",
+      "thread_id": "thr_8fk2m01x"
+    }
+  },
+  "wrongEvent": {
+    "event": "message.sent",
+    "mailbox": "hello@example.test",
+    "message": {
+      "id": "message-1"
+    }
+  },
+  "missingAuth": {
+    "event": "message.received",
+    "mailbox": "hello@example.test",
+    "timestamp": "2026-09-02T01:02:03Z",
+    "message": {
+      "from": "owner@example.test",
+      "subject": "Re: Partnership",
+      "thread_id": "thr_8fk2m01x"
+    }
+  },
+  "duplicateValidEvent": {
+    "event": "message.received",
+    "mailbox": "hello@example.test",
+    "timestamp": "2026-09-02T01:02:03Z",
+    "message": {
+      "from": "owner@example.test",
+      "subject": "Re: Partnership",
+      "thread_id": "thr_8fk2m01x"
+    }
+  }
+}

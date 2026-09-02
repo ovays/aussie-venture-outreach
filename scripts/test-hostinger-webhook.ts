@@ -64,10 +64,13 @@ function fakeSupabase(receipts: Row[]) {
   } as never
 }
 
-function webhookRequest(payload: unknown): Request {
+function webhookRequest(payload: unknown, authenticated = true): Request {
   return new Request('https://reachagent.test/api/webhooks/hostinger', {
     method: 'POST',
-    headers: { authorization: 'Bearer webhook-secret', 'content-type': 'application/json' },
+    headers: {
+      ...(authenticated ? { authorization: 'Bearer webhook-secret' } : {}),
+      'content-type': 'application/json',
+    },
     body: JSON.stringify(payload),
   })
 }
@@ -89,6 +92,126 @@ const payload = {
 
 async function main() {
   console.log('Hostinger webhook and unread-state tests')
+
+  const fixtures = JSON.parse(fs.readFileSync(
+    path.join(process.cwd(), 'scripts/fixtures/hostinger-webhook-payloads.json'),
+    'utf8',
+  )) as Record<string, unknown>
+  const handlerDependencies = (accept: (locator: ReturnType<typeof parseHostingerWebhookPayload>) => Promise<{
+    receiptId: string; runId?: string; duplicate: boolean; status: string
+  }>) => ({
+    webhookSecret: 'webhook-secret',
+    mailboxId: 'AC_mailbox',
+    mailboxAddress: 'hello@example.test',
+    accept,
+  })
+
+  let fixtureAccepts = 0
+  const fixtureAccept = async () => {
+    fixtureAccepts += 1
+    return { receiptId: 'fixture-receipt', runId: 'fixture-run', duplicate: false, status: 'queued' }
+  }
+  const testResponse = await handleHostingerWebhookRequest(
+    webhookRequest(fixtures.hostingerTest),
+    handlerDependencies(fixtureAccept),
+  )
+  assert.equal(testResponse.status, 200)
+  assert.deepEqual(await testResponse.json(), { ok: true, test: true })
+  assert.equal(fixtureAccepts, 0, 'an explicit Hostinger test must not create a receipt or enqueue')
+
+  const realResponse = await handleHostingerWebhookRequest(
+    webhookRequest(fixtures.realMessageReceived),
+    handlerDependencies(fixtureAccept),
+  )
+  assert.equal(realResponse.status, 202)
+  assert.equal(fixtureAccepts, 1, 'a realistic address-only Hostinger payload reaches acceptance')
+
+  const malformedResponse = await handleHostingerWebhookRequest(
+    webhookRequest(fixtures.malformed),
+    handlerDependencies(fixtureAccept),
+  )
+  assert.equal(malformedResponse.status, 400)
+  assert.equal((await malformedResponse.json()).error, 'Missing event type')
+
+  const invalidJsonResponse = await handleHostingerWebhookRequest(new Request(
+    'https://reachagent.test/api/webhooks/hostinger',
+    {
+      method: 'POST',
+      headers: { authorization: 'Bearer webhook-secret', 'content-type': 'application/json' },
+      body: '{',
+    },
+  ), handlerDependencies(fixtureAccept))
+  assert.equal(invalidJsonResponse.status, 400)
+  assert.equal((await invalidJsonResponse.json()).error, 'Invalid JSON')
+
+  const missingMailboxResponse = await handleHostingerWebhookRequest(webhookRequest({
+    event: 'message.received',
+    message: { id: 'message-1' },
+  }), handlerDependencies(fixtureAccept))
+  assert.equal(missingMailboxResponse.status, 400)
+  assert.equal((await missingMailboxResponse.json()).error, 'Missing mailbox identifier or address')
+
+  const missingLocatorResponse = await handleHostingerWebhookRequest(webhookRequest({
+    event: 'message.received',
+    mailbox: 'hello@example.test',
+    message: { from: 'owner@example.test', subject: 'No stable locator' },
+  }), handlerDependencies(fixtureAccept))
+  assert.equal(missingLocatorResponse.status, 400)
+  assert.equal((await missingLocatorResponse.json()).error, 'Missing stable message locator')
+
+  const wrongMailboxResponse = await handleHostingerWebhookRequest(
+    webhookRequest(fixtures.wrongMailbox),
+    handlerDependencies(fixtureAccept),
+  )
+  assert.equal(wrongMailboxResponse.status, 200)
+  assert.equal((await wrongMailboxResponse.json()).ignored, true)
+
+  const wrongEventResponse = await handleHostingerWebhookRequest(
+    webhookRequest(fixtures.wrongEvent),
+    handlerDependencies(fixtureAccept),
+  )
+  assert.equal(wrongEventResponse.status, 200)
+  assert.equal((await wrongEventResponse.json()).ignored, true)
+
+  const missingAuthResponse = await handleHostingerWebhookRequest(
+    webhookRequest(fixtures.missingAuth, false),
+    handlerDependencies(fixtureAccept),
+  )
+  assert.equal(missingAuthResponse.status, 401)
+
+  let fixtureStatus: 'pending' | 'queued' = 'pending'
+  let fixtureEnqueues = 0
+  const fixtureStore: HostingerInboundReceiptStore = {
+    async register(value) {
+      return {
+        id: 'fixture-dedup-receipt',
+        receiptKey: hostingerInboundReceiptKey(value),
+        status: fixtureStatus,
+        duplicate: fixtureStatus !== 'pending',
+        attemptCount: 0,
+        replayable: fixtureStatus === 'pending',
+      }
+    },
+    async markQueued() { fixtureStatus = 'queued'; return fixtureStatus },
+    async recordEnqueueError() { throw new Error('unexpected fixture enqueue failure') },
+  }
+  const deduplicatingAccept = (value: ReturnType<typeof parseHostingerWebhookPayload>) => acceptHostingerInboundEvent(
+    value,
+    fixtureStore,
+    async () => { fixtureEnqueues += 1; return { id: 'fixture-dedup-run' } },
+  )
+  const firstFixture = await handleHostingerWebhookRequest(
+    webhookRequest(fixtures.realMessageReceived),
+    handlerDependencies(deduplicatingAccept),
+  )
+  const duplicateFixture = await handleHostingerWebhookRequest(
+    webhookRequest(fixtures.duplicateValidEvent),
+    handlerDependencies(deduplicatingAccept),
+  )
+  assert.equal(firstFixture.status, 202)
+  assert.equal(duplicateFixture.status, 202)
+  assert.equal((await duplicateFixture.json()).duplicate, true)
+  assert.equal(fixtureEnqueues, 1, 'duplicate realistic webhook enqueues exactly once')
 
   let accepted = 0
   const started = performance.now()
