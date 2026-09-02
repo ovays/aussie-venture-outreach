@@ -28,9 +28,9 @@ export function KanbanCard({ lead, onClick }: KanbanCardProps) {
     <div
       onClick={onClick}
       className="rounded-lg p-3 cursor-pointer group"
-      style={{ background: '#1a1d2b', border: '1px solid #2a2d3e' }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#0284c7' }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#2a2d3e' }}
+      style={{ background: 'var(--surface-raised)', border: '1px solid var(--border-subtle)' }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--primary-border)' }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border-subtle)' }}
     >
       <p className="text-sm font-semibold text-white leading-snug group-hover:text-sky-300 transition-colors">
         {lead.business_name}

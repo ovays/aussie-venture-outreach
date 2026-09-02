@@ -147,7 +147,7 @@ export default async function SettingsPage() {
   return (
     <div>
       <TopBar title="Settings" />
-      <div className="p-6 space-y-6 max-w-4xl">
+      <div className="page-content page-stack max-w-4xl">
         {(dlqCount ?? 0) > 0 && (
           <Card>
             <div style={{ color: '#fbbf24', fontSize: '14px' }}>

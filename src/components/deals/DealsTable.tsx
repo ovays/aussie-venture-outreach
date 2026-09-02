@@ -7,6 +7,9 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { SEARCH_DEBOUNCE_MS } from '@/lib/search'
+import { FilterToolbar } from '@/components/ui/FilterToolbar'
+import { DataCardField, ResponsiveDataCard } from '@/components/ui/ResponsiveDataCard'
+import { DataSkeleton, DataState } from '@/components/ui/DataState'
 
 interface Deal {
   id: string
@@ -98,7 +101,7 @@ export function DealsTable() {
   return (
     <div>
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-5 border-b" style={{ borderColor: '#2a2d3e' }}>
+      <div className="grid grid-cols-2 gap-3 border-b border-[var(--border-subtle)] p-4 md:grid-cols-5 md:p-5">
         {[
           { label: 'Total Revenue', value: formatCurrency(summary.total_revenue), color: '#fbbf24' },
           { label: 'This Month', value: formatCurrency(summary.month_revenue), color: '#4ade80' },
@@ -106,24 +109,23 @@ export function DealsTable() {
           { label: 'Avg Deal', value: formatCurrency(summary.average_value), color: '#a78bfa' },
           { label: 'Total Deals', value: summary.total_deals, color: '#e2e8f0' },
         ].map(({ label, value, color }) => (
-          <div key={label}>
-            <p className="text-xs" style={{ color: '#64748b' }}>{label}</p>
+          <div key={label} className="min-w-0 rounded-lg bg-[var(--surface-raised)] p-3">
+            <p className="text-xs text-[var(--text-muted)]">{label}</p>
             <p className="text-xl font-bold mt-0.5" style={{ color }}>{value}</p>
           </div>
         ))}
       </div>
 
-      <div className="flex items-center gap-3 border-b px-4 py-3" style={{ borderColor: '#2a2d3e' }}>
-        <div className="relative w-full max-w-sm">
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#64748b' }} />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search business, email or domain..." aria-label="Search business, email or domain" className="w-full rounded-lg py-2 pl-9 pr-3 text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
+      <FilterToolbar resultCount={`${total} matching`} ariaLabel="Deal filters">
+        <div className="relative min-w-0 flex-[2_1_18rem]">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search business, email or domain..." aria-label="Search business, email or domain" className="control-field w-full py-2 pl-9 pr-3 text-sm" />
         </div>
-        <span className="ml-auto whitespace-nowrap text-xs" style={{ color: '#64748b' }}>{total} matching</span>
-      </div>
+      </FilterToolbar>
 
       {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="data-table-shell desktop-data-table">
+        <table className="data-table">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
               {['Business', 'Type', 'Value', 'Content', 'Payment', 'Closed', 'Actions'].map((h) => (
@@ -184,9 +186,27 @@ export function DealsTable() {
         </table>
       </div>
 
-      <div className="flex items-center justify-between border-t p-4" style={{ borderColor: '#2a2d3e' }}>
+      <div className="mobile-data-list" data-testid="deals-mobile-cards">
+        {loading ? <DataSkeleton rows={4} card />
+          : deals.length === 0 ? <DataState title="No deals found" description="Try changing the current search." compact />
+            : deals.map((deal) => (
+              <ResponsiveDataCard
+                key={deal.id}
+                title={<span className="line-clamp-2">{deal.leads?.business_name ?? 'Unknown business'}</span>}
+                badge={<span className="font-semibold text-[var(--success)]">{formatCurrency(deal.deal_value)}</span>}
+                actions={<Button size="sm" variant="secondary" onClick={() => { setEditingDeal(deal); setEditNotes(deal.notes ?? '') }}>Edit notes</Button>}
+              >
+                <DataCardField label="Type">{DEAL_TYPE_LABELS[deal.deal_type]}</DataCardField>
+                <DataCardField label="Payment">{deal.payment_received ? 'Received' : 'Awaiting'}</DataCardField>
+                <DataCardField label="Content">{deal.content_created ? 'Created' : 'Pending'}</DataCardField>
+                <DataCardField label="Closed">{formatDate(deal.closed_at)}</DataCardField>
+              </ResponsiveDataCard>
+            ))}
+      </div>
+
+      <div className="pagination-bar">
         <Button size="sm" variant="secondary" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}>Previous</Button>
-        <span className="text-xs" style={{ color: '#64748b' }}>Page {page} of {totalPages}</span>
+        <span className="pagination-bar__label">Page {page} of {totalPages}</span>
         <Button size="sm" variant="secondary" disabled={page >= totalPages || loading} onClick={() => setPage((value) => value + 1)}>Next</Button>
       </div>
 
@@ -203,8 +223,7 @@ export function DealsTable() {
               value={editNotes}
               onChange={(e) => setEditNotes(e.target.value)}
               rows={5}
-              className="w-full px-3 py-2 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-sky-500 resize-none"
-              style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+              className="control-field w-full resize-none px-3 py-2 text-sm"
             />
           </div>
           <div className="flex gap-2 justify-end">

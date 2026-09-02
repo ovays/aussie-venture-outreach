@@ -6,7 +6,7 @@ export default function EmailReportPage() {
   return (
     <div>
       <TopBar title="Email Report" />
-      <div className="p-4 md:p-6">
+      <div className="page-content">
         <ErrorBoundary label="Email Report">
           <EmailReportDashboard />
         </ErrorBoundary>

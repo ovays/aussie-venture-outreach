@@ -3,6 +3,9 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { FilterToolbar } from '@/components/ui/FilterToolbar'
+import { DataCardField, ResponsiveDataCard } from '@/components/ui/ResponsiveDataCard'
+import { DataSkeleton, DataState } from '@/components/ui/DataState'
 import {
   selectableLeadIds,
   setLeadSelected,
@@ -314,27 +317,26 @@ export function DeliveryFailuresTable() {
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-2 px-4 py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
-        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Failure status" className="px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
+      <FilterToolbar resultCount={`${total} result${total === 1 ? '' : 's'}`} ariaLabel="Delivery failure filters">
+        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Failure status" className="control-field flex-1 px-3 py-2 text-sm sm:flex-none">
           <option value="">All Failures</option>
           <option value="bounced">Bounced</option>
           <option value="failed">Failed</option>
           <option value="suppressed">Suppressed</option>
         </select>
-        <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} aria-label="Email type" className="px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
+        <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} aria-label="Email type" className="control-field flex-1 px-3 py-2 text-sm sm:flex-none">
           <option value="">All Email Types</option>
           {Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
-        <form onSubmit={submitSearch} className="flex gap-2 flex-1 min-w-64">
-          <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search business or email..." aria-label="Search business or email" className="min-w-0 flex-1 px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
+        <form onSubmit={submitSearch} className="flex min-w-0 flex-[2_1_18rem] gap-2">
+          <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search business or email..." aria-label="Search business or email" className="control-field min-w-0 flex-1 px-3 py-2 text-sm" />
           <Button size="sm" variant="secondary" type="submit">Search</Button>
           {search && <Button size="sm" variant="ghost" type="button" onClick={clearSearch}>Clear</Button>}
         </form>
-        <span className="self-center text-xs" style={{ color: '#64748b' }}>{total} result{total === 1 ? '' : 's'}</span>
-      </div>
+      </FilterToolbar>
 
       <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b" style={{ borderColor: '#2a2d3e', background: '#151822' }}>
-        <Button size="sm" variant="danger" onClick={openBulkDelete} disabled={selectedCount === 0 || bulkDeleting}>
+        <Button size="sm" variant="danger" className="order-last sm:ml-auto" onClick={openBulkDelete} disabled={selectedCount === 0 || bulkDeleting}>
           Delete Selected{selectedCount > 0 ? ` (${selectedCount})` : ''}
         </Button>
         {filteredLeadCount > 0 && !allFilteredSelected && (
@@ -357,8 +359,8 @@ export function DeliveryFailuresTable() {
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="data-table-shell desktop-data-table">
+        <table className="data-table">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
               <th className="px-4 py-3 text-left">
@@ -421,9 +423,29 @@ export function DeliveryFailuresTable() {
         </table>
       </div>
 
-      <div className="flex items-center justify-between p-4 border-t" style={{ borderColor: '#2a2d3e' }}>
+      <div className="mobile-data-list" data-testid="delivery-failure-mobile-cards">
+        {loading ? <DataSkeleton rows={4} card />
+          : error ? <DataState title="Could not load delivery failures" description={error} tone="error" compact />
+            : rows.length === 0 ? <DataState title="No delivery failures" description="No records match the current filters." compact />
+              : rows.map((row) => (
+                <ResponsiveDataCard
+                  key={row.email_id}
+                  title={<span className="line-clamp-2">{row.business_name ?? 'Deleted or missing lead'}</span>}
+                  badge={<span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${STATUS_COLORS[row.failure_status]}`}>{STATUS_LABELS[row.failure_status]}</span>}
+                  selected={!!row.lead_id && selectedLeadIds.has(row.lead_id)}
+                  actions={<>{row.lead_id && <label className="flex min-h-10 items-center gap-2 text-xs"><input type="checkbox" checked={selectedLeadIds.has(row.lead_id)} onChange={(event) => toggleRow(row.lead_id!, event.target.checked)} className="h-4 w-4 accent-[var(--primary)]" />Select</label>}{row.lead_id && <Button size="sm" variant="danger" className="ml-auto" onClick={() => openDelete(row)}>Delete lead</Button>}</>}
+                >
+                  <DataCardField label="Email"><span className="break-all">{row.email_address ?? 'Unavailable'}</span></DataCardField>
+                  <DataCardField label="Type">{TYPE_LABELS[row.email_type]}</DataCardField>
+                  <DataCardField label="Date">{formatDateTime(row.failure_date)}</DataCardField>
+                  <DataCardField label="Reason"><span className="line-clamp-3">{row.failure_reason}</span></DataCardField>
+                </ResponsiveDataCard>
+              ))}
+      </div>
+
+      <div className="pagination-bar">
         <Button size="sm" variant="secondary" disabled={page <= 1 || loading} onClick={() => changePage(page - 1)}>Previous</Button>
-        <span className="text-xs" style={{ color: '#64748b' }}>Page {page} of {totalPages}</span>
+        <span className="pagination-bar__label">Page {page} of {totalPages}</span>
         <Button size="sm" variant="secondary" disabled={page >= totalPages || loading} onClick={() => changePage(page + 1)}>Next</Button>
       </div>
 

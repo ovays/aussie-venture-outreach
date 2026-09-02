@@ -23,7 +23,7 @@ export default async function AdminPage() {
   return (
     <div>
       <TopBar title="Admin" />
-      <div className="p-3 md:p-6 space-y-4 md:space-y-6">
+      <div className="page-content page-stack">
         <div>
           <h1 className="text-xl font-semibold text-white">User Management</h1>
           <p className="text-sm mt-1" style={{ color: '#94a3b8' }}>

@@ -13,7 +13,7 @@ export default async function LifecyclePage({ searchParams }: Props) {
   return (
     <div>
       <TopBar title="Lifecycle" />
-      <div className="p-6">
+      <div className="page-content">
         <Card className="!p-0 overflow-hidden">
           <ErrorBoundary label="Lifecycle">
             <LifecycleTable initialFilter={filter} />

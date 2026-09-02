@@ -155,18 +155,19 @@ export function KanbanBoard() {
 
   return (
     <>
-      <div className="border-b px-3 py-3 md:px-6" style={{ borderColor: '#2a2d3e' }}>
-        <div className="relative w-full max-w-sm">
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#64748b' }} />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search business, email or domain..." aria-label="Search business, email or domain" className="w-full rounded-lg py-2 pl-9 pr-3 text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
+      <div className="border-b border-[var(--border-subtle)] px-3 py-3 md:px-6">
+        <div className="relative w-full max-w-lg">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search business, email or domain..." aria-label="Search business, email or domain" className="control-field w-full py-2 pl-9 pr-3 text-sm" />
         </div>
+        <p className="mt-2 text-xs text-[var(--text-muted)] md:hidden">Swipe horizontally to review each pipeline stage.</p>
       </div>
-      <div className="flex gap-3 overflow-x-auto pb-4 p-3 md:p-6 min-h-0 flex-1 snap-x snap-mandatory">
+      <div className="flex min-h-0 flex-1 snap-x snap-mandatory gap-3 overflow-x-auto p-3 pb-4 md:p-6" data-testid="pipeline-mobile-swipe" aria-label="Pipeline stages" style={{ overscrollBehaviorX: 'contain' }}>
       {COLUMNS.map(({ key, label, color }) => {
         const column = columns[key]
         return (
-          <div key={key} className="flex flex-col rounded-xl shrink-0 w-[82vw] md:w-64 snap-center" style={{ background: '#1e2130', border: '1px solid #2a2d3e' }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData('text/plain'); if (id) void moveCard(id, key) }}>
-            <div className="flex items-center justify-between px-4 py-3 border-b rounded-t-xl" style={{ borderColor: '#2a2d3e', borderTop: `3px solid ${color}` }}>
+          <div key={key} className="flex w-[84vw] shrink-0 snap-center flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] sm:w-[22rem] md:w-64" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData('text/plain'); if (id) void moveCard(id, key) }}>
+            <div className="flex items-center justify-between rounded-t-xl border-b border-[var(--border-subtle)] px-4 py-3" style={{ borderTop: `3px solid ${color}` }}>
               <h3 className="text-sm font-semibold" style={{ color }}>{label}</h3>
               <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: `${color}20`, color }}>{column.total}</span>
             </div>

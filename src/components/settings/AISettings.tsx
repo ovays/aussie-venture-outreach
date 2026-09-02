@@ -299,7 +299,7 @@ export function AISettings({ initialSettings, canEdit }: AISettingsProps) {
         </div>
         <Card noPadding>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left">
+            <table className="workflow-table w-full min-w-[760px] text-left" data-testid="ai-settings-responsive-workflows">
               <thead>
                 <tr className="border-b text-xs uppercase tracking-wide" style={{ borderColor: '#2a2d3e', color: '#64748b' }}>
                   <th className="px-5 py-3 font-medium">Workflow</th>

@@ -7,7 +7,7 @@ export default function EmailLogPage() {
   return (
     <div>
       <TopBar title="Email Log" />
-      <div className="p-6">
+      <div className="page-content">
         <Card className="!p-0 overflow-hidden">
           <ErrorBoundary label="Email Log">
             <EmailLogTable />

@@ -9,8 +9,8 @@ export default async function DataQualityPage() {
   await requireAdmin()
   return (
     <div>
-      <TopBar title="Admin / Data Quality" />
-      <div className="p-3 md:p-6">
+      <TopBar title="Data Quality" subtitle="Review duplicate, invalid, and incomplete lead data" />
+      <div className="page-content">
         <ErrorBoundary label="Data Quality">
           <DataQualityDashboard />
         </ErrorBoundary>
@@ -18,4 +18,3 @@ export default async function DataQualityPage() {
     </div>
   )
 }
-

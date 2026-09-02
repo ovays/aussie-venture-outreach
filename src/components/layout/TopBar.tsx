@@ -1,48 +1,49 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
-import { LogOut, Menu } from 'lucide-react'
+import { Menu } from 'lucide-react'
 import { useSidebar } from './SidebarContext'
 
 interface TopBarProps {
   title: string
+  subtitle?: string
+  actions?: React.ReactNode
 }
 
-export default function TopBar({ title }: TopBarProps) {
-  const router = useRouter()
-  const { toggle } = useSidebar()
+const defaultSubtitles: Record<string, string> = {
+  Leads: 'Manage discovered and contacted businesses',
+  Pipeline: 'Track opportunities through every stage',
+  'DM Queue': 'Review and action social outreach',
+  'Email Log': 'Review sent outreach and delivery activity',
+  'Email Report': 'Monitor outreach performance and engagement',
+  'Delivery Failures': 'Resolve failed and suppressed deliveries',
+  Lifecycle: 'Manage follow-ups and reactivation activity',
+  Deals: 'Track active commercial opportunities',
+}
 
-  async function handleSignOut() {
-    const supabase = createClient()
-    await supabase.auth.signOut()
-    router.push('/login')
-  }
+export default function TopBar({ title, subtitle, actions }: TopBarProps) {
+  const { toggle } = useSidebar()
+  const context = subtitle ?? defaultSubtitles[title]
 
   return (
     <header
-      className="sticky top-0 z-30 flex items-center justify-between px-4 md:px-6 py-3 md:py-3.5"
-      style={{ background: '#13151f', borderBottom: '1px solid #2a2d3e' }}
+      className="sticky top-0 z-30 flex min-h-16 items-center justify-between gap-3 border-b px-[var(--page-gutter)] py-2.5 backdrop-blur-xl"
+      style={{ background: 'rgb(10 11 13 / 88%)', borderColor: 'var(--border-subtle)' }}
     >
       <div className="flex items-center gap-3 min-w-0">
         <button
           onClick={toggle}
-          className="md:hidden flex items-center justify-center w-9 h-9 rounded-lg text-slate-400 hover:text-white hover:bg-white/8 shrink-0"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] md:hidden"
           aria-label="Open menu"
+          aria-controls="app-sidebar"
         >
           <Menu size={18} />
         </button>
-        <h2 className="text-base font-semibold text-white truncate">{title}</h2>
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)] md:text-lg">{title}</h1>
+          {context && <p className="hidden truncate text-xs text-[var(--text-muted)] sm:block">{context}</p>}
+        </div>
       </div>
-
-      <button
-        onClick={handleSignOut}
-        className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 shrink-0"
-        aria-label="Sign out"
-      >
-        <LogOut size={14} />
-        <span className="hidden sm:inline">Sign out</span>
-      </button>
+      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </header>
   )
 }

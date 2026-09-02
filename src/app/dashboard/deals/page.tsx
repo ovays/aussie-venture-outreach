@@ -7,7 +7,7 @@ export default function DealsPage() {
   return (
     <div>
       <TopBar title="Deals" />
-      <div className="p-6">
+      <div className="page-content">
         <Card className="!p-0 overflow-hidden">
           <ErrorBoundary label="Deals">
             <DealsTable />

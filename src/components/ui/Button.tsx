@@ -6,27 +6,23 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export function Button({ variant = 'primary', size = 'md', className = '', children, ...props }: ButtonProps) {
-  const base = 'inline-flex items-center gap-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+  const base = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-transparent font-medium transition-colors disabled:pointer-events-none disabled:opacity-45'
 
   const variants: Record<string, string> = {
-    primary:   'bg-sky-600 hover:bg-sky-500 text-white',
-    secondary: 'hover:text-white text-white',
-    ghost:     'hover:text-white',
-    danger:    'bg-red-600/20 hover:bg-red-600/30 text-red-400',
+    primary:   'bg-[var(--primary)] text-slate-950 hover:bg-[var(--primary-hover)]',
+    secondary: 'border-[var(--border)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--surface-hover)]',
+    ghost:     'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]',
+    danger:    'border-[rgb(251_113_133_/_20%)] bg-[var(--error-muted)] text-[var(--error)] hover:bg-[rgb(251_113_133_/_18%)]',
   }
 
-  const secondaryStyle = variant === 'secondary' ? { background: '#2a2d3e' } : {}
-  const ghostStyle     = variant === 'ghost'     ? { color: '#94a3b8' }      : {}
-
   const sizes: Record<string, string> = {
-    sm: 'px-3 py-1.5 text-xs',
+    sm: 'min-h-8 px-3 py-1 text-xs',
     md: 'px-4 py-2 text-sm',
   }
 
   return (
     <button
       className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
-      style={{ ...secondaryStyle, ...ghostStyle }}
       {...props}
     >
       {children}

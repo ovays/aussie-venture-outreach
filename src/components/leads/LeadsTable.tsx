@@ -25,6 +25,9 @@ import {
   type LeadsBulkProgress,
 } from '@/lib/leads-bulk-progress'
 import { captureInitialEmailModeSnapshot } from '@/lib/initial-email-mode-operation'
+import { FilterToolbar } from '@/components/ui/FilterToolbar'
+import { DataCardField, ResponsiveDataCard } from '@/components/ui/ResponsiveDataCard'
+import { DataSkeleton, DataState } from '@/components/ui/DataState'
 
 interface Lead {
   id: string
@@ -809,10 +812,13 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
   return (
     <div className="relative">
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row flex-wrap gap-2 p-3 md:p-4 border-b" style={{ borderColor: '#2a2d3e' }}>
+      <FilterToolbar
+        ariaLabel="Lead filters"
+        resultCount={`${total} lead${total === 1 ? '' : 's'}`}
+        actions={<><Button size="sm" variant="secondary" onClick={() => void fetchLeads()} aria-label="Refresh leads"><RefreshCw size={13} />Refresh</Button><Button size="sm" variant="ghost" onClick={() => setImportModalOpen(true)}><Upload size={13} />Import</Button><Button size="sm" onClick={() => setAddModalOpen(true)}><Plus size={13} />Add Lead</Button></>}
+      >
         <div
-          className="flex items-center gap-2 w-full sm:flex-1 sm:min-w-48 px-3 py-2 rounded-lg"
-          style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+          className="control-field flex min-w-0 flex-[2_1_18rem] items-center gap-2 px-3 py-2"
         >
           <Search size={14} style={{ color: '#64748b' }} />
           <input
@@ -824,12 +830,11 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
           />
         </div>
 
-        <div className="flex flex-wrap gap-2 items-center">
           <select
             value={status}
             onChange={(e) => { invalidateFilteredIdsLookup(); setStatus(e.target.value); setPage(1) }}
-            className="px-3 py-2 rounded-lg text-sm text-white outline-none"
-            style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+            aria-label="Lead status"
+            className="control-field flex-1 px-3 py-2 text-sm sm:flex-none"
           >
             <option value="">All Statuses</option>
             {STATUS_OPTIONS.map((s) => (
@@ -840,8 +845,8 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
           <select
             value={city}
             onChange={(e) => { invalidateFilteredIdsLookup(); setCity(e.target.value); setPage(1) }}
-            className="px-3 py-2 rounded-lg text-sm text-white outline-none"
-            style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+            aria-label="Lead city"
+            className="control-field flex-1 px-3 py-2 text-sm sm:flex-none"
           >
             <option value="">All Cities</option>
             {cities.map((c) => (
@@ -855,19 +860,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
             </Button>
           )}
 
-          <span className="text-sm ml-auto sm:ml-0" style={{ color: '#64748b' }}>{total} leads</span>
-
-          <Button size="sm" variant="ghost" onClick={() => setImportModalOpen(true)}>
-            <Upload size={13} />
-            Import Leads
-          </Button>
-
-          <Button size="sm" onClick={() => setAddModalOpen(true)}>
-            <Plus size={13} />
-            Add Lead
-          </Button>
-        </div>
-      </div>
+      </FilterToolbar>
 
       <AddLeadModal
         open={addModalOpen}
@@ -965,8 +958,8 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
       )}
 
       {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="data-table-shell desktop-data-table">
+        <table className="data-table">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
               {/* Checkbox header */}
@@ -1090,13 +1083,36 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
         </table>
       </div>
 
+      <div className="mobile-data-list" data-testid="leads-mobile-cards">
+        {loading ? <DataSkeleton rows={4} card />
+          : loadError ? <DataState title="Could not load leads" description={loadError} tone="error" compact action={<Button size="sm" variant="secondary" onClick={() => void fetchLeads()}>Retry</Button>} />
+            : leads.length === 0 ? <DataState title="No leads found" description="Try clearing the current search or filters." compact />
+              : leads.map((lead) => {
+                const selectable = ['new', 'researched', 'email_ready'].includes(lead.status)
+                return (
+                  <ResponsiveDataCard
+                    key={lead.id}
+                    title={<span className="line-clamp-2">{lead.business_name}</span>}
+                    badge={<StatusBadge status={lead.status} />}
+                    selected={selectedIds.has(lead.id)}
+                    onClick={() => openDrawer(lead.id)}
+                    actions={<>{selectable && <label className="flex min-h-10 items-center gap-2 text-xs text-[var(--text-secondary)]"><input type="checkbox" checked={selectedIds.has(lead.id)} onChange={(event) => toggleSelect(lead.id, event)} className="h-4 w-4 accent-[var(--primary)]" />Select</label>}<Button size="sm" variant="secondary" onClick={() => openDrawer(lead.id)}>Open lead</Button></>}
+                  >
+                    <DataCardField label="Email"><span className="break-all">{lead.email ?? 'No email'}</span></DataCardField>
+                    <DataCardField label="Category">{lead.category_name}</DataCardField>
+                    <DataCardField label="Location">{[lead.suburb, lead.city].filter(Boolean).join(', ') || 'Not provided'}</DataCardField>
+                  </ResponsiveDataCard>
+                )
+              })}
+      </div>
+
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 p-4">
+        <div className="pagination-bar justify-center">
           <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
             Prev
           </Button>
-          <span className="text-sm" style={{ color: '#94a3b8' }}>Page {page} of {totalPages}</span>
+          <span className="pagination-bar__label">Page {page} of {totalPages}</span>
           <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
             Next
           </Button>

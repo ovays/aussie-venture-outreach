@@ -149,7 +149,7 @@ export default async function AIAnalyticsPage({ searchParams }: PageProps) {
   return (
     <div>
       <TopBar title="AI Analytics" />
-      <div className="p-3 md:p-6 space-y-5 md:space-y-6">
+      <div className="page-content page-stack">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="mb-2 flex items-center gap-2 text-xs" style={{ color: '#64748b' }}>
@@ -229,7 +229,7 @@ export default async function AIAnalyticsPage({ searchParams }: PageProps) {
         </div>
 
         <Card title="Recent Requests" noPadding>
-          <div className="overflow-x-auto">
+          <div className="data-table-shell desktop-data-table">
             <table className="w-full min-w-[1100px] text-left text-sm">
               <thead>
                 <tr className="border-b text-xs uppercase tracking-wide" style={{ borderColor: '#2a2d3e', color: '#64748b' }}>
@@ -257,6 +257,25 @@ export default async function AIAnalyticsPage({ searchParams }: PageProps) {
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="mobile-data-list" data-testid="ai-analytics-mobile-cards">
+            {analytics.recentRequests.length === 0 ? (
+              <div className="data-state data-state--compact"><p className="data-state__title">No requests match these filters.</p></div>
+            ) : analytics.recentRequests.map((request) => (
+              <article key={request.id} className="responsive-data-card">
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0"><p className="truncate text-sm font-semibold text-[var(--text-primary)]">{titleCase(request.workflow)}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{new Date(request.createdAt).toLocaleString('en-AU', { timeZone: 'Australia/Sydney' })}</p></div>
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] ${request.status === 'succeeded' ? 'bg-[var(--success-muted)] text-[var(--success)]' : 'bg-[var(--error-muted)] text-[var(--error)]'}`}>{titleCase(request.status)}</span>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                  <div><dt className="text-[var(--text-muted)]">Provider / Model</dt><dd className="mt-1 break-words text-[var(--text-secondary)]">{request.provider ?? 'Unavailable'} · {request.model ?? 'Unavailable'}</dd></div>
+                  <div><dt className="text-[var(--text-muted)]">Latency</dt><dd className="mt-1 text-[var(--text-secondary)]">{latency(request.durationMs)}</dd></div>
+                  <div><dt className="text-[var(--text-muted)]">Tokens</dt><dd className="mt-1 text-[var(--text-secondary)]">{request.totalTokens === null ? 'Unavailable' : number(request.totalTokens)}</dd></div>
+                  <div><dt className="text-[var(--text-muted)]">Cost</dt><dd className="mt-1 text-[var(--text-secondary)]">{cost(request.estimatedCostUsd)}</dd></div>
+                </dl>
+                {request.errorMessage && <p className="mt-3 line-clamp-3 text-xs text-[var(--error)]" title={request.errorMessage}>{request.errorMessage}</p>}
+              </article>
+            ))}
           </div>
         </Card>
       </div>

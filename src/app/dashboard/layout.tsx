@@ -11,9 +11,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <SidebarProvider>
       <LeadDrawerProvider>
-        <div className="flex h-screen overflow-hidden" style={{ background: '#0c0e16' }}>
+        <div className="app-shell flex h-dvh overflow-hidden">
           <Sidebar role={profile.role} />
-          <main className="flex-1 overflow-y-auto min-w-0">
+          <main className="min-w-0 flex-1 overflow-y-auto" id="main-content">
             <HealthBanner />
             {children}
           </main>

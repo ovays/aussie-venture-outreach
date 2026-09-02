@@ -11,14 +11,14 @@ function main() {
   const reportRoute = read('src/app/api/data-quality/route.ts')
   const actionRoute = read('src/app/api/data-quality/actions/route.ts')
   const reportHelper = read('src/lib/data-quality-report.ts')
-  const sidebar = read('src/components/layout/Sidebar.tsx')
+  const navigation = read('src/components/layout/navigation.ts')
   const migration = read('supabase/migrations/050_data_quality_ui_actions.sql')
   const existingDelete = read('src/app/api/leads/[id]/route.ts')
 
   // Page, authorization, navigation, and live summary values.
   assert(page.includes('await requireAdmin()'), 'Data Quality page must require admin access')
   assert(page.includes('<DataQualityDashboard'), 'Data Quality page loads the dashboard')
-  assert(sidebar.includes("'/dashboard/admin/data-quality'"), 'admin navigation includes Data Quality')
+  assert(navigation.includes("'/dashboard/admin/data-quality'") || navigation.includes('href: "/dashboard/admin/data-quality"'), 'admin navigation includes Data Quality')
   assert(reportRoute.includes('await requireApiAdmin()'), 'report API is admin-only')
   assert(actionRoute.includes('await requireApiAdmin()'), 'mutation API is admin-only')
   assert(reportRoute.includes("supabase.rpc('get_data_quality_summary')"), 'summary comes from the P1 RPC')

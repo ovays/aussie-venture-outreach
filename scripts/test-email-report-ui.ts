@@ -166,10 +166,12 @@ assert.match(escapedCsv, /"2 Aug 2026, 10:00 am"/, 'CSV timestamps use the Sydne
 const pageSource = readFileSync(resolve('src/app/dashboard/email-report/page.tsx'), 'utf8')
 const componentSource = readFileSync(resolve('src/components/email-report/EmailReportDashboard.tsx'), 'utf8')
 const sidebarSource = readFileSync(resolve('src/components/layout/Sidebar.tsx'), 'utf8')
+const navigationSource = readFileSync(resolve('src/components/layout/navigation.ts'), 'utf8')
 
 assert.match(pageSource, /EmailReportDashboard/, 'page renders the report dashboard')
 assert.match(pageSource, /TopBar title="Email Report"/, 'page uses the existing dashboard header')
-assert.match(sidebarSource, /\/dashboard\/email-report/, 'authenticated sidebar navigation is present')
+assert.match(sidebarSource, /navigationSections/, 'authenticated sidebar renders the shared navigation model')
+assert.match(navigationSource, /\/dashboard\/email-report/, 'Email Report remains in authenticated navigation')
 assert.match(componentSource, /getEmailReportPresetRange\('last_30_days'\)/, 'page defaults to Last 30 Days')
 assert.match(componentSource, /fetch\(`\/api\/email-report\?/, 'the report uses the single P1 endpoint')
 assert.match(componentSource, /method: 'GET'/, 'the report request is explicitly read-only')

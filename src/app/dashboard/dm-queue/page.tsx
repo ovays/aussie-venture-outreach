@@ -7,7 +7,7 @@ export default function DMQueuePage() {
   return (
     <div>
       <TopBar title="DM Queue" />
-      <div className="p-6">
+      <div className="page-content">
         <Card className="!p-0 overflow-hidden">
           <ErrorBoundary label="DM Queue">
             <DMQueueTable />

@@ -65,19 +65,22 @@ export function formatCurrency(amount: number): string {
 
 export function statusColor(status: string): string {
   const colors: Record<string, string> = {
-    new: 'bg-blue-500/20 text-blue-400',
-    researched: 'bg-purple-500/20 text-purple-400',
-    email_ready: 'bg-yellow-500/20 text-yellow-400',
-    contacted: 'bg-orange-500/20 text-orange-400',
-    replied: 'bg-green-500/20 text-green-400',
-    negotiating: 'bg-teal-500/20 text-teal-400',
-    interested: 'bg-violet-500/20 text-violet-400',
-    closed: 'bg-emerald-500/20 text-emerald-400',
-    closed_won: 'bg-emerald-600/20 text-emerald-300',
-    closed_manual: 'bg-orange-600/20 text-orange-300',
-    dead: 'bg-gray-500/20 text-gray-400',
+    new: 'bg-[var(--info-muted)] text-[var(--info)]',
+    researched: 'bg-[var(--ai-muted)] text-[var(--ai)]',
+    email_ready: 'bg-[var(--warning-muted)] text-[var(--warning)]',
+    contacted: 'bg-[var(--info-muted)] text-[var(--info)]',
+    replied: 'bg-[var(--success-muted)] text-[var(--success)]',
+    negotiating: 'bg-[var(--warning-muted)] text-[var(--warning)]',
+    interested: 'bg-[var(--sand-muted)] text-[var(--sand)]',
+    closed: 'bg-[var(--success-muted)] text-[var(--success)]',
+    closed_won: 'bg-[var(--success-muted)] text-[var(--success)]',
+    closed_manual: 'bg-[var(--success-muted)] text-[var(--success)]',
+    awaiting_reply: 'bg-[var(--warning-muted)] text-[var(--warning)]',
+    failed: 'bg-[var(--error-muted)] text-[var(--error)]',
+    suppressed: 'bg-[var(--error-muted)] text-[var(--error)]',
+    dead: 'bg-[var(--error-muted)] text-[var(--error)]',
   }
-  return colors[status] ?? 'bg-gray-500/20 text-gray-400'
+  return colors[status] ?? 'bg-white/5 text-[var(--text-secondary)]'
 }
 
 export function statusLabel(status: string): string {

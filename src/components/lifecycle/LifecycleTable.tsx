@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from 'react'
 import type { LifecycleLead } from '@/types/lifecycle'
 import { useLeadDrawer } from '@/lib/lead-drawer-context'
+import { DataCardField, ResponsiveDataCard } from '@/components/ui/ResponsiveDataCard'
+import { DataSkeleton, DataState } from '@/components/ui/DataState'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -390,9 +392,9 @@ export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
       </div>
 
       {/* ── Toolbar: search + filter pills ── */}
-      <div ref={tableRef} className="px-4 py-3 border-b space-y-2.5" style={{ borderColor: '#2a2d3e' }}>
+      <div ref={tableRef} className="space-y-2.5 border-b border-[var(--border-subtle)] px-3 py-3 md:px-4" data-testid="lifecycle-filter-toolbar">
         {/* Search */}
-        <div className="relative w-full max-w-xs">
+        <div className="relative w-full md:max-w-md">
           <svg
             className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
             style={{ color: '#475569' }}
@@ -407,8 +409,7 @@ export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
             placeholder="Search business, email or domain…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 rounded-md text-xs outline-none"
-            style={{ background: '#0f1117', border: '1px solid #2a2d3e', color: '#e2e8f0' }}
+            className="control-field w-full py-2 pl-8 pr-3 text-sm"
           />
         </div>
 
@@ -447,8 +448,8 @@ export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
       </div>
 
       {/* ── Table ── */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm" style={{ minWidth: '640px' }}>
+      <div className="data-table-shell desktop-data-table">
+        <table className="data-table min-w-[640px]">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>
@@ -566,8 +567,30 @@ export function LifecycleTable({ initialFilter }: { initialFilter?: string }) {
           </tbody>
         </table>
       </div>
+      <div className="mobile-data-list" data-testid="lifecycle-mobile-cards">
+        {loading && leads.length === 0 ? <DataSkeleton rows={4} card />
+          : error ? <DataState title="Could not load lifecycle" description={error} tone="error" compact />
+            : leads.length === 0 ? <DataState title={search.trim() ? `No results for “${search}”` : 'No leads in this filter'} compact />
+              : leads.map((lead) => {
+                const badge = BADGE[lead.stage] ?? BADGE.Unknown
+                const nextDate = resolveDate(lead.next_action_date, lead.is_overdue)
+                return (
+                  <ResponsiveDataCard
+                    key={lead.id}
+                    title={<span className="line-clamp-2">{lead.business_name}</span>}
+                    badge={<span className="rounded-full px-2 py-1 text-[11px] font-medium" style={{ background: badge.bg, color: badge.text }}>{lead.stage}</span>}
+                    onClick={() => openDrawer(lead.id)}
+                  >
+                    <DataCardField label="Email"><span className="break-all">{lead.email || 'No email'}</span></DataCardField>
+                    <DataCardField label="Next">{lead.next_action}</DataCardField>
+                    <DataCardField label="When"><span style={{ color: nextDate.color }}>{nextDate.label}</span></DataCardField>
+                    <DataCardField label="Activity">{lead.days_since_initial !== null ? `${lead.days_since_initial} days since initial` : 'No initial email'}</DataCardField>
+                  </ResponsiveDataCard>
+                )
+              })}
+      </div>
       {!error && leads.length < total && (
-        <div className="flex justify-center p-4 border-t" style={{ borderColor: '#2a2d3e' }}>
+        <div className="pagination-bar justify-center">
           <button
             type="button"
             disabled={loading}

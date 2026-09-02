@@ -53,18 +53,15 @@ export default async function DashboardPage() {
   return (
     <div>
       <TopBar title="Dashboard" />
-      <div className="p-3 md:p-5 space-y-4 md:space-y-5">
+      <div className="page-content space-y-4 md:space-y-5">
         {/* ── Today's Action Queue ── */}
         <div>
           <div className="flex items-end justify-between mb-5">
             <div>
-              <h2
-                className="text-xl font-bold tracking-tight leading-none"
-                style={{ color: '#f1f5f9' }}
-              >
+              <h2 className="text-xl font-bold leading-none tracking-tight text-[var(--text-primary)]">
                 Today&apos;s Action Queue
               </h2>
-              <p className="text-sm mt-1.5" style={{ color: '#475569' }}>
+              <p className="mt-1.5 text-sm text-[var(--text-muted)]">
                 What needs your attention right now
               </p>
             </div>
@@ -159,8 +156,7 @@ export default async function DashboardPage() {
           {/* Hot Leads — 2 cols */}
           <div className="lg:col-span-2 flex flex-col">
             <div
-              className="flex-1 rounded-2xl overflow-hidden flex flex-col"
-              style={{ background: '#161927', border: '1px solid rgba(255,255,255,0.055)' }}
+                className="surface flex flex-1 flex-col overflow-hidden"
             >
               {/* Header */}
               <div
@@ -205,8 +201,7 @@ export default async function DashboardPage() {
           {/* Live Activity — 1 col */}
           <div className="flex flex-col">
             <div
-              className="flex-1 rounded-2xl overflow-hidden flex flex-col"
-              style={{ background: '#161927', border: '1px solid rgba(255,255,255,0.055)' }}
+                className="surface flex flex-1 flex-col overflow-hidden"
             >
               {/* Header */}
               <div

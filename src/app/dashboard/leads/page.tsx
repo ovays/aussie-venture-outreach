@@ -13,7 +13,7 @@ export default async function LeadsPage({ searchParams }: Props) {
   return (
     <div>
       <TopBar title="Leads" />
-      <div className="p-6">
+      <div className="page-content">
         <Card className="!p-0 overflow-hidden">
           <ErrorBoundary label="Leads Table">
             <LeadsTable initialStatus={status} initialStage={stage} />

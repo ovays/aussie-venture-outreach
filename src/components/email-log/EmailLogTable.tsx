@@ -6,6 +6,9 @@ import { Button } from '@/components/ui/Button'
 import { formatDate, formatDateTime } from '@/lib/utils'
 import { Search } from 'lucide-react'
 import { SEARCH_DEBOUNCE_MS } from '@/lib/search'
+import { FilterToolbar } from '@/components/ui/FilterToolbar'
+import { DataCardField, ResponsiveDataCard } from '@/components/ui/ResponsiveDataCard'
+import { DataSkeleton, DataState } from '@/components/ui/DataState'
 
 interface EmailRecord {
   id: string
@@ -34,7 +37,7 @@ const TYPE_LABELS: Record<string, string> = {
   initial_pitch: 'Initial', follow_up_1: 'Follow-up 1', follow_up_2: 'Follow-up 2', follow_up_3: 'Follow-up 3',
 }
 const STATUS_COLORS: Record<string, string> = {
-  sent: 'bg-green-500/20 text-green-400', failed: 'bg-red-500/20 text-red-400', bounced: 'bg-orange-500/20 text-orange-400', suppressed: 'bg-red-500/20 text-red-300', pending_send: 'bg-yellow-500/20 text-yellow-400', email_sync_failed: 'bg-purple-500/20 text-purple-400',
+  sent: 'bg-[var(--success-muted)] text-[var(--success)]', failed: 'bg-[var(--error-muted)] text-[var(--error)]', bounced: 'bg-[var(--error-muted)] text-[var(--error)]', suppressed: 'bg-[var(--error-muted)] text-[var(--error)]', pending_send: 'bg-[var(--warning-muted)] text-[var(--warning)]', email_sync_failed: 'bg-[var(--error-muted)] text-[var(--error)]',
 }
 const STATUS_LABELS: Record<string, string> = {
   sent: 'Sent', failed: 'Failed', bounced: 'Bounced', suppressed: 'Suppressed', pending_send: 'Pending', email_sync_failed: 'Sync Failed',
@@ -146,38 +149,36 @@ export function EmailLogTable() {
 
   return (
     <div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 md:p-5 border-b" style={{ borderColor: '#2a2d3e' }}>
+      <div className="grid grid-cols-2 gap-3 border-b border-[var(--border-subtle)] p-4 md:grid-cols-4 md:p-5">
         {[
           { label: 'Contacted Leads', value: totalSent, color: '#38bdf8' },
           { label: 'Positive Replies', value: totalReplied, color: '#4ade80' },
           { label: 'Reply Rate', value: `${replyRate}%`, color: '#a78bfa' },
           { label: 'Bounce Rate', value: `${bounceRate}%`, color: '#f87171' },
-        ].map(({ label, value, color }) => <div key={label}><p className="text-xs" style={{ color: '#64748b' }}>{label}</p><p className="text-xl md:text-2xl font-bold mt-0.5" style={{ color }}>{value}</p></div>)}
+        ].map(({ label, value, color }) => <div key={label} className="min-w-0 rounded-lg bg-[var(--surface-raised)] p-3"><p className="text-xs text-[var(--text-muted)]">{label}</p><p className="mt-0.5 text-xl font-bold md:text-2xl" style={{ color }}>{value}</p></div>)}
       </div>
 
-      <div className="flex flex-wrap gap-2 px-4 py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
-        <div className="relative min-w-[240px] flex-1 sm:max-w-sm">
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#64748b' }} />
+      <FilterToolbar resultCount={`${total} email${total === 1 ? '' : 's'}`}>
+        <div className="relative min-w-0 flex-[2_1_18rem]">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search business, email or subject..."
             aria-label="Search business, email or subject"
-            className="w-full rounded-lg py-2 pl-9 pr-3 text-sm text-white outline-none"
-            style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+            className="control-field w-full py-2 pl-9 pr-3 text-sm"
           />
         </div>
-        <select value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); setPage(1) }} className="px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
+        <select aria-label="Email type" value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); setPage(1) }} className="control-field flex-1 px-3 py-2 text-sm sm:flex-none">
           <option value="">All Types</option><option value="initial_pitch">Initial</option><option value="follow_up_1">Follow-up 1</option><option value="follow_up_2">Follow-up 2</option><option value="follow_up_3">Follow-up 3</option>
         </select>
-        <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1) }} className="px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
+        <select aria-label="Email status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1) }} className="control-field flex-1 px-3 py-2 text-sm sm:flex-none">
           <option value="">All Statuses</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="bounced">Bounced</option><option value="suppressed">Suppressed</option><option value="pending_send">Pending</option><option value="email_sync_failed">Sync Failed</option>
         </select>
-        <span className="ml-auto self-center text-xs" style={{ color: '#64748b' }}>{total} email{total === 1 ? '' : 's'}</span>
-      </div>
+      </FilterToolbar>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="data-table-shell desktop-data-table">
+        <table className="data-table">
           <thead><tr style={{ borderBottom: '1px solid #2a2d3e' }}>
             {['Business', 'Type', 'Subject', 'Status', 'Sent At', 'Replied', 'Actions'].map((label, index) => <th key={label} className={`${[2, 4, 5].includes(index) ? 'hidden md:table-cell ' : ''}px-4 py-3 text-left text-xs font-medium uppercase tracking-wider`} style={{ color: '#64748b' }}>{label}</th>)}
           </tr></thead>
@@ -198,9 +199,27 @@ export function EmailLogTable() {
         </table>
       </div>
 
-      <div className="flex items-center justify-between p-4 border-t" style={{ borderColor: '#2a2d3e' }}>
+      <div className="mobile-data-list" data-testid="email-log-mobile-cards">
+        {loading ? <DataSkeleton rows={3} card />
+          : error ? <DataState title="Could not load email activity" description={error} tone="error" compact />
+            : emails.length === 0 ? <DataState title="No email activity" description="Try changing the current search or filters." compact />
+              : emails.map((email) => (
+                <ResponsiveDataCard
+                  key={email.id}
+                  title={<span className="line-clamp-2">{email.leads?.business_name ?? 'Unknown business'}</span>}
+                  badge={<span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${STATUS_COLORS[email.status]}`}>{STATUS_LABELS[email.status]}</span>}
+                  actions={<Button size="sm" variant="secondary" onClick={() => openEmail(email)}>View email</Button>}
+                >
+                  <DataCardField label="Subject"><span className="line-clamp-2">{email.subject}</span></DataCardField>
+                  <DataCardField label="Type">{TYPE_LABELS[email.type]}</DataCardField>
+                  <DataCardField label="Date">{email.sent_at ? formatDateTime(email.sent_at) : 'Not sent'}</DataCardField>
+                </ResponsiveDataCard>
+              ))}
+      </div>
+
+      <div className="pagination-bar">
         <Button size="sm" variant="secondary" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}>Previous</Button>
-        <span className="text-xs" style={{ color: '#64748b' }}>Page {page} of {totalPages}</span>
+        <span className="pagination-bar__label">Page {page} of {totalPages}</span>
         <Button size="sm" variant="secondary" disabled={page >= totalPages || loading} onClick={() => setPage((value) => value + 1)}>Next</Button>
       </div>
 

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Copy, Check, Search } from 'lucide-react'
 import { PlatformBadge, StatusBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { FilterToolbar } from '@/components/ui/FilterToolbar'
 import { Modal } from '@/components/ui/Modal'
 import { formatDate } from '@/lib/utils'
 import { SEARCH_DEBOUNCE_MS } from '@/lib/search'
@@ -112,10 +113,10 @@ export function DMQueueTable() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2 md:gap-3 px-4 py-3 border-b" style={{ borderColor: '#2a2d3e' }}>
-        <div className="relative w-full sm:max-w-xs">
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#64748b' }} />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search business or Instagram..." aria-label="Search business or Instagram" className="w-full rounded-lg py-2 pl-9 pr-3 text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
+      <FilterToolbar resultCount={`${total} DM${total === 1 ? '' : 's'}`} ariaLabel="DM queue filters">
+        <div className="relative min-w-0 flex-[2_1_18rem]">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search business or handle..." aria-label="Search business or handle" className="control-field w-full py-2 pl-9 pr-3 text-sm" />
         </div>
         {(['', 'pending', 'sent', 'skipped'] as const).map((s) => (
           <button
@@ -123,29 +124,31 @@ export function DMQueueTable() {
             onClick={() => { setStatusFilter(s); setPage(1) }}
             className="px-3 py-2 rounded-full text-xs font-medium transition-colors min-h-[36px]"
             style={{
-              background: statusFilter === s ? '#0284c7' : '#1e2130',
-              color: statusFilter === s ? 'white' : '#94a3b8',
+              background: statusFilter === s ? 'var(--primary-muted)' : 'var(--surface-raised)',
+              color: statusFilter === s ? 'var(--primary)' : 'var(--text-secondary)',
+              border: `1px solid ${statusFilter === s ? 'var(--primary-border)' : 'var(--border-subtle)'}`,
             }}
           >
             {s === '' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
           </button>
         ))}
-        <div className="ml-auto flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {(['', 'instagram', 'facebook'] as const).map((p) => (
             <button
               key={p}
               onClick={() => { setPlatformFilter(p); setPage(1) }}
               className="px-3 py-2 rounded-full text-xs font-medium transition-colors min-h-[36px]"
               style={{
-                background: platformFilter === p ? '#2a2d3e' : 'transparent',
-                color: platformFilter === p ? 'white' : '#64748b',
+                background: platformFilter === p ? 'var(--surface-hover)' : 'transparent',
+                color: platformFilter === p ? 'var(--text-primary)' : 'var(--text-muted)',
+                border: '1px solid var(--border-subtle)',
               }}
             >
               {p === '' ? 'All' : p.charAt(0).toUpperCase() + p.slice(1)}
             </button>
           ))}
         </div>
-      </div>
+      </FilterToolbar>
 
       {/* ── Mobile card view ── */}
       <div className="md:hidden">
@@ -219,8 +222,8 @@ export function DMQueueTable() {
       </div>
 
       {/* ── Desktop table view ── */}
-      <div className="hidden md:block overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="data-table-shell hidden md:block">
+        <table className="data-table">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
               {['Business', 'Platform', 'Handle', 'Message Preview', 'Status', 'Added', 'Actions'].map((h) => (
@@ -287,9 +290,9 @@ export function DMQueueTable() {
         </table>
       </div>
 
-      <div className="flex items-center justify-between border-t p-4" style={{ borderColor: '#2a2d3e' }}>
+      <div className="pagination-bar">
         <Button size="sm" variant="secondary" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}>Previous</Button>
-        <span className="text-xs" style={{ color: '#64748b' }}>Page {page} of {Math.max(1, Math.ceil(total / 50))}</span>
+        <span className="pagination-bar__label">Page {page} of {Math.max(1, Math.ceil(total / 50))}</span>
         <Button size="sm" variant="secondary" disabled={page * 50 >= total || loading} onClick={() => setPage((value) => value + 1)}>Next</Button>
       </div>
 

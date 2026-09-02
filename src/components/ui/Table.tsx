@@ -22,12 +22,11 @@ export function Table<T extends { id: string }>({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
+          <tr className="border-b border-[var(--border)] bg-[var(--background-subtle)]">
             {columns.map((col) => (
               <th
                 key={col.key}
-                className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wider ${col.className ?? ''}`}
-                style={{ color: '#64748b' }}
+                className={`px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)] ${col.className ?? ''}`}
               >
                 {col.header}
               </th>
@@ -37,7 +36,7 @@ export function Table<T extends { id: string }>({
         <tbody>
           {data.length === 0 ? (
             <tr>
-              <td colSpan={columns.length} className="px-4 py-12 text-center" style={{ color: '#64748b' }}>
+              <td colSpan={columns.length} className="px-4 py-12 text-center text-[var(--text-muted)]">
                 {emptyMessage}
               </td>
             </tr>
@@ -46,11 +45,10 @@ export function Table<T extends { id: string }>({
               <tr
                 key={row.id}
                 onClick={() => onRowClick?.(row)}
-                className={`border-b transition-colors ${onRowClick ? 'cursor-pointer hover:bg-white/3' : ''}`}
-                style={{ borderColor: '#1e2130' }}
+                className={`border-b border-[var(--border-subtle)] transition-colors ${onRowClick ? 'cursor-pointer hover:bg-[var(--surface-hover)]' : ''}`}
               >
                 {columns.map((col) => (
-                  <td key={col.key} className={`px-4 py-3 ${col.className ?? ''}`} style={{ color: '#e2e8f0' }}>
+                  <td key={col.key} className={`px-4 py-3 text-[var(--text-primary)] ${col.className ?? ''}`}>
                     {col.render ? col.render(row) : String((row as Record<string, unknown>)[col.key] ?? '')}
                   </td>
                 ))}

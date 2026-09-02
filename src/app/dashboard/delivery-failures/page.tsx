@@ -7,7 +7,7 @@ export default function DeliveryFailuresPage() {
   return (
     <div>
       <TopBar title="Delivery Failures" />
-      <div className="p-6">
+      <div className="page-content">
         <Card className="!p-0 overflow-hidden">
           <ErrorBoundary label="Delivery Failures">
             <DeliveryFailuresTable />

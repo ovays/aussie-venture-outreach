@@ -7,6 +7,9 @@ import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Toggle } from '@/components/ui/Toggle'
 import type { Profile, UserRole } from '@/lib/auth-types'
+import { FilterToolbar } from '@/components/ui/FilterToolbar'
+import { DataCardField, ResponsiveDataCard } from '@/components/ui/ResponsiveDataCard'
+import { DataState } from '@/components/ui/DataState'
 
 interface UserManagementProps {
   initialUsers: Profile[]
@@ -190,8 +193,8 @@ export function UserManagement({ initialUsers, currentUserId }: UserManagementPr
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="relative w-full sm:max-w-sm">
+      <FilterToolbar resultCount={`${filteredUsers.length} user${filteredUsers.length === 1 ? '' : 's'}`} actions={<Button onClick={() => setCreateOpen(true)}><Plus size={16} />Create User</Button>} ariaLabel="User filters" className="rounded-xl border border-[var(--border-subtle)]">
+        <div className="relative min-w-0 flex-[2_1_18rem]">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#64748b' }} />
           <Input
             value={query}
@@ -200,11 +203,7 @@ export function UserManagement({ initialUsers, currentUserId }: UserManagementPr
             className="pl-9"
           />
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus size={16} />
-          Create User
-        </Button>
-      </div>
+      </FilterToolbar>
 
       {error && (
         <div className="rounded-lg border px-4 py-3 text-sm text-red-300 bg-red-500/10 border-red-500/30">
@@ -212,8 +211,8 @@ export function UserManagement({ initialUsers, currentUserId }: UserManagementPr
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border" style={{ borderColor: '#2a2d3e' }}>
-        <table className="w-full text-sm">
+      <div className="data-table-shell desktop-data-table rounded-lg border border-[var(--border-subtle)]">
+        <table className="data-table">
           <thead style={{ background: '#11141d' }}>
             <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
               {['User', 'Role', 'Status', 'Created', 'Controls'].map((header) => (
@@ -291,6 +290,22 @@ export function UserManagement({ initialUsers, currentUserId }: UserManagementPr
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="mobile-data-list !p-0" data-testid="user-management-mobile-cards">
+        {filteredUsers.length === 0 ? <DataState title="No users found" compact /> : filteredUsers.map((user) => (
+          <ResponsiveDataCard key={user.id} title={<span className="line-clamp-2">{user.full_name ?? 'Unnamed user'}</span>} badge={<StatusBadge active={user.is_active} />}>
+            <DataCardField label="Email"><span className="break-all">{user.email}</span></DataCardField>
+            <DataCardField label="Role"><RoleBadge role={user.role} /></DataCardField>
+            <DataCardField label="Created">{new Date(user.created_at).toLocaleDateString()}</DataCardField>
+            <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[var(--border-subtle)] pt-3">
+              <select aria-label={`Role for ${user.email}`} value={user.role} disabled={busyId === user.id || user.id === currentUserId} onChange={(event) => updateUser(user.id, { role: event.target.value as UserRole })} className="control-field min-w-0 px-2 text-sm"><option value="admin">admin</option><option value="member">member</option></select>
+              <div className="flex min-h-10 items-center justify-end"><Toggle checked={user.is_active} onChange={(checked) => updateUser(user.id, { is_active: checked })} disabled={busyId === user.id || user.id === currentUserId} /></div>
+              <Button variant="secondary" size="sm" onClick={() => setResetUser(user)} disabled={busyId === user.id}><KeyRound size={14} />Reset</Button>
+              <Button variant="danger" size="sm" onClick={() => deleteUser(user.id)} disabled={busyId === user.id || user.id === currentUserId}><Trash2 size={14} />Delete</Button>
+            </div>
+          </ResponsiveDataCard>
+        ))}
       </div>
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Create User">

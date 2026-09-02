@@ -20,6 +20,9 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/Badge'
 import { EmailAddressList } from '@/components/email-report/EmailAddressList'
+import { FilterToolbar } from '@/components/ui/FilterToolbar'
+import { DataCardField, ResponsiveDataCard } from '@/components/ui/ResponsiveDataCard'
+import { DataSkeleton, DataState } from '@/components/ui/DataState'
 
 const PRESETS: Array<{ value: EmailReportPreset; label: string }> = [
   { value: 'today', label: 'Today' },
@@ -137,7 +140,10 @@ export function EmailReportDashboard() {
             <Input label="To date" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
           </div>
           <Button onClick={applyRange}>Apply</Button>
-          <span className="pb-2 text-xs" style={{ color: '#64748b' }}>Australia/Sydney time</span>
+          <span className="pb-2 text-xs text-[var(--text-muted)]">Australia/Sydney time</span>
+          <Button className="sm:ml-auto" variant="secondary" disabled={loading || !report || filteredRows.length === 0} onClick={exportCsv}>
+            <Download size={15} />Export CSV
+          </Button>
         </div>
         <div className="mt-3 flex flex-wrap gap-2" aria-label="Date presets">
           {PRESETS.map((preset) => (
@@ -175,23 +181,22 @@ export function EmailReportDashboard() {
       )}
 
       <Card noPadding className="overflow-hidden">
-        <div className="flex flex-wrap gap-3 border-b p-4" style={{ borderColor: '#2a2d3e' }}>
-          <div className="relative min-w-56 flex-1">
-            <Search className="pointer-events-none absolute left-3 top-2.5" size={15} color="#64748b" />
+        <FilterToolbar resultCount={`${filteredRows.length} business${filteredRows.length === 1 ? '' : 'es'}`} ariaLabel="Email report filters">
+          <div className="relative min-w-0 flex-[2_1_18rem]">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" size={15} />
             <input
               aria-label="Search business or email"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search business, email or domain..."
-              className="w-full rounded-lg py-2 pl-9 pr-3 text-sm text-white outline-none focus:ring-2 focus:ring-sky-500"
-              style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+              className="control-field w-full py-2 pl-9 pr-3 text-sm"
             />
           </div>
           <Select
             aria-label="Email Status"
             value={emailStatus}
             onChange={(event) => setEmailStatus(event.target.value)}
-            className="min-w-44"
+            className="min-w-0 flex-1 sm:min-w-44"
             options={[
               { value: '', label: 'All Email Statuses' },
               { value: 'replied', label: 'Replied' },
@@ -203,27 +208,15 @@ export function EmailReportDashboard() {
             aria-label="ReachAgent Status"
             value={reachagentStatus}
             onChange={(event) => setReachagentStatus(event.target.value)}
-            className="min-w-48"
+            className="min-w-0 flex-1 sm:min-w-48"
             options={[
               { value: '', label: 'All ReachAgent Statuses' },
               ...reachagentStatuses.map((status) => ({ value: status, label: reachAgentStatusLabel(status) })),
             ]}
           />
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={loading || !report || filteredRows.length === 0}
-            onClick={exportCsv}
-          >
-            <Download size={15} />
-            Export CSV
-          </Button>
-          <span className="self-center text-xs" style={{ color: '#64748b' }}>
-            {filteredRows.length} business{filteredRows.length === 1 ? '' : 'es'}
-          </span>
-        </div>
+        </FilterToolbar>
 
-        <div className="overflow-x-auto">
+        <div className="data-table-shell desktop-data-table">
           <table className="w-full min-w-[940px] text-sm">
             <thead>
               <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
@@ -241,8 +234,31 @@ export function EmailReportDashboard() {
             </tbody>
           </table>
         </div>
+        <div className="mobile-data-list" data-testid="email-report-mobile-cards">
+          {loading ? <DataSkeleton rows={4} card />
+            : error ? <DataState title="Could not load email report" description={error} tone="error" compact />
+              : filteredRows.length === 0 ? <DataState title={report?.rows.length ? 'No contacts match the current filters' : 'No email activity found'} compact />
+                : filteredRows.map((row) => <MobileReportCard key={row.email} row={row} openLead={openDrawer} />)}
+        </div>
       </Card>
     </div>
+  )
+}
+
+function MobileReportCard({ row, openLead }: { row: EmailReportRow; openLead: (leadId: string) => void }) {
+  const addresses = row.email_addresses?.length ? row.email_addresses : [row.email]
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <ResponsiveDataCard
+      title={<span className="line-clamp-2">{row.business_name || 'Unknown business'}</span>}
+      badge={<EmailStatusBadge status={row.email_status} />}
+      actions={row.lead_id ? <Button size="sm" variant="secondary" onClick={() => openLead(row.lead_id!)}>Open lead</Button> : undefined}
+    >
+      <DataCardField label="Email"><EmailAddressList addresses={addresses} expanded={expanded} onToggle={() => setExpanded((value) => !value)} /></DataCardField>
+      <DataCardField label="Status">{reachAgentStatusLabel(row.reachagent_status, row.matching_lead_count)}</DataCardField>
+      <DataCardField label="Activity">{row.received_count} received · {row.sent_count} sent</DataCardField>
+      <DataCardField label="Last">{formatSydneyTimestamp(row.last_activity_at)} · {row.last_direction}</DataCardField>
+    </ResponsiveDataCard>
   )
 }
 

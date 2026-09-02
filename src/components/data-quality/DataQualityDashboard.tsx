@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { ChevronDown, ChevronRight, RefreshCw, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { FilterToolbar } from '@/components/ui/FilterToolbar'
+import { DataCardField, ResponsiveDataCard } from '@/components/ui/ResponsiveDataCard'
+import { DataSkeleton, DataState } from '@/components/ui/DataState'
 import { Modal } from '@/components/ui/Modal'
 import { StatusBadge } from '@/components/ui/Badge'
 import { useLeadDrawer } from '@/lib/lead-drawer-context'
@@ -309,13 +312,15 @@ export function DataQualityDashboard() {
         {TABS.map((tab) => <button key={tab.value || 'all'} onClick={() => chooseIssue(tab.value)} className="px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2" style={{ color: issueType === tab.value ? '#38bdf8' : '#94a3b8', borderColor: issueType === tab.value ? '#0284c7' : 'transparent' }}>{tab.label}</button>)}
       </div>
 
-      <form onSubmit={submitFilters} className="flex flex-wrap gap-2 p-3 border-b" style={{ borderColor: '#2a2d3e' }}>
-        <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} aria-label="Search business, email, or domain" placeholder="Search business, email, or domain..." className="min-w-64 flex-1 px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
-        <input value={cityInput} onChange={(event) => setCityInput(event.target.value)} aria-label="City" placeholder="City" className="w-36 px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
-        <input value={categoryInput} onChange={(event) => setCategoryInput(event.target.value)} aria-label="Category" placeholder="Category" className="w-44 px-3 py-2 rounded-lg text-sm text-white outline-none" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }} />
+      <FilterToolbar resultCount={`${total} result${total === 1 ? '' : 's'}`} ariaLabel="Data quality filters">
+        <form onSubmit={submitFilters} className="contents">
+        <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} aria-label="Search business, email, or domain" placeholder="Search business, email, or domain..." className="control-field min-w-0 flex-[2_1_18rem] px-3 py-2 text-sm" />
+        <input value={cityInput} onChange={(event) => setCityInput(event.target.value)} aria-label="City" placeholder="City" className="control-field flex-1 px-3 py-2 text-sm sm:max-w-36" />
+        <input value={categoryInput} onChange={(event) => setCategoryInput(event.target.value)} aria-label="Category" placeholder="Category" className="control-field flex-1 px-3 py-2 text-sm sm:max-w-44" />
         <Button size="sm" variant="secondary" type="submit">Apply</Button>
         {hasAppliedFilters && <Button size="sm" variant="ghost" type="button" onClick={clearFilters}>Clear</Button>}
-      </form>
+        </form>
+      </FilterToolbar>
 
       <div className="flex flex-wrap items-center gap-2 p-3 border-b" style={{ borderColor: '#2a2d3e', background: '#151822' }}>
         <Button size="sm" variant="secondary" disabled={!selectedRows.length || busy} onClick={() => void bulkResolve()}>Resolve selected ({selectedRows.length})</Button>
@@ -328,8 +333,8 @@ export function DataQualityDashboard() {
       </div>}
       {error && <div role="alert" className="px-4 py-3 text-sm border-b" style={{ color: '#fca5a5', background: '#7f1d1d22', borderColor: '#2a2d3e' }}>{error}</div>}
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[1120px]">
+      <div className="data-table-shell desktop-data-table">
+        <table className="data-table min-w-[1120px]">
           <thead><tr style={{ borderBottom: '1px solid #2a2d3e' }}>
             <th className="px-3 py-3 text-left"><input ref={pageCheckbox} type="checkbox" aria-label="Select all safe junk-email rows on this page" checked={allSelectableSelected} disabled={!selectableRows.length || loading} onChange={(event) => toggleAllSelected(event.target.checked)} className="h-4 w-4 accent-sky-600" /></th>
             {['', 'Issue', 'Business / Businesses', 'Email', 'Leads', 'ReachAgent Status', 'Outreach Owner', 'Last Activity', 'Protection', 'Actions'].map((label, index) => <th key={`${label}-${index}`} className="px-3 py-3 text-left text-[11px] font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>{label}</th>)}
@@ -352,7 +357,20 @@ export function DataQualityDashboard() {
         </table>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3 border-t" style={{ borderColor: '#2a2d3e' }}>
+      <div className="mobile-data-list" data-testid="data-quality-mobile-groups">
+        {loading ? <DataSkeleton rows={4} card />
+          : rows.length === 0 ? <DataState title={emptyMessage(issueType, hasAppliedFilters)} compact />
+            : rows.map((row) => {
+              const key = groupKey(row)
+              return <MobileQualityGroup key={key} row={row} open={expanded.has(key)} busy={busy}
+                selected={selected.has(key)} selectable={isSafelySelectable(row)} onToggle={() => toggleExpanded(row)}
+                onSelect={(checked) => toggleSelected(row, checked)} onResolve={() => void resolveRow(row)}
+                onRemove={(lead) => setRemoveTargets([lead])} onDelete={(lead) => { setDeleteTarget(lead); setProtectedConfirmed(false) }}
+                onOpenLead={openDrawer} onConsolidate={() => setConsolidationTarget(row)} />
+            })}
+      </div>
+
+      <div className="pagination-bar flex-wrap">
         <span className="text-xs" style={{ color: '#64748b' }}>{total} result{total === 1 ? '' : 's'} · Page {total === 0 ? 0 : page} of {totalPages}</span>
         <div className="flex items-center gap-2">
           <label className="text-xs" style={{ color: '#94a3b8' }}>Rows <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }} className="ml-1 rounded px-2 py-1 text-white" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>{[25, 50, 100].map((size) => <option key={size}>{size}</option>)}</select></label>
@@ -383,6 +401,35 @@ export function DataQualityDashboard() {
       </div>}
     </Modal>
   </div>
+}
+
+function MobileQualityGroup({ row, open, busy, selected, selectable, onToggle, onSelect, onResolve, onRemove, onDelete, onOpenLead, onConsolidate }: {
+  row: ReportRow; open: boolean; busy: boolean; selected: boolean; selectable: boolean
+  onToggle: () => void; onSelect: (checked: boolean) => void; onResolve: () => void
+  onRemove: (lead: DataQualityLeadDetail) => void; onDelete: (lead: DataQualityLeadDetail) => void
+  onOpenLead: (id: string) => void; onConsolidate: () => void
+}) {
+  const owner = row.ownership
+  const protectedRow = row.leads.some((lead) => lead.protected_from_auto_delete)
+  return (
+    <ResponsiveDataCard
+      title={<span className="line-clamp-2">{row.lead_count > 1 && row.issue_type === 'shared_email' ? `${row.lead_count} businesses` : row.business_names[0] ?? 'Unknown business'}</span>}
+      badge={<span className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-medium ${ISSUE_STYLES[row.issue_type]}`}>{row.issue_type === 'shared_email' ? 'Shared Inbox' : ISSUE_LABELS[row.issue_type]}</span>}
+      selected={selected}
+      actions={<>{selectable && <label className="flex min-h-10 items-center gap-2 text-xs"><input type="checkbox" checked={selected} onChange={(event) => onSelect(event.target.checked)} className="h-4 w-4 accent-[var(--primary)]" />Select</label>}<Button size="sm" variant="secondary" onClick={onToggle} aria-expanded={open}>{open ? 'Hide details' : 'Review group'}</Button><Button size="sm" variant="ghost" disabled={busy} onClick={onResolve}>Resolve</Button></>}
+    >
+      <DataCardField label="Email"><span className="break-all">{row.normalized_email ?? row.leads[0]?.email ?? 'No email'}</span></DataCardField>
+      <DataCardField label="Leads">{row.lead_count}</DataCardField>
+      <DataCardField label="Owner">{owner?.owner_business_name ?? 'No active owner'}</DataCardField>
+      <DataCardField label="Protection">{protectedRow ? <span className="font-medium text-[var(--warning)]">Protected safeguards apply</span> : 'No safeguards triggered'}</DataCardField>
+      {open && <div className="mt-4 space-y-3 border-t border-[var(--border-subtle)] pt-4">
+        {row.issue_type === 'duplicate_lead' && <div className="rounded-lg border border-[var(--warning)]/30 bg-[var(--warning-muted)] p-3 text-xs text-[var(--warning)]"><strong>Recommendation only:</strong> preferred leads are never merged automatically.</div>}
+        {row.issue_type === 'shared_email' && <div className="rounded-lg border border-[var(--ai)]/30 bg-[var(--ai-muted)] p-3 text-xs text-[var(--ai)]"><strong>Shared inbox:</strong> these businesses remain separate and no merge is available.</div>}
+        <div className="space-y-3">{row.leads.map((lead) => <LeadComparison key={lead.id} lead={lead} row={row} onRemove={onRemove} onDelete={onDelete} onOpenLead={onOpenLead} />)}</div>
+        {row.issue_type === 'duplicate_lead' && <Button size="sm" onClick={onConsolidate}>Consolidate Duplicate</Button>}
+      </div>}
+    </ResponsiveDataCard>
+  )
 }
 
 function RowFragment({ row, open, owner, statuses, protectedRow, selected, selectable, busy, onToggle, onSelect, onResolve, onRemove, onDelete, onOpenLead, onConsolidate }: {
