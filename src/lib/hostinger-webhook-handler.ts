@@ -72,7 +72,7 @@ export async function handleHostingerWebhookRequest(
     const accepted = await dependencies.accept(locator)
     return Response.json({
       ok: true,
-      queued: accepted.status === 'queued' || accepted.status === 'pending',
+      queued: !!accepted.runId || accepted.status === 'queued' || accepted.status === 'pending',
       duplicate: accepted.duplicate,
       receipt_id: accepted.receiptId,
       run_id: accepted.runId ?? null,

@@ -21,7 +21,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         () => tasks.trigger<typeof hostingerInboundTask>(
           'hostinger-inbound-message',
           { receiptId },
-          { idempotencyKey, idempotencyKeyTTL: '5m' },
+          { idempotencyKey, idempotencyKeyTTL: '24h' },
         ),
       )
     }),

@@ -40,13 +40,23 @@ function assert(condition: boolean, label: string, detail?: string): void {
   }
 }
 
+async function expectReject(promise: Promise<unknown>, pattern: RegExp, label: string): Promise<void> {
+  try {
+    await promise
+    assert(false, label, 'promise resolved')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    assert(pattern.test(message), label, message)
+  }
+}
+
 // ─── Minimal in-memory fake of the Supabase query-builder surface actually
 // used by agents/tracker.ts: .from(table).select/update/insert().eq/ilike/limit()
 // then either .single()/.maybeSingle() or awaited directly. Not a general
 // Postgrest mock — just enough to exercise the real handler logic.
 type Row = Record<string, unknown>
 
-function makeFakeSupabase(tables: Record<string, Row[]>) {
+function makeFakeSupabase(tables: Record<string, Row[]>, failUpdates: Record<string, string> = {}) {
   return {
     async rpc(name: string, args: { p_lead_id: string; p_email: string }) {
       if (name !== 'suppress_lead_delivery_email') return { error: { message: 'unknown rpc' } }
@@ -81,6 +91,7 @@ function makeFakeSupabase(tables: Record<string, Row[]>) {
       const exec = async () => {
         const matched = applyFilters(rowsFor())
         if (mode === 'update') {
+          if (failUpdates[table]) return { data: null, error: { message: failUpdates[table] } }
           for (const row of matched) Object.assign(row, patch)
           return { data: null, error: null }
         }
@@ -172,6 +183,42 @@ async function main() {
     const email = await db.from('emails').select().eq('id', 'row-1').maybeSingle()
     assert(lead.data?.status === 'replied', "Lead status advances from 'contacted' to 'replied'")
     assert(email.data?.replied_at !== null, 'initial_pitch email row gets replied_at set')
+  }
+
+  console.log('\n  4a. Reply write failures throw before activity logging')
+  {
+    const tables = {
+      leads: [{ id: 'lead-error', business_name: 'Write Error', status: 'contacted' }],
+      emails: [{ id: 'email-error', lead_id: 'lead-error', type: 'initial_pitch', replied_at: null }],
+      activity_log: [] as Row[],
+    }
+    await expectReject(
+      handleEmailReply('lead-error', makeFakeSupabase(tables, { leads: 'lead update failed' })),
+      /Reply lead status could not be stored/,
+      'Lead status update error throws',
+    )
+    assert(tables.activity_log.length === 0, 'Lead status write failure cannot log reply_received')
+
+    tables.leads[0].status = 'negotiating'
+    await expectReject(
+      handleEmailReply('lead-error', makeFakeSupabase(tables, { emails: 'replied_at update failed' })),
+      /Reply email timestamp could not be stored/,
+      'replied_at update error throws',
+    )
+    assert(tables.activity_log.length === 0, 'replied_at write failure cannot log reply_received')
+  }
+
+  console.log('\n  4b. A matched email whose lead disappeared throws with diagnostics')
+  {
+    const db = makeFakeSupabase({
+      leads: [],
+      emails: [{ id: 'orphan-email', lead_id: 'missing-lead', message_id: '<orphan@example.test>' }],
+      activity_log: [],
+    })
+    await expectReject(processInboundReply({
+      provider: 'hostinger', providerMessageId: 'missing-lead-message', from: 'owner@example.test',
+      inReplyTo: ['<orphan@example.test>'], headers: {}, receiptId: 'receipt-missing-lead',
+    }, db), /Matched inbound reply lead missing-lead could not be loaded/, 'Missing matched lead throws')
   }
 
   // ── 5. Reply handling does not regress a lead past 'contacted' ─────────────

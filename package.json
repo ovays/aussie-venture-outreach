@@ -13,6 +13,7 @@
     "test:data-quality-classifier-fix": "tsx scripts/test-data-quality-classifier-fix.ts",
     "test:duplicate-consolidation-preview": "tsx scripts/test-duplicate-consolidation-preview.ts",
     "audit:data-quality": "tsx scripts/data-quality-dry-run.ts",
+    "audit:hostinger-inbound": "dotenv -e .env.local -- tsx scripts/audit-hostinger-inbound.ts",
     "test:finder-suburb-priorities": "tsx scripts/test-finder-suburb-priorities.ts",
     "test:finder-category-suburb-cooldown": "tsx scripts/test-finder-category-suburb-cooldown.ts",
     "test:settings-suburb-priorities": "tsx scripts/test-settings-suburb-priorities.ts",
@@ -67,7 +68,7 @@
     "test:email-voice": "tsx scripts/test-email-voice.ts",
     "test:outreach-signature": "tsx scripts/test-outreach-signature.ts",
     "preview:initial-redesign": "tsx scripts/preview-initial-outreach-redesign.ts",
-    "deploy:trigger": "npx trigger.dev@4.5.6 deploy"
+    "deploy:trigger": "npx trigger.dev@4.5.15 deploy"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

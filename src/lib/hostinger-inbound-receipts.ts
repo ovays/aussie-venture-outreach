@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createServiceClient } from '@/lib/supabase/server'
 import {
+  HOSTINGER_PROCESSING_STALE_MS,
   hostingerInboundReceiptKey,
   type HostingerInboundReceipt,
   type HostingerInboundReceiptStore,
@@ -14,14 +15,22 @@ interface ReceiptRow {
   id: string
   receipt_key: string
   status: InboundReceiptStatus
+  attempts: number
+  processing_started_at: string | null
+  updated_at: string
 }
 
 function receiptFromRow(row: ReceiptRow, duplicate: boolean): HostingerInboundReceipt {
+  const processingTimestamp = row.processing_started_at ?? row.updated_at
+  const staleProcessing = row.status === 'processing'
+    && Date.parse(processingTimestamp) < Date.now() - HOSTINGER_PROCESSING_STALE_MS
   return {
     id: row.id,
     receiptKey: row.receipt_key,
     status: row.status,
     duplicate,
+    attemptCount: row.attempts,
+    replayable: row.status === 'pending' || row.status === 'failed' || staleProcessing,
   }
 }
 
@@ -43,7 +52,7 @@ export function createHostingerInboundReceiptStore(
           status: 'pending',
           payload: locator,
         })
-        .select('id, receipt_key, status')
+        .select('id, receipt_key, status, attempts, processing_started_at, updated_at')
         .single()
 
       if (!error && data) return receiptFromRow(data as ReceiptRow, false)
@@ -53,7 +62,7 @@ export function createHostingerInboundReceiptStore(
 
       const existing = await supabase
         .from('inbound_receipts')
-        .select('id, receipt_key, status')
+        .select('id, receipt_key, status, attempts, processing_started_at, updated_at')
         .eq('receipt_key', receiptKey)
         .single()
       if (existing.error || !existing.data) {
@@ -63,12 +72,21 @@ export function createHostingerInboundReceiptStore(
     },
 
     async markQueued(receiptId, runId) {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('inbound_receipts')
         .update({ status: 'queued', trigger_run_id: runId, last_error: null, updated_at: new Date().toISOString() })
         .eq('id', receiptId)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'failed'])
+        .select('status')
+        .maybeSingle()
       if (error) throw new Error(`Inbound receipt queue state failed: ${error.message}`)
+      if (data) return data.status as InboundReceiptStatus
+
+      const current = await supabase.from('inbound_receipts').select('status').eq('id', receiptId).single()
+      if (current.error || !current.data) {
+        throw new Error(`Inbound receipt queue state could not be verified: ${current.error?.message ?? 'not found'}`)
+      }
+      return current.data.status as InboundReceiptStatus
     },
 
     async recordEnqueueError(receiptId, errorMessage) {
@@ -76,7 +94,7 @@ export function createHostingerInboundReceiptStore(
         .from('inbound_receipts')
         .update({ last_error: errorMessage.slice(0, 2000), updated_at: new Date().toISOString() })
         .eq('id', receiptId)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'failed'])
       if (error) throw new Error(`Inbound receipt enqueue error could not be stored: ${error.message}`)
     },
   }
@@ -101,7 +119,7 @@ export async function processHostingerInboundReceipt(
 
   const current = await supabase
     .from('inbound_receipts')
-    .select('id, status, payload, processing_run_id')
+    .select('id, status, payload, processing_run_id, processing_started_at, updated_at')
     .eq('id', receiptId)
     .single()
   if (current.error || !current.data) {
@@ -113,24 +131,12 @@ export async function processHostingerInboundReceipt(
   ])
   const status = current.data.status as InboundReceiptStatus
   if (terminal.has(status)) return { status, skipped: true }
-  if (status === 'processing' && current.data.processing_run_id !== runId) {
-    return { status, skipped: true }
-  }
-
-  let claim = supabase
-    .from('inbound_receipts')
-    .update({
-      status: 'processing',
-      processing_run_id: runId,
-      processing_started_at: new Date().toISOString(),
-      last_error: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', receiptId)
-  claim = status === 'processing'
-    ? claim.eq('processing_run_id', runId)
-    : claim.eq('status', status)
-  const claimed = await claim.select('id').maybeSingle()
+  const staleBefore = new Date(Date.now() - HOSTINGER_PROCESSING_STALE_MS).toISOString()
+  const claimed = await supabase.rpc('claim_hostinger_inbound_receipt', {
+    p_receipt_id: receiptId,
+    p_run_id: runId,
+    p_stale_before: staleBefore,
+  }).maybeSingle()
   if (claimed.error) throw new Error(`Inbound receipt claim failed: ${claimed.error.message}`)
   if (!claimed.data) return { status, skipped: true }
 
@@ -153,15 +159,25 @@ export async function processHostingerInboundReceipt(
       })
       .eq('id', receiptId)
       .eq('processing_run_id', runId)
+      .eq('status', 'processing')
+      .select('id')
+      .maybeSingle()
     if (completed.error) throw new Error(`Inbound receipt completion failed: ${completed.error.message}`)
+    if (!completed.data) throw new Error('Inbound receipt completion lost its processing claim')
     return { status: finalStatus }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    await supabase
+    const failed = await supabase
       .from('inbound_receipts')
       .update({ status: 'failed', last_error: message.slice(0, 2000), updated_at: new Date().toISOString() })
       .eq('id', receiptId)
       .eq('processing_run_id', runId)
+      .eq('status', 'processing')
+      .select('id')
+      .maybeSingle()
+    if (failed.error) {
+      throw new Error(`${message}; additionally, receipt failure state could not be stored: ${failed.error.message}`)
+    }
     throw error
   }
 }

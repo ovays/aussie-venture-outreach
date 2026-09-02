@@ -16,6 +16,9 @@
  * Run: npm run test:reactivation-eligibility
  */
 
+import fs from 'node:fs'
+import path from 'node:path'
+
 const SEP = '═'.repeat(68)
 const DIV = '─'.repeat(68)
 
@@ -281,8 +284,14 @@ console.log(`  FU gate results: ${fuPassed} passed, ${fuFailed} failed`)
 console.log(DIV)
 
 // ── Final summary ─────────────────────────────────────────────────────────────
-const totalPassed = passed + fuPassed
-const totalFailed = failed + fuFailed
+const reactivationSource = fs.readFileSync(path.join(process.cwd(), 'agents/reactivation.ts'), 'utf8')
+const finalStatusGuard = reactivationSource.indexOf("sendTimeLead.status !== 'contacted'")
+const providerSend = reactivationSource.indexOf('const result = await sendEmail({', finalStatusGuard)
+const guardPassed = finalStatusGuard >= 0 && providerSend > finalStatusGuard ? 1 : 0
+console.log(`\n  ${guardPassed ? 'PASS' : 'FAIL'}  Reactivation re-checks contacted status immediately before provider send`)
+
+const totalPassed = passed + fuPassed + guardPassed
+const totalFailed = failed + fuFailed + (guardPassed ? 0 : 1)
 
 console.log('\n' + SEP)
 if (totalFailed === 0) {

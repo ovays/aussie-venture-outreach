@@ -1,0 +1,128 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { createClient } from '@supabase/supabase-js'
+
+type Level = 'PASS' | 'WARN' | 'FAIL'
+
+let failures = 0
+
+function report(level: Level, message: string): void {
+  if (level === 'FAIL') failures += 1
+  console.log(`[${level}] ${message}`)
+}
+
+function source(relativePath: string): string {
+  const absolutePath = path.join(process.cwd(), relativePath)
+  if (!fs.existsSync(absolutePath)) {
+    report('FAIL', `${relativePath} is missing`)
+    return ''
+  }
+  return fs.readFileSync(absolutePath, 'utf8')
+}
+
+function has(sourceText: string, expected: string, description: string): void {
+  report(sourceText.includes(expected) ? 'PASS' : 'FAIL', description)
+}
+
+async function main(): Promise<void> {
+  console.log('Hostinger inbound wiring audit (read-only; secret values are never printed)\n')
+
+  const route = source('src/app/api/webhooks/hostinger/route.ts')
+  const task = source('trigger/hostinger-inbound.ts')
+  const mail = source('src/lib/hostinger-mail.ts')
+  const receipts = source('src/lib/hostinger-inbound-receipts.ts')
+  const payloadValidation = source('src/lib/hostinger-inbound-payload.ts')
+  const migration = source('supabase/migrations/046_hostinger_inbound_receipts.sql')
+  const reliabilityMigration = source('supabase/migrations/052_hostinger_inbound_reliability.sql')
+  const threadingMigration = source('supabase/migrations/027_email_threading_and_dedup.sql')
+  const operations = source('docs/hostinger-inbound-production.md')
+  const packageJson = JSON.parse(source('package.json')) as {
+    scripts?: Record<string, string>
+    dependencies?: Record<string, string>
+  }
+
+  has(route, 'export async function POST', 'POST /api/webhooks/hostinger route is implemented')
+  has(route, "'hostinger-inbound-message'", 'webhook route triggers task ID hostinger-inbound-message')
+  has(route, 'HOSTINGER_WEBHOOK_SECRET', 'webhook route reads HOSTINGER_WEBHOOK_SECRET')
+  has(route, 'TRIGGER_SECRET_KEY_PROD', 'webhook route reads the production Trigger.dev key')
+  has(task, "id: 'hostinger-inbound-message'", 'Trigger.dev task exports hostinger-inbound-message')
+  has(task, 'processHostingerInboundReceipt(validated.receiptId', 'task processes a validated durable receipt ID')
+  has(task, 'validateHostingerInboundTaskPayload', 'task performs runtime payload validation')
+  has(task, "name: 'hostinger-inbound'", 'task uses a dedicated Hostinger inbound queue')
+  has(task, 'concurrencyLimit: 3', 'Hostinger inbound queue has an explicit concurrency limit')
+  has(payloadValidation, "typeof receiptId !== 'string'", 'payload validation rejects a non-string receiptId')
+  has(payloadValidation, '!receiptId.trim()', 'payload validation rejects an empty receiptId')
+  has(mail, "requiredEnv('HOSTINGER_MAIL_API_TOKEN')", 'worker requires the Hostinger Mail API token')
+  has(mail, "requiredEnv('HOSTINGER_MAILBOX_ID')", 'worker requires the Hostinger mailbox resource ID')
+  has(mail, "requiredEnv('HOSTINGER_MAILBOX_ADDRESS')", 'worker requires the Hostinger mailbox address')
+  has(mail, "requiredEnv('HOSTINGER_MAIL_API_BASE_URL')", 'worker requires the Hostinger Mail API base URL')
+  has(migration, 'CREATE TABLE IF NOT EXISTS public.inbound_receipts', 'migration 046 creates inbound_receipts')
+  has(migration, 'receipt_key TEXT NOT NULL UNIQUE', 'migration 046 enforces receipt idempotency')
+  has(threadingMigration, 'ADD COLUMN IF NOT EXISTS message_id TEXT', 'migration 027 adds emails.message_id')
+  has(reliabilityMigration, 'emails_message_id_not_null_idx', 'migration 052 adds the partial emails.message_id index')
+  has(reliabilityMigration, 'claim_hostinger_inbound_receipt', 'migration 052 adds atomic failed/stale receipt claiming')
+  has(reliabilityMigration, 'attempts = attempts + 1', 'receipt claims increment processing attempts')
+  has(receipts, "rpc('claim_hostinger_inbound_receipt'", 'worker uses the atomic failed/stale receipt claim')
+  has(receipts, 'HOSTINGER_PROCESSING_STALE_MS', 'worker applies deterministic stale-processing recovery')
+
+  const requiredEnvironment = [
+    'HOSTINGER_WEBHOOK_SECRET',
+    'HOSTINGER_MAIL_API_TOKEN',
+    'HOSTINGER_MAILBOX_ID',
+    'HOSTINGER_MAILBOX_ADDRESS',
+    'HOSTINGER_MAIL_API_BASE_URL',
+    'NEXT_PUBLIC_SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+  ]
+  for (const name of requiredEnvironment) {
+    report(process.env[name]?.trim() ? 'PASS' : 'FAIL', `${name} is present in the audit process`)
+  }
+  const triggerKeyPresent = !!(process.env.TRIGGER_SECRET_KEY_PROD?.trim() || process.env.TRIGGER_SECRET_KEY?.trim())
+  report(triggerKeyPresent ? 'PASS' : 'FAIL', 'TRIGGER_SECRET_KEY_PROD or TRIGGER_SECRET_KEY is present in the audit process')
+
+  const sdkVersion = packageJson.dependencies?.['@trigger.dev/sdk'] ?? 'missing'
+  const deployScript = packageJson.scripts?.['deploy:trigger'] ?? 'missing'
+  const cliVersion = deployScript.match(/trigger\.dev@(\d+\.\d+\.\d+)/)?.[1] ?? 'unpinned'
+  report(cliVersion === sdkVersion ? 'PASS' : 'FAIL', `Trigger.dev SDK=${sdkVersion}; deploy script CLI=${cliVersion}`)
+
+  const documentedTriggerEnvironment = [
+    'HOSTINGER_MAIL_API_TOKEN',
+    'HOSTINGER_MAILBOX_ID',
+    'HOSTINGER_MAILBOX_ADDRESS',
+    'HOSTINGER_MAIL_API_BASE_URL',
+    'NEXT_PUBLIC_SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+  ]
+  for (const name of documentedTriggerEnvironment) {
+    has(operations, name, `Trigger.dev production documentation names ${name}`)
+  }
+  has(operations, 'does not inherit Vercel', 'documentation warns that Trigger.dev does not inherit Vercel variables')
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  if (supabaseUrl && serviceRoleKey) {
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+    const [receiptsProbe, emailsProbe] = await Promise.all([
+      supabase.from('inbound_receipts').select('id', { count: 'exact', head: true }),
+      supabase.from('emails').select('id,message_id,replied_at').limit(1),
+    ])
+    report(receiptsProbe.error ? 'FAIL' : 'PASS', receiptsProbe.error
+      ? `database inbound_receipts probe failed: ${receiptsProbe.error.message}`
+      : `database inbound_receipts is queryable (${receiptsProbe.count ?? 0} receipt rows)`)
+    report(emailsProbe.error ? 'FAIL' : 'PASS', emailsProbe.error
+      ? `database email-column probe failed: ${emailsProbe.error.message}`
+      : 'database emails.message_id and emails.replied_at are queryable')
+  } else {
+    report('WARN', 'database probes skipped because Supabase server credentials are absent')
+  }
+
+  console.log(`\nAudit completed with ${failures} failure(s).`)
+  process.exitCode = failures === 0 ? 0 : 1
+}
+
+main().catch((error) => {
+  console.error(`[FAIL] audit crashed: ${error instanceof Error ? error.message : String(error)}`)
+  process.exitCode = 1
+})

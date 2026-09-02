@@ -12,16 +12,20 @@ export type InboundReceiptStatus =
   | 'unmatched_ambiguous'
   | 'failed'
 
+export const HOSTINGER_PROCESSING_STALE_MS = 10 * 60_000
+
 export interface HostingerInboundReceipt {
   id: string
   receiptKey: string
   status: InboundReceiptStatus
   duplicate: boolean
+  attemptCount: number
+  replayable: boolean
 }
 
 export interface HostingerInboundReceiptStore {
   register(locator: HostingerWebhookLocator): Promise<HostingerInboundReceipt>
-  markQueued(receiptId: string, runId: string): Promise<void>
+  markQueued(receiptId: string, runId: string): Promise<InboundReceiptStatus>
   recordEnqueueError(receiptId: string, error: string): Promise<void>
 }
 
@@ -38,7 +42,7 @@ export async function acceptHostingerInboundEvent(
   enqueue: (receiptId: string, idempotencyKey: string) => Promise<{ id: string }>,
 ): Promise<HostingerWebhookAcceptance> {
   const receipt = await store.register(locator)
-  if (receipt.status !== 'pending') {
+  if (!receipt.replayable) {
     return {
       receiptId: receipt.id,
       duplicate: true,
@@ -47,13 +51,17 @@ export async function acceptHostingerInboundEvent(
   }
 
   try {
-    const handle = await enqueue(receipt.id, `hostinger-inbound-${receipt.receiptKey}`)
-    await store.markQueued(receipt.id, handle.id)
+    // The processing-attempt suffix changes only after a worker successfully
+    // claims the receipt. If enqueue succeeds but markQueued fails, a webhook
+    // retry therefore reuses the same Trigger idempotency key and run.
+    const idempotencyKey = `hostinger-inbound-${receipt.receiptKey}-attempt-${receipt.attemptCount}`
+    const handle = await enqueue(receipt.id, idempotencyKey)
+    const status = await store.markQueued(receipt.id, handle.id)
     return {
       receiptId: receipt.id,
       runId: handle.id,
       duplicate: receipt.duplicate,
-      status: 'queued',
+      status,
     }
   } catch (error) {
     await store.recordEnqueueError(receipt.id, error instanceof Error ? error.message : String(error))

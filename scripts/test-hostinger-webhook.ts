@@ -5,6 +5,7 @@ import { acceptHostingerInboundEvent, hostingerInboundReceiptKey, type Hostinger
 import { processHostingerInboundReceipt } from '../src/lib/hostinger-inbound-receipts'
 import { handleHostingerWebhookRequest } from '../src/lib/hostinger-webhook-handler'
 import { parseHostingerWebhookPayload } from '../src/lib/hostinger-webhook'
+import { validateHostingerInboundTaskPayload } from '../src/lib/hostinger-inbound-payload'
 import type { NormalizedInboundMessage } from '../agents/tracker'
 
 type Row = Record<string, unknown>
@@ -37,7 +38,30 @@ class Query {
 }
 
 function fakeSupabase(receipts: Row[]) {
-  return { from(table: string) { assert.equal(table, 'inbound_receipts'); return new Query(receipts) } } as never
+  return {
+    from(table: string) { assert.equal(table, 'inbound_receipts'); return new Query(receipts) },
+    rpc(name: string, args: { p_receipt_id: string; p_run_id: string; p_stale_before: string }) {
+      assert.equal(name, 'claim_hostinger_inbound_receipt')
+      const row = receipts.find((candidate) => candidate.id === args.p_receipt_id)
+      const status = row?.status
+      const startedAt = String(row?.processing_started_at ?? row?.updated_at ?? '')
+      const isStale = status === 'processing' && !!startedAt && startedAt < args.p_stale_before
+      const isSameRunRetry = status === 'processing' && row?.processing_run_id === args.p_run_id
+      const claimable = status === 'pending' || status === 'queued' || status === 'failed' || isStale || isSameRunRetry
+      return {
+        async maybeSingle() {
+          if (!row || !claimable) return { data: null, error: null }
+          row.status = 'processing'
+          row.processing_run_id = args.p_run_id
+          row.processing_started_at = new Date().toISOString()
+          row.updated_at = row.processing_started_at
+          row.attempts = Number(row.attempts ?? 0) + 1
+          row.last_error = null
+          return { data: { receipt_id: row.id, attempt_count: row.attempts }, error: null }
+        },
+      }
+    },
+  } as never
 }
 
 function webhookRequest(payload: unknown): Request {
@@ -86,9 +110,9 @@ async function main() {
   let enqueueCount = 0
   const store: HostingerInboundReceiptStore = {
     async register(value) {
-      return { id: 'receipt-1', receiptKey: hostingerInboundReceiptKey(value), status, duplicate: status !== 'pending' }
+      return { id: 'receipt-1', receiptKey: hostingerInboundReceiptKey(value), status, duplicate: status !== 'pending', attemptCount: 0, replayable: status === 'pending' }
     },
-    async markQueued(_id, runId) { assert.equal(runId, 'run-1'); status = 'queued' },
+    async markQueued(_id, runId) { assert.equal(runId, 'run-1'); status = 'queued'; return status },
     async recordEnqueueError() { throw new Error('unexpected enqueue failure') },
   }
   const first = await acceptHostingerInboundEvent(locator, store, async () => { enqueueCount += 1; return { id: 'run-1' } })
@@ -97,8 +121,82 @@ async function main() {
   assert.equal(duplicate.duplicate, true)
   assert.equal(enqueueCount, 1, 'duplicate webhook must not enqueue a second task')
 
+  for (const terminalStatus of ['processed', 'ignored'] as const) {
+    let terminalEnqueues = 0
+    const terminalStore: HostingerInboundReceiptStore = {
+      async register(value) {
+        return { id: `receipt-${terminalStatus}`, receiptKey: hostingerInboundReceiptKey(value), status: terminalStatus, duplicate: true, attemptCount: 1, replayable: false }
+      },
+      async markQueued() { throw new Error('terminal receipt must not be queued') },
+      async recordEnqueueError() { throw new Error('terminal receipt must not record enqueue errors') },
+    }
+    const terminal = await acceptHostingerInboundEvent(locator, terminalStore, async () => {
+      terminalEnqueues += 1
+      return { id: 'unexpected' }
+    })
+    assert.equal(terminal.status, terminalStatus)
+    assert.equal(terminalEnqueues, 0, `${terminalStatus} receipt must not replay`)
+  }
+
+  let failedStatus: 'failed' | 'queued' = 'failed'
+  const replayKeys: string[] = []
+  const failedStore: HostingerInboundReceiptStore = {
+    async register(value) {
+      return { id: 'receipt-failed', receiptKey: hostingerInboundReceiptKey(value), status: failedStatus, duplicate: true, attemptCount: 2, replayable: failedStatus === 'failed' }
+    },
+    async markQueued() { failedStatus = 'queued'; return failedStatus },
+    async recordEnqueueError() { throw new Error('unexpected failed replay enqueue error') },
+  }
+  const failedReplay = await acceptHostingerInboundEvent(locator, failedStore, async (_id, key) => {
+    replayKeys.push(key)
+    return { id: 'run-failed-replay' }
+  })
+  assert.equal(failedReplay.status, 'queued')
+  assert.match(replayKeys[0], /attempt-2$/)
+
+  let recoveryStatus: 'pending' | 'queued' = 'pending'
+  let queueWrites = 0
+  const recoveryKeys: string[] = []
+  const recoveryStore: HostingerInboundReceiptStore = {
+    async register(value) {
+      return { id: 'receipt-recovery', receiptKey: hostingerInboundReceiptKey(value), status: recoveryStatus, duplicate: true, attemptCount: 0, replayable: recoveryStatus === 'pending' }
+    },
+    async markQueued() {
+      queueWrites += 1
+      if (queueWrites === 1) throw new Error('queued state write failed')
+      recoveryStatus = 'queued'
+      return recoveryStatus
+    },
+    async recordEnqueueError() {},
+  }
+  await assert.rejects(acceptHostingerInboundEvent(locator, recoveryStore, async (_id, key) => {
+    recoveryKeys.push(key)
+    return { id: 'same-trigger-run' }
+  }), /queued state write failed/)
+  const recovered = await acceptHostingerInboundEvent(locator, recoveryStore, async (_id, key) => {
+    recoveryKeys.push(key)
+    return { id: 'same-trigger-run' }
+  })
+  assert.equal(recovered.status, 'queued')
+  assert.equal(recoveryKeys[0], recoveryKeys[1], 'state-write recovery must reuse the Trigger idempotency key')
+
+  let staleReplayEnqueues = 0
+  const staleReplayStore: HostingerInboundReceiptStore = {
+    async register(value) {
+      return { id: 'receipt-stale-webhook', receiptKey: hostingerInboundReceiptKey(value), status: 'processing', duplicate: true, attemptCount: 1, replayable: true }
+    },
+    async markQueued() { return 'processing' },
+    async recordEnqueueError() { throw new Error('unexpected stale replay enqueue error') },
+  }
+  const staleReplay = await acceptHostingerInboundEvent(locator, staleReplayStore, async () => {
+    staleReplayEnqueues += 1
+    return { id: 'run-stale-replay' }
+  })
+  assert.equal(staleReplay.runId, 'run-stale-replay')
+  assert.equal(staleReplayEnqueues, 1, 'stale processing duplicate webhook enqueues a reclaim run')
+
   const processingPayload = parseHostingerWebhookPayload(payload)
-  const receipts: Row[] = [{ id: 'receipt-bg', status: 'queued', payload: processingPayload, processing_run_id: null }]
+  const receipts: Row[] = [{ id: 'receipt-bg', status: 'queued', payload: processingPayload, processing_run_id: null, attempts: 0 }]
   let fetchCount = 0
   let processCount = 0
   const fetchMessage = async (): Promise<NormalizedInboundMessage> => {
@@ -116,8 +214,9 @@ async function main() {
   assert.equal(replay.skipped, true)
   assert.equal(fetchCount, 1)
   assert.equal(processCount, 1, 'completed task replay must not process twice')
+  assert.equal(receipts[0].attempts, 1)
 
-  const retryRows: Row[] = [{ id: 'receipt-retry', status: 'queued', payload: processingPayload, processing_run_id: null }]
+  const retryRows: Row[] = [{ id: 'receipt-retry', status: 'queued', payload: processingPayload, processing_run_id: null, attempts: 0 }]
   let attempts = 0
   const retryProcessor = async () => {
     attempts += 1
@@ -133,6 +232,51 @@ async function main() {
   })
   assert.equal(retryResult.status, 'processed')
   assert.equal(attempts, 2)
+  assert.equal(retryRows[0].attempts, 2)
+
+  const missingLeadRows: Row[] = [{ id: 'receipt-missing', status: 'queued', payload: processingPayload, attempts: 0 }]
+  await assert.rejects(processHostingerInboundReceipt('receipt-missing', 'run-missing', {
+    supabase: fakeSupabase(missingLeadRows), fetchMessage,
+    processReply: (async () => { throw new Error('Matched inbound reply lead lead-gone could not be loaded: not found') }) as never,
+  }), /lead-gone/)
+  assert.equal(missingLeadRows[0].status, 'failed', 'missing matched lead receipt must not become processed')
+  assert.match(String(missingLeadRows[0].last_error), /lead-gone/, 'missing lead diagnostic is retained')
+
+  const freshRows: Row[] = [{
+    id: 'receipt-fresh', status: 'processing', payload: processingPayload,
+    processing_run_id: 'run-active', processing_started_at: new Date().toISOString(), attempts: 1,
+  }]
+  const fresh = await processHostingerInboundReceipt('receipt-fresh', 'run-other', {
+    supabase: fakeSupabase(freshRows), fetchMessage, processReply: processReply as never,
+  })
+  assert.equal(fresh.skipped, true)
+  assert.equal(freshRows[0].processing_run_id, 'run-active', 'fresh processing receipt cannot be reclaimed')
+
+  const sameRunRows: Row[] = [{
+    id: 'receipt-same-run', status: 'processing', payload: processingPayload,
+    processing_run_id: 'run-retry', processing_started_at: new Date().toISOString(), attempts: 1,
+  }]
+  const sameRun = await processHostingerInboundReceipt('receipt-same-run', 'run-retry', {
+    supabase: fakeSupabase(sameRunRows), fetchMessage, processReply: processReply as never,
+  })
+  assert.equal(sameRun.status, 'processed')
+  assert.equal(sameRunRows[0].attempts, 2, 'same Trigger run can resume after a hard attempt crash')
+
+  const staleRows: Row[] = [{
+    id: 'receipt-stale', status: 'processing', payload: processingPayload,
+    processing_run_id: 'run-crashed', processing_started_at: '2026-01-01T00:00:00.000Z', attempts: 1,
+  }]
+  const stale = await processHostingerInboundReceipt('receipt-stale', 'run-reclaim', {
+    supabase: fakeSupabase(staleRows), fetchMessage, processReply: processReply as never,
+  })
+  assert.equal(stale.status, 'processed')
+  assert.equal(staleRows[0].attempts, 2, 'stale processing reclaim increments attempts')
+
+  assert.throws(() => validateHostingerInboundTaskPayload(undefined), /expected an object/)
+  assert.throws(() => validateHostingerInboundTaskPayload({}), /receiptId/)
+  assert.throws(() => validateHostingerInboundTaskPayload({ receiptId: '   ' }), /receiptId/)
+  assert.throws(() => validateHostingerInboundTaskPayload({ receiptId: 'receipt-ok', extra: true }), /receiptId/)
+  assert.deepEqual(validateHostingerInboundTaskPayload({ receiptId: ' receipt-ok ' }), { receiptId: 'receipt-ok' })
 
   const mailSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/hostinger-mail.ts'), 'utf8')
   assert.doesNotMatch(mailSource, /messages[^\n]*\/source/)
@@ -141,6 +285,10 @@ async function main() {
   assert.doesNotMatch(mailSource, /\/messages\/flags/)
   assert.match(mailSource, /getMessageMetadata\(locator, config, fetchImpl\)/)
   assert.match(mailSource, /metadataHeaders\(message, locator\)/)
+
+  const migrationSource = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations/052_hostinger_inbound_reliability.sql'), 'utf8')
+  assert.match(migrationSource, /CREATE INDEX IF NOT EXISTS emails_message_id_not_null_idx/)
+  assert.match(migrationSource, /WHERE message_id IS NOT NULL/)
 
   console.log('✓ fast acknowledgement, durable queueing, dedupe, retry, metadata-only retrieval, and unchanged flags')
 }

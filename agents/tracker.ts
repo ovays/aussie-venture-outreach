@@ -20,24 +20,31 @@ export async function handleEmailReply(
 ): Promise<void> {
   const supabase = supabaseOverride ?? createServiceClient()
 
-  const { data: lead } = await supabase
+  const { data: lead, error: leadError } = await supabase
     .from('leads')
     .select('id, business_name, status')
     .eq('id', leadId)
     .single()
 
-  if (!lead) return
+  if (leadError || !lead) {
+    throw new Error(
+      `Matched inbound reply lead ${leadId} could not be loaded: ${leadError?.message ?? 'not found'}`,
+    )
+  }
 
   // Advance outreach/no-response states, including a genuinely late reply
   // from a lead already marked dead. Never regress active-deal or closed
   // states. The status predicate also prevents a concurrent manual status
   // change between this read and update from being overwritten.
   if (lead.status === 'contacted' || lead.status === 'dead') {
-    await supabase
+    const { error: leadUpdateError } = await supabase
       .from('leads')
       .update({ status: 'replied' })
       .eq('id', leadId)
       .eq('status', lead.status)
+    if (leadUpdateError) {
+      throw new Error(`Reply lead status could not be stored: ${leadUpdateError.message}`)
+    }
   }
 
   let replyUpdate = supabase
@@ -53,7 +60,10 @@ export async function handleEmailReply(
     ? replyUpdate.eq('id', matchedEmailId)
     : replyUpdate.eq('type', 'initial_pitch')
 
-  await replyUpdate
+  const { error: replyUpdateError } = await replyUpdate
+  if (replyUpdateError) {
+    throw new Error(`Reply email timestamp could not be stored: ${replyUpdateError.message}`)
+  }
 
   const { error: activityError } = await supabase.from('activity_log').insert({
     event_type: 'reply_received',
