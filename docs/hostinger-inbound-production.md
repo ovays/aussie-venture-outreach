@@ -60,6 +60,37 @@ The worker continues to fetch message metadata only. It must not call `/text`,
 `/source`, attachments, message flag updates, or any endpoint that sets
 `\\Seen`.
 
+## Webhook-to-UID resolution
+
+Receipts retain the safe webhook locator fields (UID, provider Message-ID,
+event/delivery ID, thread ID, sender, recipients/mailbox, subject, received
+timestamp, and folder) but never a message body. Resolution uses, in order:
+
+1. the webhook UID in `INBOX`;
+2. an exact provider Message-ID;
+3. thread ID + exact sender + timestamp when Hostinger list metadata exposes a
+   thread ID;
+4. exact sender + trimmed, case-insensitive subject + timestamp;
+5. exact sender + timestamp only when exactly one message remains.
+
+Hostinger's current message-list/search schema does not expose its internal
+webhook thread ID, so step 3 is normally unavailable; it is not treated as an
+RFC Message-ID. Timestamp comparisons use parsed instants and a two-minute
+tolerance. The worker uses Hostinger's paginated `/messages/search` metadata
+endpoint against `INBOX` only with date filters, then enforces the exact time
+window locally. A missing webhook folder defaults to `INBOX`. An explicitly
+non-Inbox webhook is ignored before queueing, and a message moved or deleted
+before the worker resolves it is not recovered from Trash or another folder.
+Multiple safe matches remain a failure; the worker never selects the first
+result.
+
+To replay a failed receipt after deploying the corrected Trigger task, trigger
+`hostinger-inbound-message` from the Trigger.dev production dashboard with the
+existing payload `{ "receiptId": "<existing receipt UUID>" }`. The atomic claim
+accepts `failed` rows and increments `attempts`; no new receipt is inserted. A
+redelivery of the exact same Hostinger webhook is also safe because its receipt
+key finds and requeues the same failed row.
+
 ## Local credential safety
 
 `.claude/settings.local.json` is ignored and untracked. Keep it out of Git and

@@ -5,6 +5,7 @@ export interface HostingerWebhookLocator {
   mailboxId?: string
   mailboxAddress?: string
   folder: string
+  folderProvided?: boolean
   uid?: number
   providerMessageId?: string
   eventId?: string
@@ -16,6 +17,12 @@ export interface HostingerWebhookLocator {
   inReplyTo?: string[]
   references?: string[]
   headers: Record<string, string>
+}
+
+export const HOSTINGER_INBOX_FOLDER = 'INBOX'
+
+export function isHostingerInboxFolder(folder: string): boolean {
+  return folder.trim().toUpperCase() === HOSTINGER_INBOX_FOLDER
 }
 
 export interface HostingerWebhookDiagnostics {
@@ -124,6 +131,28 @@ function addresses(value: unknown): string[] | undefined {
   return result.length ? result : undefined
 }
 
+function addressAt(objects: Array<JsonObject | null>, keys: readonly string[]): string | undefined {
+  for (const object of objects) {
+    if (!object) continue
+    for (const key of keys) {
+      const value = address(object[key])
+      if (value) return value
+    }
+  }
+  return undefined
+}
+
+function addressesAt(objects: Array<JsonObject | null>, keys: readonly string[]): string[] | undefined {
+  for (const object of objects) {
+    if (!object) continue
+    for (const key of keys) {
+      const value = addresses(object[key])
+      if (value) return value
+    }
+  }
+  return undefined
+}
+
 function stringValues(value: unknown): string[] | undefined {
   const values = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]
   const strings = values
@@ -212,7 +241,15 @@ export function normalizeHostingerWebhookPayload(payload: unknown): HostingerWeb
   const messageId = locatedString([{ value: message, prefix: 'message.' }], HOSTINGER_WEBHOOK_FIELD_ALIASES.messageId)
   const fallbackMessageId = messageId.value
     ? messageId
-    : locatedString([{ value: resource, prefix: 'resource.' }], HOSTINGER_WEBHOOK_FIELD_ALIASES.messageId.slice(0, -1))
+    : locatedString(
+      [
+        { value: resource, prefix: 'resource.' },
+        { value: data, prefix: 'data.' },
+        { value: nestedPayload, prefix: 'payload.' },
+        { value: root, prefix: '' },
+      ],
+      HOSTINGER_WEBHOOK_FIELD_ALIASES.messageId.slice(0, -1),
+    )
   const eventId = locatedString(containers, HOSTINGER_WEBHOOK_FIELD_ALIASES.eventId)
   const threadId = locatedString(containers, HOSTINGER_WEBHOOK_FIELD_ALIASES.threadId)
   const folder = locatedString(containers, HOSTINGER_WEBHOOK_FIELD_ALIASES.folder)
@@ -242,14 +279,15 @@ export function normalizeHostingerWebhookPayload(payload: unknown): HostingerWeb
     eventType: event.value,
     mailboxId: fallbackMailboxId.value,
     mailboxAddress,
-    folder: folder.value ?? 'INBOX',
+    folder: folder.value ?? HOSTINGER_INBOX_FOLDER,
+    folderProvided: !!folder.value,
     uid: numericUid && numericUid > 0 ? numericUid : undefined,
     providerMessageId: fallbackMessageId.value,
     eventId: eventId.value,
     threadId: threadId.value,
-    from: address(message.from ?? message.sender),
-    to: addresses(message.to ?? message.recipient ?? message.recipients),
-    subject: stringAt([message], ['subject']),
+    from: addressAt([message, resource, data, nestedPayload, root], ['from', 'sender']),
+    to: addressesAt([message, resource, data, nestedPayload, root], ['to', 'recipient', 'recipients']),
+    subject: stringAt([message, resource, data, nestedPayload, root], ['subject']),
     receivedAt: stringAt(containers.map(({ value }) => value), ['receivedAt', 'received_at', 'timestamp', 'date', 'createdAt', 'created_at']),
     inReplyTo: stringValues(message.inReplyTo ?? message.in_reply_to ?? headers['in-reply-to']),
     references: stringValues(message.references ?? headers.references),

@@ -1,5 +1,6 @@
 import type { HostingerWebhookLocator } from '@/lib/hostinger-webhook'
 import {
+  isHostingerInboxFolder,
   normalizeHostingerWebhookPayload,
   validateHostingerMessageLocator,
   verifyHostingerBearerSecret,
@@ -33,6 +34,7 @@ function locatorPresence(locator: HostingerWebhookLocator): Record<string, boole
     mailbox_id: !!locator.mailboxId,
     mailbox_address: !!locator.mailboxAddress,
     folder: !!locator.folder,
+    folder_from_webhook: locator.folderProvided === true,
     uid: !!locator.uid,
     message_id: !!locator.providerMessageId,
     event_id: !!locator.eventId,
@@ -110,6 +112,15 @@ export async function handleHostingerWebhookRequest(
       http_status: 200,
     })
     return Response.json({ ok: true, ignored: true })
+  }
+
+  if (locator.folderProvided === true && !isHostingerInboxFolder(locator.folder)) {
+    dependencies.log?.info('Hostinger webhook event ignored', {
+      event_type: safeEventType(locator.eventType),
+      validation_failure: 'Message is not in Inbox',
+      http_status: 200,
+    })
+    return Response.json({ ok: true, ignored: true, reason: 'non_inbox_folder' })
   }
 
   const locatorError = validateHostingerMessageLocator(locator)
