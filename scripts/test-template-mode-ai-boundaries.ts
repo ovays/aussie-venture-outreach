@@ -30,6 +30,12 @@ class MemoryDb {
   }
 
   from(table: string) { return new Query(this, table) }
+  async rpc(name: string, args: { p_lead_id?: string }) {
+    if (name === 'claim_recipient_outreach') {
+      return { data: { allowed: true, owner_lead_id: args.p_lead_id ?? null, normalized_email: null, reason: null }, error: null }
+    }
+    return { data: null, error: null }
+  }
 }
 
 class Query {
@@ -216,7 +222,7 @@ async function main() {
   {
     const calls = counters()
     const missingLead = { ...baseLead, id: 'missing-email', business_name: 'Missing Email Co' }
-    const goodLead = { ...baseLead, id: 'next-lead', business_name: 'Next Lead', category_id: null, email: 'next@example.com' }
+    const goodLead = { ...baseLead, id: 'next-lead', business_name: 'Next Lead', category_id: null, email: 'next@gmail.com' }
     const db = new MemoryDb([missingLead, goodLead])
     const templateAi = throwingTemplateDependencies(calls)
     const outcomes: string[] = []

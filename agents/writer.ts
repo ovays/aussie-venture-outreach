@@ -81,6 +81,8 @@ export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<v
       .from('leads')
       .select('*, categories(*)')
       .eq('status', 'researched')
+      .is('outreach_suppressed_at', null)
+      .is('outreach_suppression_reason', null)
 
     if (leadsErr) logger.error('writer', 'Error fetching researched leads', { error: leadsErr.message })
 

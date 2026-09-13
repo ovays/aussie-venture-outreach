@@ -3,6 +3,7 @@ import { composeOutreachEmailBody } from '@/lib/outreach-signature'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
 import { generateInitialEmailFromTemplate } from '@/lib/initial-email-template'
 import { isInitialEmailMode, type InitialEmailMode } from '@/lib/settingsDefaults'
+import { claimRecipientOutreach, releaseRecipientOutreachClaim, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
 
 export type InitialEmailLead = {
   id: string; business_name: string; category_id: string | null; category_name: string | null
@@ -69,12 +70,33 @@ export async function routeInitialEmail(
   try {
     const { data: pending, error: pendingError } = await supabase.from('emails').select('id').eq('lead_id', lead.id).eq('type', 'initial_pitch').eq('status', 'pending_send').limit(1).maybeSingle()
     if (pendingError) return failure(lead, mode, 'email_lookup_failed', pendingError.message)
-    if (operation === 'normal' && pending) return { ok: true, mode, outcome: 'existing', emailId: pending.id }
+    if (operation === 'normal' && pending) {
+      const ownership = await claimRecipientOutreach(supabase, lead.id, 'initial')
+      if (!ownership.allowed) {
+        await removeLeadFromInitialOutreachQueue(supabase, lead.id)
+        return failure(lead, mode, 'recipient_suppressed', 'Recipient is not eligible for outreach.')
+      }
+      const { error: recoveryError } = await supabase.from('leads').update({ status: 'email_ready' }).eq('id', lead.id)
+      if (recoveryError) return failure(lead, mode, 'lead_transition_failed', recoveryError.message)
+      return { ok: true, mode, outcome: 'existing', emailId: pending.id }
+    }
     const targetId = options.pendingEmailId ?? pending?.id
     if (operation === 'regenerate' && !targetId) return failure(lead, mode, 'no_eligible_email', 'No pending Initial Email exists for regeneration.')
 
     const generated = await generateContent(supabase, lead, mode, options.aiWriter)
     if (!generated.ok) return generated
+    const ownership = await claimRecipientOutreach(supabase, lead.id, 'initial')
+    if (!ownership.allowed) {
+      await removeLeadFromInitialOutreachQueue(supabase, lead.id)
+      return failure(
+        lead,
+        mode,
+        'recipient_suppressed',
+        ownership.reason === 'email_already_contacted'
+          ? 'Another lead owns the active outreach lifecycle for this recipient.'
+          : `Recipient is not eligible for outreach: ${ownership.reason ?? 'suppressed'}.`,
+      )
+    }
     const values = { subject: generated.subject!, body_text: generated.body!, body_html: generated.html!, generation_source: generated.generationSource!, edited_at: null, edited_by_user: false }
     if (operation === 'regenerate') {
       const { data, error } = await supabase.from('emails').update(values).eq('id', targetId!).eq('lead_id', lead.id).eq('type', 'initial_pitch').eq('status', 'pending_send').select('id').maybeSingle()
@@ -84,11 +106,13 @@ export async function routeInitialEmail(
     const { data, error } = await supabase.from('emails').insert({ lead_id: lead.id, type: 'initial_pitch', status: 'pending_send', ...values }).select('id').single()
     if (error) {
       if (error.code === '23505') return { ok: true, mode, outcome: 'existing' }
+      await releaseRecipientOutreachClaim(supabase, lead.id, ownership.normalizedEmail, ownership.claimToken)
       return failure(lead, mode, 'database_save_conflict', error.message)
     }
     const { error: leadError } = await supabase.from('leads').update({ status: 'email_ready' }).eq('id', lead.id)
     if (leadError) {
-      await supabase.from('emails').delete().eq('id', data.id).eq('lead_id', lead.id).eq('type', 'initial_pitch').eq('status', 'pending_send')
+      const { error: cleanupError } = await supabase.from('emails').delete().eq('id', data.id).eq('lead_id', lead.id).eq('type', 'initial_pitch').eq('status', 'pending_send')
+      if (!cleanupError) await releaseRecipientOutreachClaim(supabase, lead.id, ownership.normalizedEmail, ownership.claimToken)
       return failure(lead, mode, 'lead_transition_failed', leadError.message)
     }
     return { ...generated, outcome: 'created', emailId: data.id }

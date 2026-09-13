@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { claimRecipientOutreach, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
 
 export async function POST(
   _request: NextRequest,
@@ -38,6 +39,16 @@ export async function POST(
       { error: 'No pending email found. Run the writer pipeline first so it can generate an email for this lead.' },
       { status: 400 }
     )
+  }
+
+  const ownership = await claimRecipientOutreach(supabase, id, 'initial')
+  if (!ownership.allowed) {
+    await removeLeadFromInitialOutreachQueue(supabase, id)
+    return NextResponse.json({
+      error: 'This recipient already has an outreach lifecycle owned by another lead.',
+      reason: ownership.reason,
+      owner_lead_id: ownership.ownerLeadId,
+    }, { status: 409 })
   }
 
   const { error: emailUpdateErr } = await supabase

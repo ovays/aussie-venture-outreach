@@ -4,6 +4,7 @@ import { addLeadToDedupeIndex, checkLeadDedupe, type LeadDedupeIndex } from '@/l
 import { routeInitialEmail } from '@/lib/initial-email-router'
 import type { InitialEmailMode } from '@/lib/settingsDefaults'
 import { classifyEmailQuality } from '@/lib/data-quality'
+import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 
 export type WriteableLeadRow = {
   id: string
@@ -18,6 +19,9 @@ export type WriteableLeadRow = {
   email: string | null
   instagram_handle: string | null
   content_type: string | null
+  delivery_suppressed_emails?: string[] | null
+  outreach_suppression_reason?: string | null
+  outreach_suppressed_at?: string | null
 }
 
 export type WriteOneLeadResult =
@@ -53,6 +57,16 @@ export async function writeOneLead(
     return { success: true, channel: 'dead' }
   }
 
+  if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
+    await supabase.from('activity_log').insert({
+      event_type: 'data_quality_email_suppressed',
+      lead_id: lead.id,
+      description: `Initial outreach not queued for ${lead.business_name}: terminal delivery suppression`,
+      metadata: { issue_type: 'delivery_suppressed_email', normalized_email: lead.email.trim().toLowerCase() },
+    })
+    return { success: true, channel: 'duplicate' }
+  }
+
   const emailQuality = classifyEmailQuality(lead.email)
   if (emailQuality.issueType) {
     await supabase.from('activity_log').insert({
@@ -61,6 +75,10 @@ export async function writeOneLead(
       description: `Initial outreach not queued for ${lead.business_name}: ${emailQuality.issueType}`,
       metadata: { issue_type: emailQuality.issueType, normalized_email: emailQuality.normalizedEmail },
     })
+    return { success: true, channel: 'duplicate' }
+  }
+
+  if (lead.outreach_suppressed_at || lead.outreach_suppression_reason) {
     return { success: true, channel: 'duplicate' }
   }
 

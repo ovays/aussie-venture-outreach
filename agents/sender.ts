@@ -5,7 +5,7 @@ import { getAnalyticsDayRange } from '@/lib/analytics'
 import { handleEmailSyncFailure } from '@/lib/email-status'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
-import { claimRecipientOutreach } from '@/lib/data-quality'
+import { claimRecipientOutreach, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
 
 // Held for the entire quota-check-then-send sequence below so two overlapping
 // invocations (a stuck old run, a manual script racing the scheduled
@@ -201,12 +201,14 @@ console.log("FILTERED PENDING", pendingEmails)
     if (!lead?.email) {
       logger.info('sender', `#${i + 1}/${total} SKIP — no email address for lead`, { lead_id: emailRecord.lead_id })
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
+      await removeLeadFromInitialOutreachQueue(supabase, emailRecord.lead_id)
       failed++
       continue
     }
 
     if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
       logger.warn('sender', 'INITIAL_EMAIL_SUPPRESSED_DELIVERY_FAILURE', { lead_id: emailRecord.lead_id })
+      await removeLeadFromInitialOutreachQueue(supabase, emailRecord.lead_id, 'suppressed')
       continue
     }
 
@@ -218,6 +220,7 @@ console.log("FILTERED PENDING", pendingEmails)
         reason: ownership.reason,
       })
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
+      await removeLeadFromInitialOutreachQueue(supabase, emailRecord.lead_id)
       failed++
       continue
     }
@@ -236,6 +239,7 @@ console.log("FILTERED PENDING", pendingEmails)
     if (alreadySent?.length) {
       logger.warn('sender', `Idempotency skip: already sent or sync-failed for lead`, { lead_id: emailRecord.lead_id })
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
+      await supabase.from('leads').update({ status: 'contacted', updated_at: new Date().toISOString() }).eq('id', emailRecord.lead_id).eq('status', 'email_ready')
       continue
     }
 
@@ -249,10 +253,12 @@ const { data: sendTimeLead, error: sendTimeLeadErr } = await supabase
   .maybeSingle()
 if (sendTimeLeadErr || !sendTimeLead?.email) {
   logger.warn('sender', 'Initial email skipped because current address could not be verified', { lead_id: emailRecord.lead_id })
+  await removeLeadFromInitialOutreachQueue(supabase, emailRecord.lead_id)
   continue
 }
 if (isDeliverySuppressedForAddress(sendTimeLead.email, sendTimeLead.delivery_suppressed_emails)) {
   logger.warn('sender', 'INITIAL_EMAIL_SUPPRESSED_DELIVERY_FAILURE', { lead_id: emailRecord.lead_id })
+  await removeLeadFromInitialOutreachQueue(supabase, emailRecord.lead_id, 'suppressed')
   continue
 }
 const result = await sendEmail({

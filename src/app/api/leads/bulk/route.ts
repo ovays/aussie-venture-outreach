@@ -14,7 +14,7 @@ import {
   type LeadsBulkOutcome,
 } from '@/lib/leads-bulk-progress'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
-import { claimRecipientOutreach } from '@/lib/data-quality'
+import { claimRecipientOutreach, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
 
 // Same protection agents/sender.ts (idempotency re-check) and
 // resend/route.ts (per-lead lock) already apply to their send paths — this
@@ -77,12 +77,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const skip = { lead_id, business_name: lead.business_name, reason: 'No email address' }
         skipped.push(skip)
         outcomes.push({ ...skip, status: 'skipped' })
+        await removeLeadFromInitialOutreachQueue(supabase, lead_id)
         continue
       }
       if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
         const skip = { lead_id, business_name: lead.business_name, reason: 'Current email has a terminal delivery failure' }
         skipped.push(skip)
         outcomes.push({ ...skip, status: 'skipped' })
+        await removeLeadFromInitialOutreachQueue(supabase, lead_id, 'suppressed')
         continue
       }
 
@@ -120,6 +122,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           skipped.push(skip)
           outcomes.push({ ...skip, status: 'skipped' })
           await supabase.from('emails').update({ status: 'failed' }).eq('lead_id', lead_id).eq('type', 'initial_pitch').eq('status', 'pending_send')
+          await removeLeadFromInitialOutreachQueue(supabase, lead_id)
           continue
         }
 
@@ -159,12 +162,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           const skip = { lead_id, business_name: lead.business_name, reason: 'Current email address could not be verified' }
           skipped.push(skip)
           outcomes.push({ ...skip, status: 'skipped' })
+          await removeLeadFromInitialOutreachQueue(supabase, lead_id)
           continue
         }
         if (isDeliverySuppressedForAddress(sendTimeLead.email, sendTimeLead.delivery_suppressed_emails)) {
           const skip = { lead_id, business_name: lead.business_name, reason: 'Current email has a terminal delivery failure' }
           skipped.push(skip)
           outcomes.push({ ...skip, status: 'skipped' })
+          await removeLeadFromInitialOutreachQueue(supabase, lead_id, 'suppressed')
           continue
         }
 
@@ -276,7 +281,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     for (const lead_id of lead_ids) {
       const { data: lead } = await supabase
         .from('leads')
-        .select('id, business_name, category_id, category_name, suburb, city, website, description, services, email, instagram_handle, content_type, status')
+        .select('id, business_name, category_id, category_name, suburb, city, website, description, services, email, instagram_handle, content_type, status, delivery_suppressed_emails, outreach_suppression_reason, outreach_suppressed_at')
         .eq('id', lead_id)
         .single()
 

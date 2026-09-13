@@ -9,7 +9,7 @@ import { determineNextEmailType, buildEmailHistory, buildReferenceChain } from '
 import { FOLLOW_UP_NUMBER } from '@/lib/stage-import'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
-import { claimRecipientOutreach } from '@/lib/data-quality'
+import { claimRecipientOutreach, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
 
 // Generation + send + DB write normally completes in a few seconds; 3 minutes
 // gives ample headroom before a stale lock is reclaimed from a crashed request.
@@ -37,6 +37,7 @@ export async function POST(
   }
 
   if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
+    await removeLeadFromInitialOutreachQueue(supabase, id, 'suppressed')
     return NextResponse.json({ error: 'This email address has a terminal delivery failure. Add a different address before sending again.' }, { status: 409 })
   }
 

@@ -196,6 +196,7 @@ export type RecipientOwnershipDecision = {
   ownerLeadId: string | null
   normalizedEmail: string | null
   reason: string | null
+  claimToken: string | null
 }
 
 export async function claimRecipientOutreach(
@@ -214,7 +215,45 @@ export async function claimRecipientOutreach(
     ownerLeadId: typeof result.owner_lead_id === 'string' ? result.owner_lead_id : null,
     normalizedEmail: typeof result.normalized_email === 'string' ? result.normalized_email : null,
     reason: typeof result.reason === 'string' ? result.reason : null,
+    claimToken: typeof result.claim_token === 'string' ? result.claim_token : null,
   }
+}
+
+export async function releaseRecipientOutreachClaim(
+  supabase: SupabaseClient,
+  leadId: string,
+  normalizedEmail: string | null,
+  claimToken: string | null,
+): Promise<boolean> {
+  if (!normalizedEmail || !claimToken) return false
+  const { data, error } = await supabase.rpc('release_recipient_outreach_claim', {
+    p_lead_id: leadId,
+    p_normalized_email: normalizedEmail,
+    p_claim_token: claimToken,
+  })
+  if (error) throw new Error(`Recipient outreach ownership release failed: ${error.message}`)
+  return data === true
+}
+
+export async function removeLeadFromInitialOutreachQueue(
+  supabase: SupabaseClient,
+  leadId: string,
+  emailStatus: 'failed' | 'suppressed' = 'failed',
+): Promise<void> {
+  const { error: emailError } = await supabase
+    .from('emails')
+    .update({ status: emailStatus })
+    .eq('lead_id', leadId)
+    .eq('type', 'initial_pitch')
+    .eq('status', 'pending_send')
+  if (emailError) throw new Error(`Initial outreach draft suppression failed: ${emailError.message}`)
+
+  const { error: leadError } = await supabase
+    .from('leads')
+    .update({ status: 'researched', updated_at: new Date().toISOString() })
+    .eq('id', leadId)
+    .eq('status', 'email_ready')
+  if (leadError) throw new Error(`Initial outreach queue removal failed: ${leadError.message}`)
 }
 
 export async function refreshLeadDataQuality(supabase: SupabaseClient, leadId: string): Promise<void> {

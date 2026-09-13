@@ -11,10 +11,33 @@ type Failure = { table: string; operation: string; message: string; code?: strin
 class MemoryDb {
   tables: Record<string, Row[]>
   failures: Failure[] = []
+  releasedClaims: Array<{ leadId: string | undefined; normalizedEmail: string | undefined; claimToken: string | undefined }> = []
+  recipientDecision = { allowed: true, owner_lead_id: null as string | null, reason: null as string | null }
   constructor(seed: Record<string, Row[]> = {}) {
     this.tables = Object.fromEntries(Object.entries(seed).map(([key, rows]) => [key, rows.map((row) => ({ ...row }))]))
   }
   from(table: string) { return new Query(this, table) }
+  async rpc(name: string, args: { p_lead_id?: string; p_normalized_email?: string; p_claim_token?: string }) {
+    if (name === 'release_recipient_outreach_claim') {
+      this.releasedClaims.push({ leadId: args.p_lead_id, normalizedEmail: args.p_normalized_email, claimToken: args.p_claim_token })
+      return { data: true, error: null }
+    }
+    if (name !== 'claim_recipient_outreach') return { data: null, error: null }
+    const lead = this.tables.leads?.find((row) => row.id === args.p_lead_id)
+    if (!this.recipientDecision.allowed && lead) {
+      lead.outreach_suppression_reason = this.recipientDecision.reason
+      lead.outreach_suppressed_at = '2026-09-13T00:00:00.000Z'
+    }
+    return {
+      data: {
+        ...this.recipientDecision,
+        owner_lead_id: this.recipientDecision.owner_lead_id ?? args.p_lead_id ?? null,
+        normalized_email: 'owner@example.com',
+        claim_token: 'claim-token',
+      },
+      error: null,
+    }
+  }
   fail(table: string, operation: string, message: string, code = 'TEST') { this.failures.push({ table, operation, message, code }) }
   takeFailure(table: string, operation: string) {
     const index = this.failures.findIndex((item) => item.table === table && item.operation === operation)
@@ -118,6 +141,14 @@ async function main() {
   assert.equal(aiCalls, 0, 'normal repeated generation does not call AI')
   assert.equal(templateDb.tables.emails.length, 1, 'normal repeated generation does not overwrite or duplicate')
 
+  const ownedRecipientDb = seed()
+  ownedRecipientDb.recipientDecision = { allowed: false, owner_lead_id: 'lead-owner', reason: 'email_already_contacted' }
+  const ownedRecipient = await routeInitialEmail(ownedRecipientDb as never, lead, 'template')
+  assert.equal(!ownedRecipient.ok && ownedRecipient.error.code, 'recipient_suppressed')
+  assert.equal(ownedRecipientDb.tables.leads[0].status, 'researched', 'an owned recipient never becomes active email_ready')
+  assert.equal(ownedRecipientDb.tables.leads[0].outreach_suppression_reason, 'email_already_contacted', 'the authoritative ownership reason is persisted')
+  assert.equal(ownedRecipientDb.tables.emails.length, 0, 'an owned recipient receives no pending Initial Email')
+
   const aiDb = seed()
   let aiInput: unknown
   const aiCreated = await routeInitialEmail(aiDb as never, lead, 'ai_personalised', { aiWriter: async (input) => { aiCalls++; aiInput = input; return { subject: 'AI subject', body: 'AI body' } } })
@@ -180,6 +211,7 @@ async function main() {
   assert.equal(!writeFailure.ok && writeFailure.error.code, 'database_save_conflict')
   assert.equal(writeFailureDb.tables.emails.length, 0)
   assert.equal(writeFailureDb.tables.leads[0].status, 'researched')
+  assert.deepEqual(writeFailureDb.releasedClaims, [{ leadId: lead.id, normalizedEmail: 'owner@example.com', claimToken: 'claim-token' }], 'a failed INSERT releases its provisional recipient claim')
 
   const uniqueConflictDb = seed({ emails: [{ id: 'concurrent', lead_id: 'other', type: 'follow_up_1', status: 'sent' }] })
   uniqueConflictDb.fail('emails', 'insert', 'duplicate pending email', '23505')
@@ -192,6 +224,12 @@ async function main() {
   const transition = await routeInitialEmail(transitionDb as never, lead, 'template')
   assert.equal(!transition.ok && transition.error.code, 'lead_transition_failed')
   assert.equal(transitionDb.tables.emails.length, 0, 'transition failure removes only the inserted draft')
+  assert.deepEqual(transitionDb.releasedClaims, [{ leadId: lead.id, normalizedEmail: 'owner@example.com', claimToken: 'claim-token' }], 'a failed lead transition releases ownership after draft cleanup')
+
+  const orphanedPendingDb = seed({ emails: [{ id: 'orphan', lead_id: lead.id, type: 'initial_pitch', status: 'pending_send' }] })
+  const recoveredPending = await routeInitialEmail(orphanedPendingDb as never, lead, 'template')
+  assert.equal(recoveredPending.ok && recoveredPending.outcome, 'existing')
+  assert.equal(orphanedPendingDb.tables.leads[0].status, 'email_ready', 'retry repairs a researched lead after its pending draft persisted')
 
   const regenerationDb = seed({ emails: [
     { id: 'target', lead_id: 'lead-1', type: 'initial_pitch', status: 'pending_send', subject: 'old', body_text: 'old', generation_source: 'ai' },

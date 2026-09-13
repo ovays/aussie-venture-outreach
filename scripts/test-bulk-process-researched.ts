@@ -26,6 +26,12 @@ class MemoryDb {
   }
 
   from(table: string) { return new Query(this, table) }
+  async rpc(name: string, args: { p_lead_id?: string }) {
+    if (name === 'claim_recipient_outreach') {
+      return { data: { allowed: true, owner_lead_id: args.p_lead_id ?? null, normalized_email: null, reason: null }, error: null }
+    }
+    return { data: null, error: null }
+  }
 }
 
 class Query {
@@ -167,8 +173,8 @@ async function main() {
   assert.equal(mixedDb.tables.leads.find((item) => item.id === 'missing-template')?.status, 'researched')
   assert.match(mixedOutcomes[1].reason ?? '', /missing_template/)
 
-  // D. Existing pending Initial Emails remain idempotent and do not transition
-  // an inconsistent researched row or create another email.
+  // D. Existing pending Initial Emails remain idempotent and repair an
+  // inconsistent researched row without creating another email.
   const duplicateLead = lead('already-has-email')
   const duplicateDb = new MemoryDb([duplicateLead], [template])
   duplicateDb.tables.emails.push({
@@ -178,7 +184,20 @@ async function main() {
   const duplicateOutcome = await processResearchedLead(duplicateDb as never, duplicateLead, createLeadDedupeIndex([]), 'template')
   assert.equal(duplicateOutcome.status, 'skipped')
   assert.equal(duplicateDb.tables.emails.length, 1)
-  assert.equal(duplicateDb.tables.leads[0].status, 'researched')
+  assert.equal(duplicateDb.tables.leads[0].status, 'email_ready')
+
+  const suppressedLead = { ...lead('suppressed'), outreach_suppression_reason: 'email_already_contacted', outreach_suppressed_at: '2026-09-13T00:00:00.000Z' }
+  const suppressedDb = new MemoryDb([suppressedLead], [template])
+  let suppressedWriterCalls = 0
+  const suppressedOutcome = await processResearchedLead(
+    suppressedDb as never,
+    suppressedLead,
+    createLeadDedupeIndex([]),
+    'template',
+    async () => { suppressedWriterCalls++; return { success: true, channel: 'email', outcome: 'created' } },
+  )
+  assert.equal(suppressedOutcome.status, 'skipped')
+  assert.equal(suppressedWriterCalls, 0, 'bulk processing rejects suppressed researched leads before generation')
 
   // E. UI/API wiring keeps this action researched-only.
   const tableSource = readFileSync(resolve(process.cwd(), 'src/components/leads/LeadsTable.tsx'), 'utf8')
@@ -192,6 +211,7 @@ async function main() {
   assert.match(routeSource, /processResearchedLead\(supabase, lead, dedupeIndex, initialEmailMode!\)/)
   const helperSource = readFileSync(resolve(process.cwd(), 'src/lib/process-researched-lead.ts'), 'utf8')
   assert.match(helperSource, /writer: InitialEmailWriter = writeOneLead/)
+  assert.match(routeSource, /delivery_suppressed_emails, outreach_suppression_reason, outreach_suppressed_at/)
 
   console.log('Bulk researched-to-Email-Ready checks passed')
 }

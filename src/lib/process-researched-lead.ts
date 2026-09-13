@@ -28,6 +28,9 @@ export async function processResearchedLead(
   if (!lead.email) {
     return { ...base, status: 'skipped', reason: 'No email address' }
   }
+  if (lead.outreach_suppressed_at || lead.outreach_suppression_reason) {
+    return { ...base, status: 'skipped', reason: 'Recipient is suppressed from outreach' }
+  }
 
   const result = await writer(supabase, lead, dedupeIndex, mode)
   if (!result.success) {
