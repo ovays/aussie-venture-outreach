@@ -83,8 +83,6 @@ export async function routeInitialEmail(
     const targetId = options.pendingEmailId ?? pending?.id
     if (operation === 'regenerate' && !targetId) return failure(lead, mode, 'no_eligible_email', 'No pending Initial Email exists for regeneration.')
 
-    const generated = await generateContent(supabase, lead, mode, options.aiWriter)
-    if (!generated.ok) return generated
     const ownership = await claimRecipientOutreach(supabase, lead.id, 'initial')
     if (!ownership.allowed) {
       await removeLeadFromInitialOutreachQueue(supabase, lead.id)
@@ -96,6 +94,11 @@ export async function routeInitialEmail(
           ? 'Another lead owns the active outreach lifecycle for this recipient.'
           : `Recipient is not eligible for outreach: ${ownership.reason ?? 'suppressed'}.`,
       )
+    }
+    const generated = await generateContent(supabase, lead, mode, options.aiWriter)
+    if (!generated.ok) {
+      await releaseRecipientOutreachClaim(supabase, lead.id, ownership.normalizedEmail, ownership.claimToken)
+      return generated
     }
     const values = { subject: generated.subject!, body_text: generated.body!, body_html: generated.html!, generation_source: generated.generationSource!, edited_at: null, edited_by_user: false }
     if (operation === 'regenerate') {

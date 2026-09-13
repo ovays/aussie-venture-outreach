@@ -11,6 +11,7 @@ type Row = Record<string, any>
 class MemoryDb {
   tables: Record<string, Row[]>
   recipientOwners = new Map<string, string>()
+  claimRecipientOutreachCalls = 0
 
   constructor(leads: ResearchedLeadForInitialEmail[], templates: Row[]) {
     this.tables = {
@@ -29,8 +30,23 @@ class MemoryDb {
   from(table: string) { return new Query(this, table) }
   async rpc(name: string, args: { p_lead_id?: string }) {
     if (name === 'claim_recipient_outreach') {
+      this.claimRecipientOutreachCalls++
       const target = this.tables.leads.find((item) => item.id === args.p_lead_id)
       const normalizedEmail = target?.email?.trim().toLowerCase() ?? null
+      if (target && normalizedEmail === 'user@domain.com') {
+        target.outreach_suppression_reason = 'placeholder_email'
+        target.outreach_suppressed_at ??= new Date().toISOString()
+        if (target.status === 'email_ready') target.status = 'researched'
+        return {
+          data: {
+            allowed: false,
+            owner_lead_id: null,
+            normalized_email: normalizedEmail,
+            reason: 'placeholder_email',
+          },
+          error: null,
+        }
+      }
       const ownerLeadId = normalizedEmail ? this.recipientOwners.get(normalizedEmail) : undefined
       if (target && ownerLeadId && ownerLeadId !== target.id) {
         target.outreach_suppression_reason = 'email_already_contacted'
@@ -237,6 +253,7 @@ async function main() {
   assert.equal(persistedDuplicate.status, 'researched')
   assert.equal(persistedDuplicate.outreach_suppression_reason, 'email_already_contacted')
   assert.ok(persistedDuplicate.outreach_suppressed_at)
+  assert.equal(ownershipDb.claimRecipientOutreachCalls, 1, 'bulk researched processing invokes the authoritative ownership RPC')
 
   // F. A normal researched recipient is still claimed and promoted.
   const eligibleRecipient = lead('eligible-recipient')
@@ -249,6 +266,7 @@ async function main() {
   )
   assert.equal(eligibleOutcome.status, 'succeeded')
   assert.equal(eligibleDb.tables.leads[0].status, 'email_ready')
+  assert.equal(eligibleDb.claimRecipientOutreachCalls, 1)
 
   // G. Existing suppression is an immutable guard: no claim/generation runs
   // and the original timestamp is preserved.
@@ -270,6 +288,7 @@ async function main() {
   assert.equal(alreadySuppressedDb.tables.leads[0].outreach_suppression_reason, 'email_already_contacted')
   assert.equal(alreadySuppressedDb.tables.leads[0].outreach_suppressed_at, existingSuppressedAt)
   assert.equal(alreadySuppressedDb.tables.emails.length, 0)
+  assert.equal(alreadySuppressedDb.claimRecipientOutreachCalls, 0)
 
   // H. Migration 053 clears recipient suppression after a corrected email;
   // the bulk path must evaluate that new address normally.
@@ -291,8 +310,47 @@ async function main() {
   assert.equal(correctedDb.tables.leads[0].status, 'email_ready')
   assert.equal(correctedDb.tables.leads[0].outreach_suppression_reason, null)
   assert.equal(correctedDb.tables.leads[0].outreach_suppressed_at, null)
+  assert.equal(correctedDb.claimRecipientOutreachCalls, 1)
 
-  // I. UI/API wiring keeps this action researched-only and refetches after it.
+  // I. Production regression: JS formerly classified this address and returned
+  // channel=duplicate before the ownership RPC. Migration 053 intentionally
+  // gives the open placeholder flag precedence, so the authoritative persisted
+  // reason is placeholder_email even when an ownership row also exists.
+  const placeholderRecipient = { ...lead('placeholder-recipient'), email: 'user@domain.com' }
+  const placeholderDb = new MemoryDb([placeholderRecipient], [template])
+  placeholderDb.recipientOwners.set('user@domain.com', 'another-lead')
+  const placeholderOutcome = await processResearchedLead(
+    placeholderDb as never,
+    placeholderRecipient,
+    createLeadDedupeIndex([
+      { id: 'another-lead', business_name: placeholderRecipient.business_name, email: 'user@domain.com', status: 'contacted' },
+      placeholderRecipient,
+    ]),
+    'template',
+  )
+  assert.equal(placeholderOutcome.status, 'skipped')
+  assert.match(placeholderOutcome.reason ?? '', /Duplicate email/)
+  assert.equal(placeholderDb.claimRecipientOutreachCalls, 1, 'the production-shaped quality case cannot bypass claim_recipient_outreach')
+  assert.equal(placeholderDb.tables.leads[0].status, 'researched')
+  assert.equal(placeholderDb.tables.leads[0].outreach_suppression_reason, 'placeholder_email')
+  assert.ok(placeholderDb.tables.leads[0].outreach_suppressed_at)
+
+  // J. Domain-only heuristic duplicates retain their pre-RPC behavior.
+  const domainOwner = { ...lead('domain-owner'), email: 'owner@venture-example.com.au' }
+  const domainCandidate = { ...lead('domain-candidate'), email: 'contact@venture-example.com.au' }
+  const domainDb = new MemoryDb([domainOwner, domainCandidate], [template])
+  const domainOutcome = await processResearchedLead(
+    domainDb as never,
+    domainCandidate,
+    createLeadDedupeIndex([domainOwner, domainCandidate]),
+    'template',
+  )
+  assert.equal(domainOutcome.status, 'skipped')
+  assert.match(domainOutcome.reason ?? '', /Duplicate email/)
+  assert.equal(domainDb.claimRecipientOutreachCalls, 0, 'domain-only heuristic duplicate remains an in-memory skip')
+  assert.equal(domainDb.tables.leads[1].outreach_suppression_reason, undefined)
+
+  // K. UI/API wiring keeps this action researched-only and refetches after it.
   const tableSource = readFileSync(resolve(process.cwd(), 'src/components/leads/LeadsTable.tsx'), 'utf8')
   assert.match(tableSource, /processEligibleLeads\s*=\s*leads\.filter\(l => l\.status === 'researched' && !isLeadSuppressed\(l\)\)/)
   assert.match(tableSource, /selectedResearchedLeads\.length > 0[\s\S]*Process to Email Ready/)

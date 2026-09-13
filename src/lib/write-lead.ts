@@ -3,7 +3,6 @@ import { logger } from '@/lib/logger'
 import { addLeadToDedupeIndex, checkLeadDedupe, type LeadDedupeIndex } from '@/lib/deduplication'
 import { routeInitialEmail } from '@/lib/initial-email-router'
 import type { InitialEmailMode } from '@/lib/settingsDefaults'
-import { classifyEmailQuality } from '@/lib/data-quality'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 
 export type WriteableLeadRow = {
@@ -67,17 +66,9 @@ export async function writeOneLead(
     return { success: true, channel: 'duplicate' }
   }
 
-  const emailQuality = classifyEmailQuality(lead.email)
-  if (emailQuality.issueType) {
-    await supabase.from('activity_log').insert({
-      event_type: 'data_quality_email_suppressed',
-      lead_id: lead.id,
-      description: `Initial outreach not queued for ${lead.business_name}: ${emailQuality.issueType}`,
-      metadata: { issue_type: emailQuality.issueType, normalized_email: emailQuality.normalizedEmail },
-    })
-    return { success: true, channel: 'duplicate' }
-  }
-
+  // Email quality is intentionally adjudicated by claim_recipient_outreach()
+  // inside routeInitialEmail(). Returning on an in-memory classification here
+  // would skip migration 053's authoritative suppression persistence.
   if (lead.outreach_suppressed_at || lead.outreach_suppression_reason) {
     return { success: true, channel: 'duplicate' }
   }
