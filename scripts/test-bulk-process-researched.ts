@@ -10,6 +10,7 @@ type Row = Record<string, any>
 
 class MemoryDb {
   tables: Record<string, Row[]>
+  recipientOwners = new Map<string, string>()
 
   constructor(leads: ResearchedLeadForInitialEmail[], templates: Row[]) {
     this.tables = {
@@ -28,7 +29,25 @@ class MemoryDb {
   from(table: string) { return new Query(this, table) }
   async rpc(name: string, args: { p_lead_id?: string }) {
     if (name === 'claim_recipient_outreach') {
-      return { data: { allowed: true, owner_lead_id: args.p_lead_id ?? null, normalized_email: null, reason: null }, error: null }
+      const target = this.tables.leads.find((item) => item.id === args.p_lead_id)
+      const normalizedEmail = target?.email?.trim().toLowerCase() ?? null
+      const ownerLeadId = normalizedEmail ? this.recipientOwners.get(normalizedEmail) : undefined
+      if (target && ownerLeadId && ownerLeadId !== target.id) {
+        target.outreach_suppression_reason = 'email_already_contacted'
+        target.outreach_suppressed_at ??= new Date().toISOString()
+        if (target.status === 'email_ready') target.status = 'researched'
+        return {
+          data: {
+            allowed: false,
+            owner_lead_id: ownerLeadId,
+            normalized_email: normalizedEmail,
+            reason: 'email_already_contacted',
+          },
+          error: null,
+        }
+      }
+      if (normalizedEmail && target) this.recipientOwners.set(normalizedEmail, target.id)
+      return { data: { allowed: true, owner_lead_id: args.p_lead_id ?? null, normalized_email: normalizedEmail, reason: null }, error: null }
     }
     return { data: null, error: null }
   }
@@ -199,7 +218,81 @@ async function main() {
   assert.equal(suppressedOutcome.status, 'skipped')
   assert.equal(suppressedWriterCalls, 0, 'bulk processing rejects suppressed researched leads before generation')
 
-  // E. UI/API wiring keeps this action researched-only.
+  // E. An exact recipient owned by another lead reaches the authoritative
+  // claim RPC. The RPC persists migration-053 suppression while keeping the
+  // researched lifecycle, so migration 054 moves it to the virtual group.
+  const owner = lead('recipient-owner')
+  const duplicateRecipient = { ...lead('recipient-duplicate'), business_name: owner.business_name, email: owner.email }
+  const ownershipDb = new MemoryDb([owner, duplicateRecipient], [template])
+  ownershipDb.recipientOwners.set(owner.email!, owner.id)
+  const duplicateRecipientOutcome = await processResearchedLead(
+    ownershipDb as never,
+    duplicateRecipient,
+    createLeadDedupeIndex([owner, duplicateRecipient]),
+    'template',
+  )
+  const persistedDuplicate = ownershipDb.tables.leads.find((item) => item.id === duplicateRecipient.id)!
+  assert.equal(duplicateRecipientOutcome.status, 'skipped')
+  assert.match(duplicateRecipientOutcome.reason ?? '', /Duplicate email/)
+  assert.equal(persistedDuplicate.status, 'researched')
+  assert.equal(persistedDuplicate.outreach_suppression_reason, 'email_already_contacted')
+  assert.ok(persistedDuplicate.outreach_suppressed_at)
+
+  // F. A normal researched recipient is still claimed and promoted.
+  const eligibleRecipient = lead('eligible-recipient')
+  const eligibleDb = new MemoryDb([eligibleRecipient], [template])
+  const eligibleOutcome = await processResearchedLead(
+    eligibleDb as never,
+    eligibleRecipient,
+    createLeadDedupeIndex([eligibleRecipient]),
+    'template',
+  )
+  assert.equal(eligibleOutcome.status, 'succeeded')
+  assert.equal(eligibleDb.tables.leads[0].status, 'email_ready')
+
+  // G. Existing suppression is an immutable guard: no claim/generation runs
+  // and the original timestamp is preserved.
+  const existingSuppressedAt = '2026-09-12T01:02:03.000Z'
+  const alreadySuppressed = {
+    ...lead('already-suppressed'),
+    outreach_suppression_reason: 'email_already_contacted',
+    outreach_suppressed_at: existingSuppressedAt,
+  }
+  const alreadySuppressedDb = new MemoryDb([alreadySuppressed], [template])
+  const alreadySuppressedOutcome = await processResearchedLead(
+    alreadySuppressedDb as never,
+    alreadySuppressed,
+    createLeadDedupeIndex([alreadySuppressed]),
+    'template',
+  )
+  assert.equal(alreadySuppressedOutcome.status, 'skipped')
+  assert.equal(alreadySuppressedDb.tables.leads[0].status, 'researched')
+  assert.equal(alreadySuppressedDb.tables.leads[0].outreach_suppression_reason, 'email_already_contacted')
+  assert.equal(alreadySuppressedDb.tables.leads[0].outreach_suppressed_at, existingSuppressedAt)
+  assert.equal(alreadySuppressedDb.tables.emails.length, 0)
+
+  // H. Migration 053 clears recipient suppression after a corrected email;
+  // the bulk path must evaluate that new address normally.
+  const correctedRecipient = {
+    ...lead('corrected-recipient'),
+    email: 'hello@freshventure.com.au',
+    outreach_suppression_reason: null,
+    outreach_suppressed_at: null,
+  }
+  const correctedDb = new MemoryDb([correctedRecipient], [template])
+  correctedDb.recipientOwners.set('old-recipient@gmail.com', 'old-owner')
+  const correctedOutcome = await processResearchedLead(
+    correctedDb as never,
+    correctedRecipient,
+    createLeadDedupeIndex([correctedRecipient]),
+    'template',
+  )
+  assert.equal(correctedOutcome.status, 'succeeded')
+  assert.equal(correctedDb.tables.leads[0].status, 'email_ready')
+  assert.equal(correctedDb.tables.leads[0].outreach_suppression_reason, null)
+  assert.equal(correctedDb.tables.leads[0].outreach_suppressed_at, null)
+
+  // I. UI/API wiring keeps this action researched-only and refetches after it.
   const tableSource = readFileSync(resolve(process.cwd(), 'src/components/leads/LeadsTable.tsx'), 'utf8')
   assert.match(tableSource, /processEligibleLeads\s*=\s*leads\.filter\(l => l\.status === 'researched' && !isLeadSuppressed\(l\)\)/)
   assert.match(tableSource, /selectedResearchedLeads\.length > 0[\s\S]*Process to Email Ready/)
@@ -212,6 +305,7 @@ async function main() {
   const helperSource = readFileSync(resolve(process.cwd(), 'src/lib/process-researched-lead.ts'), 'utf8')
   assert.match(helperSource, /writer: InitialEmailWriter = writeOneLead/)
   assert.match(routeSource, /delivery_suppressed_emails, outreach_suppression_reason, outreach_suppressed_at/)
+  assert.match(tableSource, /finally\s*\{[\s\S]*?setBulkRunning\(false\)[\s\S]*?void fetchLeads\(\)/, 'bulk completion refetches the active Leads view')
 
   console.log('Bulk researched-to-Email-Ready checks passed')
 }

@@ -99,17 +99,22 @@ export async function writeOneLead(
       logger.info('writer', dedupeDecision.reason, duplicateMeta)
       if (dedupeDecision.reason === 'DUPLICATE_EMAIL_SKIPPED') {
         logger.info('writer', '[DEBUG_DEDUPLICATION] duplicate email detected', duplicateMeta)
+        // The pipeline index is only a hint. Recipient ownership is the
+        // authority, and claim_recipient_outreach() also persists suppression
+        // atomically when another lead owns this exact address. Continue to
+        // routeInitialEmail() so that claim cannot be bypassed by this early
+        // duplicate check.
       } else {
         logger.info('writer', '[DEBUG_DEDUPLICATION] duplicate domain detected', duplicateMeta)
+        logger.info('writer', '[DEBUG_DEDUPLICATION] lead skipped reason', duplicateMeta)
+        await supabase.from('activity_log').insert({
+          event_type: dedupeDecision.reason,
+          lead_id: lead.id,
+          description: `Duplicate skipped before email queueing: ${lead.business_name}`,
+          metadata: duplicateMeta,
+        })
+        return { success: true, channel: 'duplicate' }
       }
-      logger.info('writer', '[DEBUG_DEDUPLICATION] lead skipped reason', duplicateMeta)
-      await supabase.from('activity_log').insert({
-        event_type: dedupeDecision.reason,
-        lead_id: lead.id,
-        description: `Duplicate skipped before email queueing: ${lead.business_name}`,
-        metadata: duplicateMeta,
-      })
-      return { success: true, channel: 'duplicate' }
     }
 
     const emailResult = await routeInitialEmail(supabase, lead, mode)
@@ -122,6 +127,9 @@ export async function writeOneLead(
         code: emailResult.error.code,
         reason: emailResult.error.reason,
       })
+      if (emailResult.error.code === 'recipient_suppressed') {
+        return { success: true, channel: 'duplicate' }
+      }
       return { success: false, error: `${emailResult.error.code}: ${emailResult.error.reason}`, code: emailResult.error.code }
     }
     if (emailResult.outcome === 'existing') return { success: true, channel: 'email', outcome: 'existing' }
