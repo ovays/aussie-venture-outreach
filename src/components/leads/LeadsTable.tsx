@@ -14,6 +14,9 @@ import {
   createUniqueIdBatches,
   FILTERED_IDS_PAGE_SIZE,
   LEADS_PAGE_SIZE,
+  SUPPRESSED_LEADS_FILTER,
+  isLeadSuppressed,
+  leadSuppressionLabel,
   normalizeLeadsSearch,
 } from '@/lib/leads-list'
 import {
@@ -42,6 +45,9 @@ interface Lead {
   status: string
   created_at: string
   halal: boolean
+  delivery_suppressed_emails: string[]
+  outreach_suppression_reason: string | null
+  outreach_suppressed_at: string | null
 }
 
 type BulkAction = 'send' | 'delete' | 'research' | 'process'
@@ -57,7 +63,20 @@ interface RegenerateResult {
   outcomes: LeadsBulkOutcome[]
 }
 
-const STATUS_OPTIONS = ['new', 'researched', 'email_ready', 'contacted', 'replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual', 'dead']
+const STATUS_OPTIONS = [
+  { value: 'new', label: 'New' },
+  { value: 'researched', label: 'Researched' },
+  { value: SUPPRESSED_LEADS_FILTER, label: 'Suppressed' },
+  { value: 'email_ready', label: 'Email Ready' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'replied', label: 'Replied' },
+  { value: 'negotiating', label: 'Negotiating' },
+  { value: 'interested', label: 'Interested' },
+  { value: 'closed', label: 'Closed' },
+  { value: 'closed_won', label: 'Closed Won' },
+  { value: 'closed_manual', label: 'Closed Manual' },
+  { value: 'dead', label: 'Dead' },
+] as const
 const SEARCH_DEBOUNCE_MS = 300
 
 interface LeadsTableProps {
@@ -94,6 +113,20 @@ function HalalConfidenceBadge({ score }: { score: number | null }) {
       style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)' }}
     >
       {label}
+    </span>
+  )
+}
+
+function LeadStatusBadge({ lead }: { lead: Lead }) {
+  const suppressionLabel = leadSuppressionLabel(lead)
+  if (!suppressionLabel) return <StatusBadge status={lead.status} />
+
+  return (
+    <span
+      className="inline-flex min-h-6 items-center rounded-full border border-red-400/20 bg-red-500/10 px-2.5 py-0.5 text-[11px] font-medium leading-none text-red-300"
+      title={`Lifecycle status: ${lead.status}`}
+    >
+      Suppressed · {suppressionLabel}
     </span>
   )
 }
@@ -546,16 +579,16 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
     }
   }
 
-  // Clear selection when page changes
-  useEffect(() => { setSelectedIds(new Set()) }, [page])
+  // Never carry hidden selections across a page or filter boundary.
+  useEffect(() => { setSelectedIds(new Set()) }, [page, filterControlsKey])
 
   // Only email_ready leads are eligible for Bulk Send, regardless of source.
-  const emailReadyLeads = leads.filter(l => l.status === 'email_ready')
+  const emailReadyLeads = leads.filter(l => l.status === 'email_ready' && !isLeadSuppressed(l))
   const bulkSendEligibleLeads = emailReadyLeads
   // new leads → research action
-  const researchEligibleLeads = leads.filter(l => l.status === 'new')
+  const researchEligibleLeads = leads.filter(l => l.status === 'new' && !isLeadSuppressed(l))
   // researched leads → Initial Email generation action
-  const processEligibleLeads = leads.filter(l => l.status === 'researched')
+  const processEligibleLeads = leads.filter(l => l.status === 'researched' && !isLeadSuppressed(l))
   // combined for row checkboxes and select-all
   const selectableLeads = [...emailReadyLeads, ...researchEligibleLeads, ...processEligibleLeads]
 
@@ -837,8 +870,8 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
             className="control-field flex-1 px-3 py-2 text-sm sm:flex-none"
           >
             <option value="">All Statuses</option>
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>{s}</option>
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
 
@@ -1014,7 +1047,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
                 const isEmailReady  = lead.status === 'email_ready'
                 const isNew         = lead.status === 'new'
                 const isResearched  = lead.status === 'researched'
-                const isSelectable  = isEmailReady || isNew || isResearched
+                const isSelectable  = !isLeadSuppressed(lead) && (isEmailReady || isNew || isResearched)
                 return (
                   <tr
                     key={lead.id}
@@ -1052,7 +1085,7 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge status={lead.status} />
+                      <LeadStatusBadge lead={lead} />
                     </td>
                     <td className="hidden md:table-cell px-4 py-3">
                       {lead.google_rating ? (
@@ -1088,12 +1121,12 @@ export function LeadsTable({ initialStatus, initialStage }: LeadsTableProps) {
           : loadError ? <DataState title="Could not load leads" description={loadError} tone="error" compact action={<Button size="sm" variant="secondary" onClick={() => void fetchLeads()}>Retry</Button>} />
             : leads.length === 0 ? <DataState title="No leads found" description="Try clearing the current search or filters." compact />
               : leads.map((lead) => {
-                const selectable = ['new', 'researched', 'email_ready'].includes(lead.status)
+                const selectable = !isLeadSuppressed(lead) && ['new', 'researched', 'email_ready'].includes(lead.status)
                 return (
                   <ResponsiveDataCard
                     key={lead.id}
                     title={<span className="line-clamp-2">{lead.business_name}</span>}
-                    badge={<StatusBadge status={lead.status} />}
+                    badge={<LeadStatusBadge lead={lead} />}
                     selected={selectedIds.has(lead.id)}
                     onClick={() => openDrawer(lead.id)}
                     actions={<>{selectable && <label className="flex min-h-10 items-center gap-2 text-xs text-[var(--text-secondary)]"><input type="checkbox" checked={selectedIds.has(lead.id)} onChange={(event) => toggleSelect(lead.id, event)} className="h-4 w-4 accent-[var(--primary)]" />Select</label>}<Button size="sm" variant="secondary" onClick={() => openDrawer(lead.id)}>Open lead</Button></>}

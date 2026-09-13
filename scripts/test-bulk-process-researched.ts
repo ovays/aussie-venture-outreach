@@ -201,9 +201,9 @@ async function main() {
 
   // E. UI/API wiring keeps this action researched-only.
   const tableSource = readFileSync(resolve(process.cwd(), 'src/components/leads/LeadsTable.tsx'), 'utf8')
-  assert.match(tableSource, /processEligibleLeads\s*=\s*leads\.filter\(l => l\.status === 'researched'\)/)
+  assert.match(tableSource, /processEligibleLeads\s*=\s*leads\.filter\(l => l\.status === 'researched' && !isLeadSuppressed\(l\)\)/)
   assert.match(tableSource, /selectedResearchedLeads\.length > 0[\s\S]*Process to Email Ready/)
-  assert.match(tableSource, /isSelectable\s*=\s*isEmailReady \|\| isNew \|\| isResearched/)
+  assert.match(tableSource, /isSelectable\s*=\s*!isLeadSuppressed\(lead\) && \(isEmailReady \|\| isNew \|\| isResearched\)/)
   assert.doesNotMatch(tableSource, /processEligibleLeads\s*=\s*leads\.filter\(l => l\.status !==/)
 
   const routeSource = readFileSync(resolve(process.cwd(), 'src/app/api/leads/bulk/route.ts'), 'utf8')
