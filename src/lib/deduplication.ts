@@ -53,6 +53,7 @@ export const PERSONAL_EMAIL_PROVIDER_DOMAINS = new Set([
   'hotmail.com',
   'hotmail.com.au',
   'outlook.com',
+  'outlook.com.au',
   'live.com',
   'live.com.au',
   'yahoo.com',
@@ -67,8 +68,23 @@ export const PERSONAL_EMAIL_PROVIDER_DOMAINS = new Set([
   'bigpond.net.au',
   'optusnet.com.au',
   'tpg.com.au',
+  'iinet.net.au',
   'internode.on.net',
 ])
+
+export function isPublicEmailDomain(domain: string | null | undefined): boolean {
+  return getPublicEmailProviderDomain(domain) !== null
+}
+
+function getPublicEmailProviderDomain(domain: string | null | undefined): string | null {
+  const normalized = (domain ?? '').trim().toLowerCase().replace(/\.+$/, '')
+  for (const providerDomain of PERSONAL_EMAIL_PROVIDER_DOMAINS) {
+    if (normalized === providerDomain || normalized.endsWith(`.${providerDomain}`)) {
+      return providerDomain
+    }
+  }
+  return null
+}
 
 const MULTI_PART_PUBLIC_SUFFIXES = new Set([
   'com.au',
@@ -90,6 +106,11 @@ export function extractRootDomainFromEmail(email: string | null | undefined): st
   const normalized = normalizeEmail(email)
   const domain = normalized?.split('@')[1]?.replace(/\.+$/, '')
   if (!domain) return null
+
+  // Some shared providers sit below a registrable-looking parent (for example,
+  // internode.on.net). Preserve the known provider before reducing to on.net.
+  const publicProviderDomain = getPublicEmailProviderDomain(domain)
+  if (publicProviderDomain) return publicProviderDomain
 
   const parts = domain.split('.').filter(Boolean)
   if (parts.length < 2) return null
@@ -123,7 +144,7 @@ export function createLeadDedupeIndex(leads: DedupeLead[]): LeadDedupeIndex {
     byEmail.set(email, emailMatches)
 
     const rootDomain = extractRootDomainFromEmail(email)
-    if (!rootDomain || PERSONAL_EMAIL_PROVIDER_DOMAINS.has(rootDomain)) continue
+    if (!rootDomain || isPublicEmailDomain(rootDomain)) continue
 
     const domainMatches = byRootDomain.get(rootDomain) ?? []
     domainMatches.push(match)
@@ -170,7 +191,7 @@ export function checkLeadDedupe(
     }
   }
 
-  if (rootDomain && !PERSONAL_EMAIL_PROVIDER_DOMAINS.has(rootDomain)) {
+  if (rootDomain && !isPublicEmailDomain(rootDomain)) {
     const domainMatch = getCanonicalDuplicate(index.byRootDomain.get(rootDomain) ?? [], currentLeadId)
     if (domainMatch) {
       return {

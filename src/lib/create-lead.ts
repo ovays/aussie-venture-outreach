@@ -4,7 +4,7 @@
 // exact same dedupe checks, staged-import backfill, and insert shape.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { normalizeEmail, extractRootDomainFromEmail, PERSONAL_EMAIL_PROVIDER_DOMAINS } from '@/lib/deduplication'
+import { normalizeEmail, extractRootDomainFromEmail, isPublicEmailDomain } from '@/lib/deduplication'
 import { resolveContentType } from '@/lib/content-type'
 import { emailBodyToHtml } from '@/lib/utils'
 import { generateFollowUpEmail, type FollowUpThreadEmail } from '@/lib/followup-generation'
@@ -77,7 +77,7 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
   // agency or booking inbox; recipient ownership prevents competing outreach.
   if (!force && !emailDupe) {
     const rootDomain = extractRootDomainFromEmail(email)
-    if (rootDomain && !PERSONAL_EMAIL_PROVIDER_DOMAINS.has(rootDomain)) {
+    if (rootDomain && !isPublicEmailDomain(rootDomain)) {
       const { data: domainDupe } = await supabase
         .from('leads')
         .select('id, business_name')

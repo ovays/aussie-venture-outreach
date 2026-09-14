@@ -10,7 +10,7 @@ ReachAgent V2 must start from one immutable, curated, dump-derived golden baseli
 
 This design reuses the completed evidence in `docs/reachagent-supabase-schema-audit.md`: repository migrations and callers, Git history, live PostgREST metadata, exact-count `HEAD` queries, `get_lead_status_counts()`, and the prior FK consistency check. No expensive production query was repeated.
 
-Direct PostgreSQL catalog access was unavailable. PostgREST cannot expose exact live index/check/function/trigger/policy definitions, grants, sequences, view SQL, extension ownership, or the migration ledger. Those details remain approval gates rather than guessed facts.
+Direct PostgreSQL catalog access was unavailable. A renewed read-only access audit on 14 September 2026 found a linked project reference and pooler host/user, but the stored pooler URL has no password; no database password, direct database URL, Supabase Management API token, `psql`, `pg_dump`, or working Docker engine is available. A supported `supabase db dump --linked --schema public,extensions` attempt failed before producing a dump because the CLI requires Docker in this environment. PostgREST cannot expose exact live index/check/function/trigger/policy definitions, grants, sequences, view SQL, extension ownership, or the migration ledger. Those details remain approval gates rather than guessed facts.
 
 ## 1. ReachAgent ownership boundary
 
@@ -169,7 +169,7 @@ Live PostgREST confirms PK/FK annotations and exposed column defaults/nullabilit
 
 ### Functions/RPCs
 
-All ReachAgent-called RPC names/signatures exist live. Final repository definitions come from:
+The earlier audit confirmed that all ReachAgent-called RPC names/signatures at its historical cutoff existed live. Final repository definitions through that cutoff come from:
 
 - 001/009/035: `update_updated_at_column`, `handle_new_auth_user`, `is_active_admin`;
 - 036/038/039/040: AI analytics, lead counts, dashboard, lifecycle/health;
@@ -177,11 +177,13 @@ All ReachAgent-called RPC names/signatures exist live. Final repository definiti
 - 049–051: recipient claim and final data-quality helpers/reports/actions;
 - 052: `claim_hostinger_inbound_receipt`.
 
+Post-cutoff repository migrations 053-054 must also be reconciled when catalog access becomes available: 053 replaces `claim_recipient_outreach`, adds `release_recipient_outreach_claim` and `clear_lead_outreach_suppression_on_email_change`; 054 replaces `get_leads_search_page`. Their live application and bodies are unverified.
+
 Bodies remain unavailable. Before approval compare `pg_get_functiondef` plus identity args, result, language, volatility, parallel/security/leakproof flags, `search_path`, owner and ACL. Harden security-definer functions.
 
 ### Triggers
 
-Repository-exact triggers: `update_leads_updated_at`, `update_categories_updated_at`, `update_settings_updated_at`; `on_auth_user_created`; three AI updated-at triggers; `update_category_email_templates_updated_at`; `update_category_suburb_search_state_updated_at`; `leads_set_normalized_email`; final `leads_refresh_data_quality`. Add the proposed priority updated-at trigger after catalog reconciliation.
+Repository-exact triggers: `update_leads_updated_at`, `update_categories_updated_at`, `update_settings_updated_at`; `on_auth_user_created`; three AI updated-at triggers; `update_category_email_templates_updated_at`; `update_category_suburb_search_state_updated_at`; `leads_set_normalized_email`; final `leads_refresh_data_quality`; and post-cutoff `leads_clear_outreach_suppression_on_email_change` from migration 053. Add the proposed priority updated-at trigger after catalog reconciliation.
 
 Live presence, enable mode, ordering, conditions, and bodies need `pg_trigger`/`pg_get_triggerdef`. Verify `auth.users` only in disposable Supabase, not plain PostgreSQL.
 
@@ -322,4 +324,167 @@ Files created during Prompt 3:
 - `docs/reachagent-supabase-schema-audit.md`
 - `docs/reachagent-v2-golden-baseline-design.md`
 
-`docs/reachagent-live-schema-only.sql` was not created because no safe successful schema-only dump was obtained.
+No safe successful schema-only dump was obtained. The repository's tracked `docs/reachagent-live-schema-only.sql` is zero bytes and must not be treated as dump evidence.
+
+## 15. Production catalog validation addendum (14 September 2026)
+
+This addendum records the continuation of the catalog gate. It reuses the earlier audit and does not repeat its production data queries.
+
+### Read-only access audit
+
+| Access path | Result |
+|---|---|
+| Supabase linked project | Available: linked-project metadata and a project reference are present. No identifier or credential is reproduced here. |
+| Pooler URL | Incomplete: scheme, host, and username are present, but the URL contains no password. It cannot authenticate as stored. |
+| Direct/session/transaction database URL | Not available in repository files or process environment. |
+| Database password | Not available in repository files or process environment. |
+| Supabase Management API credential | No `SUPABASE_ACCESS_TOKEN` environment variable or Supabase CLI access-token file is available. |
+| API credentials | Supabase URL and service-role key are present, but PostgREST/service-role access is not PostgreSQL catalog access. Values were not printed. |
+| Native PostgreSQL clients | `psql` and `pg_dump` are not installed or discoverable. |
+| Supabase CLI | Not installed globally; runnable through `npx`. |
+| Docker | No working Docker command/engine is available. Supabase CLI 2.116.0 therefore cannot run its remote dump helper. |
+
+The read-only command `supabase db dump --linked --schema public,extensions` was attempted. It failed with the CLI's Docker prerequisite error. The target path was already a tracked zero-byte file in `HEAD`; it was restored to that exact pre-attempt state. It is a pre-existing placeholder, not a successful dump, and is excluded from all readiness evidence.
+
+### Migration 041 live-assumption classification
+
+`CONFIRMED` below means confirmed by the previously captured live PostgREST schema metadata. It does not imply catalog-level confirmation of features PostgREST does not expose.
+
+| Proposed reconstruction fact | Classification | Evidence/limit |
+|---|---|---|
+| `city_suburbs.last_used_at` is nullable `timestamptz` | CONFIRMED | Live column metadata. |
+| `city_suburbs.last_used_at` has no exposed default | CONFIRMED | Live column metadata exposes no default. Generated/identity metadata is still catalog-only. |
+| `city_suburbs.priority` is nullable integer with default `1` | CONFIRMED | Live column metadata. |
+| `city_suburbs.priority CHECK (priority BETWEEN 1 AND 10)` | UNVERIFIED | Test/repository intent only; exact live check is catalog-only. |
+| `category_suburb_priorities.id` is a non-null UUID primary key | CONFIRMED | Live PK/column metadata. |
+| `category_suburb_priorities.id DEFAULT gen_random_uuid()` | UNVERIFIED | The live API metadata did not establish this default. |
+| `category_id` is non-null UUID and references `categories(id)` | CONFIRMED | Live column/FK metadata. |
+| `category_id` uses `ON DELETE CASCADE` and the proposed `ON UPDATE` behavior | UNVERIFIED | Referential actions require `pg_get_constraintdef`. |
+| `city_suburb_id` is non-null UUID and references `city_suburbs(id)` | CONFIRMED | Live column/FK metadata. |
+| `city_suburb_id` uses `ON DELETE CASCADE` and the proposed `ON UPDATE` behavior | UNVERIFIED | Referential actions require `pg_get_constraintdef`. |
+| `priority` is non-null integer | CONFIRMED | Live column metadata. |
+| `priority CHECK (priority BETWEEN 1 AND 10)` | UNVERIFIED | Test/repository intent only. |
+| `created_at` and `updated_at` are non-null `timestamptz DEFAULT now()` | CONFIRMED | Live column/default metadata. |
+| Unique constraint on `(category_id, city_suburb_id)` | UNVERIFIED | Test/repository intent only; unique catalog unavailable. |
+| Reverse index on `city_suburb_id` | UNVERIFIED | `pg_index` unavailable. |
+| Updated-at trigger and exact trigger function | UNVERIFIED | `pg_trigger` unavailable. |
+| RLS enabled/FORCE state and exact policies | UNVERIFIED | `pg_class`/`pg_policy` unavailable. |
+
+No proposed 041 fact is classified `DIFFERENT` on currently available evidence. Migration 041 is not fully reconstructable as a live-equivalent object until every `UNVERIFIED` row is resolved.
+
+### Lead-status constraint validation
+
+The exact live `leads.status` check definition remains unavailable, so the complete set accepted by production cannot be honestly stated. The earlier read-only counts prove only that production has accepted `researched`, `email_ready`, `contacted`, `replied`, `negotiating`, `closed`, `closed_manual`, and `dead`; zero observed rows do not prove acceptance or rejection.
+
+| Source | Status vocabulary |
+|---|---|
+| Final historical migration 012 | `new`, `researched`, `email_ready`, `contacted`, `replied`, `negotiating`, `closed`, `closed_manual`, `dead` |
+| Current TypeScript/UI (`src/lib/lead-status.ts`) | Historical nine plus `interested` and `closed_won` |
+| Recommended V2 contract | Historical nine plus `interested`; exclude `closed_won` and obsolete `dm_queued` |
+| Exact live check | UNVERIFIED |
+
+### ReachAgent function body comparison
+
+The earlier API audit established live RPC names/signatures available at that time, but not bodies. Migrations 053-054 are newer than the historical audit cutoff: 053 replaces `claim_recipient_outreach`, adds `release_recipient_outreach_claim` and `clear_lead_outreach_suppression_on_email_change`; 054 replaces `get_leads_search_page`. Their live application cannot be inferred. Since no `pg_get_functiondef` access exists, assigning `MATCH`, `LIVE NEWER`, `REPO NEWER`, `LIVE ONLY`, or `REPO ONLY` would be unsupported. Each required comparison is therefore explicitly `UNVERIFIED` rather than guessed.
+
+| Function/RPC area | Final repository source | Live-body comparison |
+|---|---|---|
+| Dashboard | `get_dashboard_summary` (039) | UNVERIFIED |
+| Leads search | `get_leads_search_page` (054; supersedes 048) | UNVERIFIED |
+| Pipeline search | `get_pipeline_search_page` (048) | UNVERIFIED |
+| Lifecycle | `get_lifecycle_page` (040) | UNVERIFIED |
+| Email Log search/summary | `get_email_log_search_page`, `get_email_log_summary` (048) | UNVERIFIED |
+| Health summary | `get_health_summary` (040) | UNVERIFIED |
+| Deals search | `get_deals_search_page` (048) | UNVERIFIED |
+| DM Queue search | `get_dm_queue_search_page` (048) | UNVERIFIED |
+| Delivery failures | `get_delivery_failure_report` (044), `get_delivery_failure_lead_selection` (045) | UNVERIFIED |
+| Email-report lookup | `get_email_report_leads` (047) | UNVERIFIED |
+| AI analytics | `get_ai_request_analytics` (036) | UNVERIFIED |
+| Delivery suppression | `suppress_lead_delivery_email` (043) | UNVERIFIED |
+| Hostinger receipt claim | `claim_hostinger_inbound_receipt` (052) | UNVERIFIED |
+| Recipient ownership | `claim_recipient_outreach`, `release_recipient_outreach_claim` (053) | UNVERIFIED |
+| Data quality | final helpers/report in 051; actions/summary in 050 | UNVERIFIED |
+
+Comparison must include identity arguments, result type, complete body, language, volatility, parallel/leakproof flags, security mode, per-function configuration/search path, owner, and ACL.
+
+### Trigger comparison
+
+No live trigger catalog was obtainable. Accordingly all requested comparisons remain `UNVERIFIED`; none can be safely labelled `MATCH`, `LIVE ONLY`, `REPO ONLY`, or `DIFFERENT`.
+
+| Trigger area | Final repository trigger | Status |
+|---|---|---|
+| Lead updated-at | `update_leads_updated_at` | UNVERIFIED |
+| Category updated-at | `update_categories_updated_at` | UNVERIFIED |
+| Settings updated-at | `update_settings_updated_at` | UNVERIFIED |
+| Auth profile creation | `on_auth_user_created` on `auth.users` | UNVERIFIED |
+| AI configuration updated-at | `update_ai_providers_updated_at`, `update_ai_models_updated_at`, `update_ai_workflow_configurations_updated_at` | UNVERIFIED |
+| Category template updated-at | `update_category_email_templates_updated_at` | UNVERIFIED |
+| Category suburb search state updated-at | `update_category_suburb_search_state_updated_at` | UNVERIFIED |
+| Lead normalized email | `leads_set_normalized_email` | UNVERIFIED |
+| Data-quality refresh | `leads_refresh_data_quality` (final body from 051) | UNVERIFIED |
+| Lead suppression reset after email change | `leads_clear_outreach_suppression_on_email_change` (053) | UNVERIFIED |
+| Category suburb priorities updated-at | Proposed only; absent from valid historical migrations | UNVERIFIED |
+
+### RLS, grants, and SaaS security assessment
+
+Exact live RLS enable/FORCE flags, policies, roles, `USING`/`WITH CHECK` expressions, schema/table/sequence/function grants, default privileges, owners, and security-definer settings all remain unavailable. The V1 intent is unsafe to copy wholesale into an eventual SaaS baseline:
+
+- broad authenticated CRUD on the core tables would allow every authenticated account to read or modify all leads and operational records;
+- broad authenticated settings writes would allow ordinary users to alter system-wide behavior and potentially secret-bearing configuration;
+- authenticated reads of quality/ownership objects can expose cross-customer recipient identity and suppression state;
+- `city_suburbs`, metrics, and distributed locks have no explicit historical RLS posture;
+- service-role access bypasses RLS, so application/job queries without tenant predicates cannot become tenant-safe merely by adding policies;
+- every security-definer RPC requires fixed safe `search_path`, least-privilege execute grants, caller authorization where applicable, and body review.
+
+This remains a design finding only. Multi-tenancy is not implemented here.
+
+### Ownership boundary and unexplained objects
+
+A renewed repository/code search found no ReachAgent table, view, or RPC dependency on `clients`, `customers`, `conversations`, `bookings`, `escalations`, `knowledge_base`, `weekly_reports`, `v_conversation_thread`, `v_bookings_full`, or `v_daily_summary`. Incidental English words such as "bookings" in lead content are not schema dependencies. All ten objects remain classified **EXCLUDE FROM REACHAGENT V2**. They must not be altered or deleted in production.
+
+`show_limit()` and `show_trgm(text)` still have no ReachAgent caller. Their owner, source extension, body, and purpose remain unexplained because function catalog metadata is unavailable; keep them excluded pending catalog proof.
+
+### Baseline readiness answers
+
+1. Successful schema-only dump: **No**.
+2. All ReachAgent tables completely known: **No**; API-visible shapes are known, but generated/identity/sequence/ownership/comment and other catalog details are incomplete.
+3. All constraints known: **No**.
+4. All indexes known: **No**.
+5. All required function bodies known: **No**.
+6. All triggers known: **No**.
+7. All RLS policies known: **No**.
+8. All relevant grants known: **No**.
+9. Migration 041 fully reconstructable: **No**.
+10. ReachAgent ownership boundary confirmed: **Yes at repository/caller level**; named-owner approval remains a separate governance gate.
+11. Unexplained live objects that could affect ReachAgent: **Yes**; `show_limit()` and `show_trgm(text)` provenance is unresolved, and catalog-only dependencies cannot be ruled out.
+12. Enough verified information to create the V2 golden baseline: **No**.
+
+**GOLDEN BASELINE STATUS: NOT READY**
+
+Remaining blockers:
+
+- a non-empty, secret-free production schema-only dump;
+- authenticated read-only PostgreSQL catalog access sufficient to capture exact columns/generated/identity/sequences, constraints and referential actions, indexes, functions, triggers, RLS/policies, grants/default privileges, extensions, views, owners, ACLs, and dependencies;
+- catalog resolution of every unverified migration 041 property and the exact `leads.status` check;
+- full live-body comparison for all ReachAgent functions, including post-cutoff migrations 053-054, and classification as `MATCH`, `LIVE NEWER`, `REPO NEWER`, `LIVE ONLY`, or `REPO ONLY`;
+- full live trigger comparison and classification;
+- provenance/dependency resolution for `show_limit()` and `show_trgm(text)` and any other catalog-only live objects.
+
+## Catalog validation completion record
+
+CATALOG VALIDATION COMPLETE
+
+Production schema changes: 0
+Production data changes: 0
+Historical migrations changed: 0
+Migrations applied: 0
+Deployments performed: 0
+
+Schema-only dump:
+NOT AVAILABLE
+
+GOLDEN BASELINE STATUS:
+NOT READY
+
+Remaining blockers:
+The six catalog/dump blockers listed immediately above.

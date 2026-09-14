@@ -52,6 +52,7 @@
     "test:stage-import-rollback": "tsx scripts/test-stage-import-rollback.ts",
     "test:migration-duplicate-resolution": "tsx scripts/test-migration-duplicate-resolution.ts",
     "test:writer-dedupe-index-refresh": "tsx scripts/test-writer-dedupe-index-refresh.ts",
+    "test:add-lead-duplicate-detection": "tsx scripts/test-add-lead-duplicate-detection.ts",
     "test:destructive-routes-require-admin": "tsx scripts/test-destructive-routes-require-admin.ts",
     "test:batch-agent-error-isolation": "tsx scripts/test-batch-agent-error-isolation.ts",
     "test:resend-send-idempotency": "tsx scripts/test-resend-send-idempotency.ts",
