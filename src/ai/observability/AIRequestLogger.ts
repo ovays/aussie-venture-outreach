@@ -15,6 +15,7 @@ export interface AIRequestLog {
   errorMessage: string | null
   retryCount: number
   requestSource: string
+  providerRequestId?: string | null
   metadata: Readonly<Record<string, boolean | number | string | null>>
 }
 

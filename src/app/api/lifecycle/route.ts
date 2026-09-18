@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { resolvePagination } from '@/lib/pagination'
 import { normalizeSearchTerm } from '@/lib/search'
+import { compareDecisionWithLifecycleProjection, loadDecisionContexts } from '@/domain/decision-engine'
 
 const FILTERS = new Set([
   'all', 'fu1_due', 'fu2_due', 'fu3_due', 'fu1', 'fu2', 'fu3',
@@ -36,6 +37,40 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  if (process.env.DECISION_ENGINE_SHADOW === 'true' && data && typeof data === 'object' && !Array.isArray(data)) {
+    const rows = (data as { data?: unknown }).data
+    if (Array.isArray(rows)) {
+      const projections = rows.filter((row): row is { id: string; next_action: string; is_overdue: boolean } => (
+        !!row && typeof row === 'object'
+        && typeof (row as { id?: unknown }).id === 'string'
+        && typeof (row as { next_action?: unknown }).next_action === 'string'
+        && typeof (row as { is_overdue?: unknown }).is_overdue === 'boolean'
+      ))
+      try {
+        const loaded = await loadDecisionContexts(supabase, projections.map((row) => row.id), { asOf })
+        const projectionById = new Map(projections.map((row) => [row.id, row]))
+        for (const context of loaded.contexts) {
+          const projection = projectionById.get(context.leadId)
+          if (!projection) continue
+          const comparison = compareDecisionWithLifecycleProjection(context, projection)
+          if (comparison.classification !== 'MATCH') {
+            console.info('[DECISION_ENGINE_SHADOW]', {
+              lead_id: context.leadId,
+              lifecycle_action: comparison.legacyAction,
+              engine_action: comparison.engine.action,
+              engine_reason: comparison.engine.reasonCode,
+              classification: comparison.classification,
+            })
+          }
+        }
+      } catch (shadowError) {
+        console.warn('[DECISION_ENGINE_SHADOW] comparison skipped', {
+          error: shadowError instanceof Error ? shadowError.message : String(shadowError),
+        })
+      }
+    }
   }
 
   return NextResponse.json({ ...data, as_of: asOf })

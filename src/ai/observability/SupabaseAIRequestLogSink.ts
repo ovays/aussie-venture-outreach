@@ -1,8 +1,10 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import type { AIRequestLog, AIRequestLogSink } from './AIRequestLogger'
+import { currentWorkflowTrace } from '@/lib/observability/context'
 
 export class SupabaseAIRequestLogSink implements AIRequestLogSink {
   async write(log: AIRequestLog): Promise<void> {
+    const trace = currentWorkflowTrace()
     const { error } = await createServiceClient()
       .from('ai_request_logs')
       .insert({
@@ -21,6 +23,9 @@ export class SupabaseAIRequestLogSink implements AIRequestLogSink {
         error_message: log.errorMessage,
         retry_count: log.retryCount,
         request_source: log.requestSource,
+        provider_request_id: log.providerRequestId ?? null,
+        workflow_run_id: trace?.workflowRunId ?? null,
+        workflow_step_id: trace?.workflowStepId ?? null,
         metadata: log.metadata,
       })
 

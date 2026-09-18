@@ -202,7 +202,7 @@ async function main() {
     read('src/app/api/leads/import/route.ts'),
     read('src/app/api/leads/route.ts'),
   ]
-  assert(creationPaths[0].includes("from('leads').insert"), 'Finder creation path covered by the leads trigger')
+  assert(creationPaths[0].includes("rpc('insert_finder_lead_if_new'"), 'Finder uses the atomic V2 insert RPC covered by the leads trigger')
   assert(creationPaths[1].includes('createLead(supabase'), 'CSV uses central createLead')
   assert(creationPaths[2].includes('createLead(supabase'), 'manual Add Lead uses central createLead')
   assert(migration.includes('CREATE TRIGGER leads_refresh_data_quality'), 'all lead inserts/updates are classified at the database boundary')

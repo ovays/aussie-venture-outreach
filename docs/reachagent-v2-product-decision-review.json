@@ -1,0 +1,264 @@
+{
+  "date": "2026-09-17",
+  "timezone": "Australia/Sydney",
+  "status": "PROMPT 15.5 PRODUCT DECISION REVIEW READY",
+  "scope": {
+    "analysisOnly": true,
+    "productionAccess": 0,
+    "deletedSnapshotUsed": false,
+    "decisionEngineChanges": 0,
+    "orchestratorChanges": 0,
+    "databaseMutations": 0,
+    "sends": 0,
+    "finderRuns": 0,
+    "aiCalls": 0,
+    "triggerDeployments": 0,
+    "prompt16Started": false
+  },
+  "summary": {
+    "totalProductDecisionCases": 72,
+    "rootDecisionCount": 3,
+    "genuineProductPolicyCount": 2,
+    "safeNoSideEffectCases": 34,
+    "sideEffectBlockers": 38,
+    "statusDistribution": {
+      "contacted": 72
+    },
+    "modeDistribution": {
+      "template": 72
+    }
+  },
+  "decisions": [
+    {
+      "decisionId": "PD-01",
+      "description": "Decide whether an already-contacted lead may receive scheduled follow-ups when its current category is null.",
+      "classification": "GENUINE_PRODUCT_POLICY_WITH_INSUFFICIENT_CONTENT_FACTS",
+      "affectedLeadCount": 30,
+      "sideEffectBlockerCount": 19,
+      "safeNoSideEffectCount": 11,
+      "statuses": ["contacted"],
+      "currentV1Behavior": {
+        "intent": "MANUAL_REVIEW",
+        "count": 30,
+        "evidenceKind": "SYNTHESIZED_LEGACY_INTENT"
+      },
+      "currentV2Behavior": [
+        { "action": "SEND_FOLLOWUP_1", "reasonCode": "FOLLOWUP_1_READY", "count": 4, "sideEffectBlockers": 4 },
+        { "action": "SEND_FOLLOWUP_2", "reasonCode": "FOLLOWUP_2_READY", "count": 11, "sideEffectBlockers": 11 },
+        { "action": "SEND_FOLLOWUP_3", "reasonCode": "FOLLOWUP_3_READY", "count": 4, "sideEffectBlockers": 4 },
+        { "action": "WAIT", "reasonCode": "FOLLOWUP_NOT_DUE", "count": 11, "sideEffectBlockers": 0 }
+      ],
+      "whyTheyDiffer": "The legacy comparator gates template mode on current category/template availability before contacted scheduling; V2 treats sent history and contacted lifecycle as governing facts.",
+      "insufficientFacts": [
+        "Whether follow-up content is already stored or category-neutral",
+        "The category or campaign used for the initial send",
+        "Why the current category is null"
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Continue contacted sequence",
+          "description": "Allow follow-ups from sent history regardless of current category."
+        },
+        {
+          "id": "B",
+          "label": "Require category or manual review",
+          "description": "Exclude null-category follow-up sends until categorized or reviewed."
+        },
+        {
+          "id": "C",
+          "label": "Require preserved or neutral context",
+          "description": "Continue only with preserved campaign/template context or approved category-neutral content."
+        }
+      ],
+      "safestCanaryDefault": "B",
+      "longTermSaasImplication": "Persist send-time campaign/template identity and support an explicit tenant or campaign continuation policy.",
+      "safeDefaultCanUnblockPrompt16": true,
+      "unblockCondition": "An enforceable canary cohort restriction or policy must prevent null-category follow-up execution.",
+      "blockersRemovedBySafeDefault": 19,
+      "blockersRemainingAfterSafeDefault": 19
+    },
+    {
+      "decisionId": "PD-02",
+      "description": "Decide whether an already-contacted lead may be reactivated after 60 days when its current category is null.",
+      "classification": "GENUINE_PRODUCT_POLICY_WITH_INSUFFICIENT_CONTENT_FACTS",
+      "affectedLeadCount": 38,
+      "sideEffectBlockerCount": 19,
+      "safeNoSideEffectCount": 19,
+      "statuses": ["contacted"],
+      "currentV1Behavior": {
+        "intent": "MANUAL_REVIEW",
+        "count": 38,
+        "evidenceKind": "SYNTHESIZED_LEGACY_INTENT"
+      },
+      "currentV2Behavior": [
+        { "action": "REACTIVATE", "reasonCode": "REACTIVATION_READY", "count": 19, "sideEffectBlockers": 19 },
+        { "action": "WAIT", "reasonCode": "REACTIVATION_NOT_DUE", "count": 19, "sideEffectBlockers": 0 }
+      ],
+      "whyTheyDiffer": "The legacy comparator returns on current template availability before reactivation scheduling; V2 gives completed sequence history and the approved initial-send-based schedule precedence.",
+      "insufficientFacts": [
+        "Whether reactivation has a safe null-category fallback",
+        "Whether original campaign context survives",
+        "Why the current category is null"
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Permit reactivation",
+          "description": "Allow reactivation from historical sequence facts regardless of current category."
+        },
+        {
+          "id": "B",
+          "label": "Require category or preserved context",
+          "description": "Exclude or review null-category reactivations until content provenance is known."
+        },
+        {
+          "id": "C",
+          "label": "Disable reactivation broadly",
+          "description": "Use tenant-wide disablement for the canary, accepting that this is not category-specific and may lead to MARK_DEAD."
+        }
+      ],
+      "safestCanaryDefault": "B",
+      "longTermSaasImplication": "Provide an explicit tenant or campaign reactivation policy backed by preserved campaign context or approved neutral content.",
+      "safeDefaultCanUnblockPrompt16": true,
+      "unblockCondition": "An enforceable canary cohort restriction or policy must prevent null-category reactivation execution.",
+      "blockersRemovedBySafeDefault": 19,
+      "blockersRemainingAfterSafeDefault": 19
+    },
+    {
+      "decisionId": "PD-03",
+      "description": "Confirm that template readiness must not automatically regenerate initial content for an already-contacted lead.",
+      "classification": "COMPARISON_MODEL_LIMITATION_AND_HISTORICAL_V1_INCONSISTENCY",
+      "affectedLeadCount": 4,
+      "sideEffectBlockerCount": 0,
+      "safeNoSideEffectCount": 4,
+      "statuses": ["contacted"],
+      "commonFacts": {
+        "manualSource": true,
+        "categoryPresent": true,
+        "templateReady": true
+      },
+      "currentV1Behavior": {
+        "intent": "GENERATE_INITIAL",
+        "count": 4,
+        "evidenceKind": "SYNTHESIZED_LEGACY_INTENT"
+      },
+      "currentV2Behavior": [
+        { "action": "WAIT", "reasonCode": "REACTIVATION_NOT_DUE", "count": 3, "sideEffectBlockers": 0 },
+        { "action": "WAIT", "reasonCode": "FOLLOWUP_NOT_DUE", "count": 1, "sideEffectBlockers": 0 }
+      ],
+      "whyTheyDiffer": "The legacy comparator's template branch returns before recognizing contacted lifecycle state; V2 gives the already-sent initial and contacted sequence precedence.",
+      "options": [
+        {
+          "id": "A",
+          "label": "Preserve V2 lifecycle ordering",
+          "description": "Never automatically regenerate an initial email after contact."
+        },
+        {
+          "id": "B",
+          "label": "Operator-only regeneration",
+          "description": "Allow explicit audited repair or regeneration outside automatic next-action selection."
+        },
+        {
+          "id": "C",
+          "label": "Reproduce legacy ordering",
+          "description": "Automatically regenerate for contacted template-ready leads, risking duplicate or stale drafts."
+        }
+      ],
+      "safestCanaryDefault": "A",
+      "longTermSaasImplication": "Lifecycle truth should outrank mutable template readiness; regeneration should be a separate audited operator operation.",
+      "safeDefaultCanUnblockPrompt16": false,
+      "unblockCondition": "No runtime unblock is needed because all four V2 actions are WAIT.",
+      "blockersRemovedBySafeDefault": 0,
+      "blockersRemainingAfterSafeDefault": 38
+    }
+  ],
+  "approvedDecisions": {
+    "PD-01": {
+      "approved": true,
+      "selectedDefault": "MANUAL_REVIEW",
+      "rule": "Due follow-ups require usable category context."
+    },
+    "PD-02": {
+      "approved": true,
+      "selectedDefault": "MANUAL_REVIEW",
+      "rule": "Due reactivation requires usable category context."
+    },
+    "PD-03": {
+      "approved": true,
+      "selectedDefault": "PRESERVE_CONTACTED_LIFECYCLE",
+      "rule": "Contacted leads never automatically regenerate initial outreach."
+    }
+  },
+  "implementation": {
+    "status": "COMPLETE_AND_LOCALLY_VERIFIED",
+    "usableCategoryContext": {
+      "fact": "operationalFacts.hasUsableCategoryContext",
+      "derivation": "A non-null leads.category_id whose already-loaded categories FK relation resolves.",
+      "nullCategoryFailsClosed": true,
+      "orphanedCategoryFailsClosed": true,
+      "missingFactFailsClosed": true,
+      "templateAvailabilityUsedAsProxy": false,
+      "newDatabaseLookupAdded": false,
+      "aiInferenceUsed": false,
+      "preservedOrNeutralContentExceptionAvailable": false
+    },
+    "blockersBefore": 38,
+    "blockersAfter": 0,
+    "remainingProductDecisionRequired": 34,
+    "remainingSideEffectBlockers": 0,
+    "bugInNewEngine": 0,
+    "tests": [
+      {
+        "command": "npm run test:decision-engine:v2",
+        "status": "PASS",
+        "pureDecisionCases": 43,
+        "transitionAssertions": 5,
+        "shadowComparisons": 4,
+        "integratedExecutionPaths": 5,
+        "boundedContextBatch": 100
+      },
+      {
+        "command": "npm run test:prompt15-safety-gate:v2",
+        "status": "PASS",
+        "reviewedCases": 72,
+        "convertedToManualReview": 38,
+        "remainingDocumentationOnly": 34,
+        "productionAccess": 0,
+        "snapshotRecreated": false
+      },
+      {
+        "command": "npm run test:shadow-readiness:v2",
+        "status": "PASS",
+        "syntheticCohorts": 29
+      },
+      {
+        "command": "npm run typecheck",
+        "status": "PASS"
+      }
+    ]
+  },
+  "canaryReadiness": {
+    "casesExplained": {
+      "PD-01": 30,
+      "PD-02": 38,
+      "PD-03": 4,
+      "total": 72
+    },
+    "blockerScenarios": [
+      { "appliedSafeDecisions": [], "blockersRemaining": 38 },
+      { "appliedSafeDecisions": ["PD-01"], "blockersRemaining": 19 },
+      { "appliedSafeDecisions": ["PD-02"], "blockersRemaining": 19 },
+      { "appliedSafeDecisions": ["PD-03"], "blockersRemaining": 38 },
+      { "appliedSafeDecisions": ["PD-01", "PD-02"], "blockersRemaining": 0 },
+      { "appliedSafeDecisions": ["PD-01", "PD-02", "PD-03"], "blockersRemaining": 0 }
+    ],
+    "configurationWithoutCoreArchitectureChangeExists": true,
+    "configurationDescription": "A curated or explicitly gated canary can exclude null-category contacted leads from follow-up and reactivation execution while preserving the approved Decision Engine and Orchestrator architecture.",
+    "existingSettingsOnlyConfigurationIsClean": false,
+    "existingSettingsLimitation": "Available global quotas, delays, and reactivation disablement are not category-specific and may suppress unrelated leads or produce MARK_DEAD.",
+    "prompt16SafeNow": true,
+    "prompt16StartCondition": "Prompt 15.6 safety gate is satisfied; Prompt 16 still requires its own launch controls and explicit authorization.",
+    "prompt16Started": false
+  }
+}

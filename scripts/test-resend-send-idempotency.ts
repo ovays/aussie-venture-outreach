@@ -55,8 +55,8 @@ async function main() {
 
     const fnIdx = src.indexOf('export async function sendEmail(')
     const retryOpenIdx = src.indexOf('return await withRetry(async () => {', fnIdx)
-    const buildHeadersIdx = src.indexOf('buildThreadingHeaders(params.references)', fnIdx)
-    const idempotencyKeyDeclIdx = src.indexOf('const idempotencyKey = messageId', fnIdx)
+    const buildHeadersIdx = src.indexOf('buildThreadingHeaders(params.references, params.messageId)', fnIdx)
+    const idempotencyKeyDeclIdx = src.indexOf('const idempotencyKey = params.idempotencyKey ?? messageId', fnIdx)
 
     assert(fnIdx !== -1, 'sendEmail() still exists')
     assert(retryOpenIdx !== -1, 'sendEmail() still uses withRetry')
@@ -90,6 +90,9 @@ async function main() {
 
     const b = buildThreadingHeaders()
     assert(!('In-Reply-To' in b.headers), 'No In-Reply-To header when no references are given (new thread)')
+
+    const stable = buildThreadingHeaders(undefined, '<stable@aussieventure.com>')
+    assert(stable.messageId === '<stable@aussieventure.com>', 'A durable intent can supply a stable Message-ID across worker retries')
   }
 
   console.log('\n' + SEP)

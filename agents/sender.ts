@@ -1,11 +1,14 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { sendEmail } from '@/lib/resend'
+import { sendEmail, UncertainEmailDeliveryError } from '@/lib/resend'
 import { logger } from '@/lib/logger'
 import { getAnalyticsDayRange } from '@/lib/analytics'
 import { handleEmailSyncFailure } from '@/lib/email-status'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
+import { decideNextAction, loadDecisionContexts } from '@/domain/decision-engine'
 import { claimRecipientOutreach, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
+import { outboundIdempotencyKey, outboundMessageId } from '@/lib/outbound-send'
+import { observability } from '@/lib/observability/service'
 
 // Held for the entire quota-check-then-send sequence below so two overlapping
 // invocations (a stuck old run, a manual script racing the scheduled
@@ -189,6 +192,9 @@ console.log("FILTERED PENDING", pendingEmails)
 
   // Apply hard cap: never send more initial outreach than remaining quota allows.
   const toSend = pendingEmails.slice(0, remainingToday)
+  const loadedDecisionContexts = await loadDecisionContexts(supabase, toSend.map((email) => email.lead_id))
+  const decisionByLeadId = new Map(loadedDecisionContexts.contexts.map((context) => [context.leadId, decideNextAction(context)]))
+  await observability().recordDecisionResults([...decisionByLeadId.values()], 'send_initial_decision', 41)
 
   let sent = 0
   let failed = 0
@@ -209,6 +215,16 @@ console.log("FILTERED PENDING", pendingEmails)
     if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
       logger.warn('sender', 'INITIAL_EMAIL_SUPPRESSED_DELIVERY_FAILURE', { lead_id: emailRecord.lead_id })
       await removeLeadFromInitialOutreachQueue(supabase, emailRecord.lead_id, 'suppressed')
+      continue
+    }
+
+    const centralDecision = decisionByLeadId.get(emailRecord.lead_id)
+    if (!centralDecision || centralDecision.action !== 'SEND_INITIAL') {
+      logger.warn('sender', 'INITIAL_EMAIL_DECISION_BLOCKED', {
+        lead_id: emailRecord.lead_id,
+        action: centralDecision?.action ?? 'MISSING_CONTEXT',
+        reason: centralDecision?.reasonCode ?? 'MISSING_CONTEXT',
+      })
       continue
     }
 
@@ -267,6 +283,10 @@ const result = await sendEmail({
     html: emailRecord.body_html,
     text: emailRecord.body_text,
     leadId: emailRecord.lead_id,
+    idempotencyKey: outboundIdempotencyKey(emailRecord.id),
+    messageId: outboundMessageId(emailRecord.id),
+    emailIntentId: emailRecord.id,
+    phase: 'initial_pitch',
   })
 
 
@@ -309,6 +329,11 @@ const result = await sendEmail({
           continue
         }
 
+        await observability().observeLeadStatusTransition({
+          leadId: emailRecord.lead_id, fromStatus: 'email_ready', toStatus: 'contacted',
+          actor: 'sender', reasonCode: centralDecision.reasonCode,
+        })
+
         await supabase.from('activity_log').insert({
           event_type: 'email_sent',
           lead_id: emailRecord.lead_id,
@@ -340,6 +365,19 @@ const result = await sendEmail({
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
       logger.error('sender', `#${i + 1}/${total} EXCEPTION for ${lead.email}: ${msg}`)
+
+      if (error instanceof UncertainEmailDeliveryError) {
+        // Keep the durable intent pending. A retry reuses this row's provider
+        // idempotency key, so it confirms the same delivery instead of sending
+        // a second message after an ambiguous transport failure.
+        await supabase.from('dead_letter_queue').insert({
+          operation: 'send_email_uncertain',
+          payload: { lead_id: emailRecord.lead_id, email_id: emailRecord.id },
+          error: msg,
+        })
+        failed++
+        continue
+      }
 
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/lib/rateLimit'
-import { STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
+import { ALL_STATUSES, STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
 import { STAGE_VALUES } from '@/lib/stage-import'
 import { createLead } from '@/lib/create-lead'
 import { readInitialEmailMode } from '@/lib/initial-email-router'
@@ -16,6 +16,7 @@ import {
 
 const patchLeadSchema = z.object({
   id: z.string().uuid(),
+  status: z.enum(ALL_STATUSES).optional(),
 }).catchall(z.unknown())
 
 const createLeadSchema = z.object({
@@ -120,8 +121,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   let statuses: string[] | null = null
   if (stage && STAGE_STATUSES[stage]) {
     statuses = [...STAGE_STATUSES[stage]]
-  } else if (status) {
+  } else if (status && (ALL_STATUSES as readonly string[]).includes(status)) {
     statuses = [status]
+  } else if (status) {
+    return NextResponse.json({ error: 'Invalid lead status' }, { status: 400 })
   }
 
   const { data: result, error } = await supabase.rpc('get_leads_search_page', {

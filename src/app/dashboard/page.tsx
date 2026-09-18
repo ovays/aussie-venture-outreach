@@ -47,7 +47,7 @@ export default async function DashboardPage() {
     source: 'leads.status (no limit)',
     raw_status_map: statusMap,
     stage_counts: stageCounts,
-    note: 'negotiating = negotiating+interested, closed = closed+closed_won+closed_manual',
+    note: 'negotiating = negotiating+interested, closed = closed+closed_manual',
   })
 
   return (

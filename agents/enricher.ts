@@ -1,3 +1,8 @@
+/**
+ * @deprecated Legacy, inactive enrichment pipeline. ReachAgent V2 uses the
+ * bounded Researcher compatibility wrapper and the exact-lead Research service.
+ * Keep this file only until production compatibility dependencies are audited.
+ */
 import { createServiceClient } from '@/lib/supabase/server'
 import { extractWebsiteData, extractEmailWithHaiku } from '@/ai/workflows'
 

@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 import { dataQualityActionSchema, friendlyDataQualityError } from '@/lib/data-quality-actions'
+import { POSITIVE_RESPONSE_STATUSES } from '@/lib/lead-status'
+import type { Database } from '@/types/database'
 import { deleteLeads } from '@/lib/delete-leads'
 import { createServiceClient } from '@/lib/supabase/server'
 
-const POSITIVE_STATUSES = new Set(['replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual'])
+const POSITIVE_STATUSES = new Set<string>(POSITIVE_RESPONSE_STATUSES)
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const auth = await requireApiAdmin()
@@ -17,23 +19,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     if (action.action === 'resolve' || action.action === 'reopen') {
-      const { data, error } = await supabase.rpc('set_data_quality_flag_status', {
+      const args = {
         p_issue_type: action.issue_type,
-        p_normalized_email: action.normalized_email ?? null,
-        p_lead_ids: action.lead_ids ?? null,
+        p_normalized_email: action.normalized_email ?? undefined,
+        p_lead_ids: action.lead_ids ?? undefined,
         p_status: action.action === 'resolve' ? 'resolved' : 'open',
-        p_resolution_reason: action.action === 'resolve' ? action.reason ?? null : null,
-        p_actor_id: auth.user.id,
-      })
+        p_resolution_reason: action.action === 'resolve' ? action.reason ?? undefined : undefined,
+      } satisfies Database['public']['Functions']['set_data_quality_flag_status']['Args']
+      const { data, error } = await supabase.rpc('set_data_quality_flag_status', args)
       if (error) throw error
       return NextResponse.json({ success: true, data })
     }
 
     if (action.action === 'remove_email') {
-      const { data, error } = await supabase.rpc('remove_data_quality_emails', {
+      const args = {
         p_lead_ids: action.lead_ids,
-        p_actor_id: auth.user.id,
-      })
+      } satisfies Database['public']['Functions']['remove_data_quality_emails']['Args']
+      const { data, error } = await supabase.rpc('remove_data_quality_emails', args)
       if (error) throw error
       return NextResponse.json({ success: true, data })
     }

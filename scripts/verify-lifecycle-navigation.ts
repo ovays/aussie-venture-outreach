@@ -190,8 +190,8 @@ async function verifyEmailLog() {
 }
 
 async function expectedEmailSummary(search: string) {
-  const contactedStatuses = ['contacted', 'replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual', 'dead']
-  const positiveStatuses = ['replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual']
+  const contactedStatuses = ['contacted', 'replied', 'negotiating', 'interested', 'closed', 'closed_manual', 'dead']
+  const positiveStatuses = ['replied', 'negotiating', 'interested', 'closed', 'closed_manual']
   const [contacted, positive] = await Promise.all([
     supabase.from('leads').select('id', { count: 'exact', head: true }).in('status', contactedStatuses),
     supabase.from('leads').select('id', { count: 'exact', head: true }).in('status', positiveStatuses),
@@ -236,7 +236,7 @@ async function measureLegacyHealth() {
   const since2h = new Date(asOf.getTime() - 2 * 3_600_000).toISOString()
   const since25h = new Date(asOf.getTime() - 25 * 3_600_000).toISOString()
   await measured(metrics, () => supabase.from('leads').select('id').limit(1))
-  const systemActive = await measured(metrics, () => supabase.from('settings').select('value').eq('key', 'system_active').single())
+  const systemActive = await measured(metrics, () => supabase.from('settings').select('value').eq('key', 'system_active').maybeSingle())
   const lastPipelineRun = await measured(metrics, () => supabase.from('activity_log').select('created_at').eq('event_type', 'finder_complete').order('created_at', { ascending: false }).limit(1).maybeSingle())
   const outscraperError = await measured(metrics, () => supabase.from('activity_log').select('id').gte('created_at', since24h).or('description.ilike.%402%,description.ilike.%quota exhausted%,description.ilike.%balance%').limit(1))
   const bounceCount = await measured(metrics, () => supabase.from('emails').select('id', { count: 'exact', head: true }).eq('status', 'bounced').gte('sent_at', since24h))
@@ -305,7 +305,7 @@ async function staticContracts() {
   }
   const files = Object.fromEntries(await Promise.all(Object.entries(paths).map(async ([key, path]) => [key, await readFile(path, 'utf8')])))
   assert(!files.pipelinePage.includes("select('*')") && !files.pipelinePage.includes('limit(2000)'))
-  assert(files.pipelineApi.includes("page_size") && files.pipelineApi.includes("{ count: 'exact' }") && files.pipelineApi.includes(".order('id'"))
+  assert(files.pipelineApi.includes("rpc('get_pipeline_search_page'") && files.pipelineApi.includes('p_page_size') && !files.pipelineApi.includes("select('*')"))
   assert(files.pipelineUi.includes('mutations.current.has') && files.pipelineUi.includes('mutatingLeadIds.has') && files.pipelineUi.includes('Promise.all([loadColumn(source), loadColumn(destination)])'))
   const moveCard = files.pipelineUi.slice(files.pipelineUi.indexOf('async function moveCard'))
   const responseCheckIndex = moveCard.indexOf('if (!response.ok)')

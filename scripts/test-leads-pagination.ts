@@ -25,7 +25,7 @@ type Filters = {
 
 const STAGE_STATUSES = {
   negotiating: ['negotiating', 'interested'],
-  closed: ['closed', 'closed_won', 'closed_manual'],
+  closed: ['closed', 'closed_manual'],
 } as const
 
 function requireEnvironment(name: string): string {

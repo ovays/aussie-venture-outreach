@@ -4,8 +4,8 @@
 
 export const ALL_STATUSES = [
   'new', 'researched', 'email_ready',
-  'contacted', 'replied', 'negotiating', 'interested',
-  'closed', 'closed_won', 'closed_manual', 'dead',
+  'contacted', 'replied', 'interested', 'negotiating',
+  'closed', 'closed_manual', 'dead',
 ] as const
 
 export type LeadStatus = typeof ALL_STATUSES[number]
@@ -15,13 +15,13 @@ export const PRE_CONTACT_STATUSES: readonly LeadStatus[] = ['new', 'researched',
 
 // All statuses where an initial pitch was sent
 export const PITCHED_STATUSES: readonly LeadStatus[] = [
-  'contacted', 'replied', 'negotiating', 'interested',
-  'closed', 'closed_won', 'closed_manual', 'dead',
+  'contacted', 'replied', 'interested', 'negotiating',
+  'closed', 'closed_manual', 'dead',
 ]
 
 // Positive-response statuses (used for reply-rate / engagement metrics)
 export const POSITIVE_RESPONSE_STATUSES: readonly LeadStatus[] = [
-  'replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual',
+  'replied', 'interested', 'negotiating', 'closed', 'closed_manual',
 ]
 
 // ─── Canonical pipeline stages ──────────────────────────────────────────────
@@ -29,13 +29,13 @@ export const POSITIVE_RESPONSE_STATUSES: readonly LeadStatus[] = [
 // Dashboard cards, Pipeline Kanban, and Leads filters all use these groupings.
 //
 // Rule: negotiating includes "interested" (they're both active-deal stages)
-//       closed includes closed_won and closed_manual (all closed-deal variants)
+//       closed includes closed and closed_manual (all closed-deal variants)
 
 export const STAGE_STATUSES = {
   contacted:   ['contacted']                              as readonly LeadStatus[],
   replied:     ['replied']                               as readonly LeadStatus[],
-  negotiating: ['negotiating', 'interested']             as readonly LeadStatus[],
-  closed:      ['closed', 'closed_won', 'closed_manual'] as readonly LeadStatus[],
+  negotiating: ['interested', 'negotiating']             as readonly LeadStatus[],
+  closed:      ['closed', 'closed_manual']               as readonly LeadStatus[],
   dead:        ['dead']                                  as readonly LeadStatus[],
 }
 
@@ -63,7 +63,6 @@ export const STATUS_LABELS: Record<LeadStatus, string> = {
   negotiating:   'Negotiating',
   interested:    'Interested',
   closed:        'Closed',
-  closed_won:    'Closed Won',
   closed_manual: 'Closed (Manual)',
   dead:          'Dead',
 }
@@ -78,7 +77,6 @@ export const STATUS_COLORS: Record<LeadStatus, string> = {
   negotiating:   'bg-teal-500/20 text-teal-400',
   interested:    'bg-violet-500/20 text-violet-400',
   closed:        'bg-emerald-500/20 text-emerald-400',
-  closed_won:    'bg-emerald-600/20 text-emerald-300',
   closed_manual: 'bg-orange-600/20 text-orange-300',
   dead:          'bg-gray-500/20 text-gray-400',
 }
@@ -105,6 +103,10 @@ export function rawStatusToStage(status: string): LeadStage | null {
     if ((statuses as readonly string[]).includes(status)) return stage
   }
   return null
+}
+
+export function isLeadStatus(value: unknown): value is LeadStatus {
+  return typeof value === 'string' && (ALL_STATUSES as readonly string[]).includes(value)
 }
 
 // Build a Supabase .in() string for a stage: '("negotiating","interested")'

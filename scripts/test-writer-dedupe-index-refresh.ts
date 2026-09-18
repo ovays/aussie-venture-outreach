@@ -107,11 +107,11 @@ async function main() {
     assert(src.includes("addLeadToDedupeIndex, checkLeadDedupe") || /import\s*{[^}]*addLeadToDedupeIndex[^}]*}\s*from\s*'@\/lib\/deduplication'/.test(src),
       'write-lead.ts imports addLeadToDedupeIndex from @/lib/deduplication')
 
-    const routeIdx = src.indexOf('await routeInitialEmail(')
+    const routeIdx = src.indexOf('await generateInitialContent(')
     const addToIndexIdx = src.indexOf('addLeadToDedupeIndex(dedupeIndex,')
     const returnEmailIdx = src.lastIndexOf("return { success: true, channel: 'email', outcome: 'created'")
 
-    assert(routeIdx !== -1, 'write-lead.ts routes the queued email through the central router')
+    assert(routeIdx !== -1, 'write-lead.ts routes the queued email through the canonical Initial Content service')
     assert(addToIndexIdx !== -1, 'write-lead.ts calls addLeadToDedupeIndex(dedupeIndex, ...)')
     assert(returnEmailIdx !== -1, "write-lead.ts returns the successful created-email outcome")
     assert(routeIdx < addToIndexIdx, 'The index is updated only after the router saves the email')

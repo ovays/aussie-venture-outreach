@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { NextResponse, type NextRequest } from 'next/server'
+import { assertV2SupabaseTarget } from '@/lib/v2-runtime-safety'
 
 const protectedPrefixes = ['/dashboard', '/api']
 const publicApiPrefixes = ['/api/webhooks']
@@ -38,6 +39,7 @@ function forbidden() {
 }
 
 async function getLiveProfileRole(userId: string) {
+  assertV2SupabaseTarget()
   const supabase = createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -73,6 +75,7 @@ async function getLiveProfileRole(userId: string) {
 }
 
 export async function proxy(request: NextRequest) {
+  assertV2SupabaseTarget()
   const { pathname } = request.nextUrl
   let response = NextResponse.next({ request })
 

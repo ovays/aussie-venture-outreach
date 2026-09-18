@@ -4,7 +4,9 @@ import { logger } from '@/lib/logger'
 import {
   addLeadToDedupeIndex,
   checkLeadDedupe,
-  fetchPipelineDedupeIndex,
+  createLeadDedupeIndex,
+  extractRootDomainFromEmail,
+  isPublicEmailDomain,
 } from '@/lib/deduplication'
 import {
   isHalalFilterCategory,
@@ -1250,26 +1252,37 @@ function validateBusinessEmail(email: string, businessName: string): EmailValida
 
 // ── DB dedup ─────────────────────────────────────────────────────────────────
 
-async function isAlreadyInDB(
+interface FinderCandidateMatch {
+  matched_id: string | null
+  matched_business_name: string | null
+  matched_email: string | null
+  matched_status: string | null
+  matched_suppression_reason: string | null
+  match_type: string | null
+}
+
+async function findExistingCandidates(
   supabase: ReturnType<typeof createServiceClient>,
-  name: string,
+  candidates: readonly OutscraperResult[],
   city: string,
-  phone?: string
-): Promise<{ isDuplicate: boolean; matchedId?: string; matchedName?: string; matchedEmail?: string }> {
-  const conditions: string[] = [`and(business_name.eq.${name},city.eq.${city})`]
-  if (phone) conditions.push(`phone.eq.${phone}`)
-  const { data } = await supabase
-    .from('leads')
-    .select('id, business_name, email')
-    .or(conditions.join(','))
-    .limit(1)
-  const match = data?.[0] as { id: string; business_name: string; email: string | null } | undefined
-  return {
-    isDuplicate:  !!data?.length,
-    matchedId:    match?.id,
-    matchedName:  match?.business_name,
-    matchedEmail: match?.email ?? undefined,
-  }
+): Promise<Map<number, FinderCandidateMatch>> {
+  if (candidates.length === 0) return new Map()
+  const { data, error } = await supabase.rpc('lookup_finder_candidates', {
+    p_candidates: candidates.map((candidate, candidateIndex) => ({
+      candidate_index: candidateIndex,
+      business_name: candidate.name,
+      city,
+      phone: candidate.phone ?? null,
+      email: candidate.email ?? null,
+      email_root_domain: extractRootDomainFromEmail(candidate.email),
+      is_public_email_domain: isPublicEmailDomain(extractRootDomainFromEmail(candidate.email)),
+      website_domain: normalizeDomain(candidate.website ?? ''),
+    })),
+  })
+  if (error) throw new Error(`Finder candidate lookup failed: ${error.message}`)
+  return new Map(((data ?? []) as Array<FinderCandidateMatch & { candidate_index: number }>)
+    .filter((row) => row.matched_id)
+    .map((row) => [row.candidate_index, row]))
 }
 
 // ── Daily spend helper ───────────────────────────────────────────────────────
@@ -1447,22 +1460,13 @@ export async function runFinderAgent(): Promise<{ leadsFound: number; runtimeLim
   const spentToday = await getDailyOutscraperSpend(supabase)
   logger.info('finder', `Prior spend today: $${spentToday.toFixed(4)}`)
 
-  const dedupeIndex = await fetchPipelineDedupeIndex(supabase)
+  // This index now contains only leads accepted during this Finder invocation.
+  // Existing database identities are resolved by the set-based RPC below.
+  const dedupeIndex = createLeadDedupeIndex([])
   logger.info('finder', '[DEBUG_DEDUPLICATION] Pipeline dedupe index loaded', {
     emails: dedupeIndex.byEmail.size,
     root_domains: dedupeIndex.byRootDomain.size,
   })
-
-  const { data: existingWebsiteRows } = await supabase
-    .from('leads')
-    .select('website')
-    .not('website', 'is', null)
-  const knownDomains = new Set<string>(
-    (existingWebsiteRows ?? [])
-      .map((r) => normalizeDomain(r.website ?? ''))
-      .filter((d): d is string => Boolean(d))
-  )
-  logger.info('finder', `Known website domains pre-loaded = ${knownDomains.size}`)
 
   const seenDomains = new Set<string>()
   const seenQueries = new Set<string>()
@@ -1893,9 +1897,13 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           }
           comboGoogleResults += results.length
 
+          // One set-based lookup for the whole provider page replaces the
+          // former per-candidate leads query.
+          const existingCandidates = await findExistingCandidates(supabase, results, city)
+
           let newLeadsThisBatch = 0
 
-          for (const result of results) {
+          for (const [resultIndex, result] of results.entries()) {
             if (emailCount >= EMAIL_TARGET) break
             if (emailCount + dmCount >= TOTAL_TARGET) break
             if (categoryEmailCount >= categoryLimit) break
@@ -1991,8 +1999,8 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
             if (rawWebsite) {
               const domain = normalizeDomain(rawWebsite)
               if (domain) {
-                if (knownDomains.has(domain) || seenDomains.has(domain)) {
-                  const matchedSource = knownDomains.has(domain) ? 'knownWebsiteDomains' : 'currentPipelineRun'
+                if (seenDomains.has(domain)) {
+                  const matchedSource = 'currentPipelineRun'
                   logger.info('finder', '[DUPLICATE_MATCH_FOUND]', {
                     incomingBusiness:         name,
                     incomingWebsite:          rawWebsite,
@@ -2113,16 +2121,16 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               })
             }
 
-            const dbDupeCheck = await isAlreadyInDB(supabase, name, city, result.phone)
-            if (dbDupeCheck.isDuplicate) {
+            const dbDupeCheck = existingCandidates.get(resultIndex)
+            if (dbDupeCheck) {
               logger.info('finder', '[DUPLICATE_MATCH_FOUND]', {
                 incomingBusiness:         name,
                 incomingWebsite:          rawWebsite ?? null,
                 incomingNormalizedDomain: rawWebsite ? normalizeDomain(rawWebsite) : null,
                 incomingEmail:            foundEmail ?? null,
-                matchedLeadId:            dbDupeCheck.matchedId ?? null,
-                matchedBusiness:          dbDupeCheck.matchedName ?? null,
-                matchedEmail:             dbDupeCheck.matchedEmail ?? null,
+                matchedLeadId:            dbDupeCheck.matched_id,
+                matchedBusiness:          dbDupeCheck.matched_business_name,
+                matchedEmail:             dbDupeCheck.matched_email,
                 matchedSource:            'database',
                 matchType:                'name_city_or_phone',
               })
@@ -2200,8 +2208,9 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                 reason: 'candidate_accepted',
               })
               qualifiedCandidates++
-              const { data: insertedLead, error } = await supabase.from('leads').insert({
+              const { data: insertionResult, error } = await supabase.rpc('insert_finder_lead_if_new', { p_lead: {
                 business_name:        name,
+                category_id:          category.id,
                 category_name:        category.name,
                 city:                 city,
                 state:                state,
@@ -2215,16 +2224,40 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                 halal_reasons:        halalReasons,
                 status:               'new',
                 outreach_channel:     'email',
+                is_public_email_domain: isPublicEmailDomain(dedupeDecision.rootDomain),
                 content_type:         resolveContentType(
                   { name: category.name, content_type: category.contentType, city_content_types: category.cityContentTypes },
                   city
                 ),
-              }).select('id, business_name, email, status').single()
+              } })
 
               if (error) {
                 logger.error('finder', `Insert failed: ${name}`, { error: error.message })
                 continue
               }
+
+              const insertion = insertionResult as {
+                inserted?: boolean
+                lead?: { id: string; business_name: string; email: string | null; status: string | null }
+                match?: { id: string; business_name: string; email: string | null; status: string | null; outreach_suppression_reason: string | null }
+              } | null
+              if (!insertion?.inserted || !insertion.lead) {
+                logger.info('finder', '[DUPLICATE_MATCH_FOUND]', {
+                  incomingBusiness: name,
+                  incomingEmail: dedupeDecision.email,
+                  matchedLeadId: insertion?.match?.id ?? null,
+                  matchedBusiness: insertion?.match?.business_name ?? null,
+                  matchedEmail: insertion?.match?.email ?? null,
+                  matchedStatus: insertion?.match?.status ?? null,
+                  matchedSuppressionReason: insertion?.match?.outreach_suppression_reason ?? null,
+                  matchedSource: 'atomicInsertGuard',
+                })
+                dbDuplicateSkips++
+                comboDuplicates++
+                duplicatesRemoved++
+                continue
+              }
+              const insertedLead = insertion.lead
 
               if (insertedLead) {
                 addLeadToDedupeIndex(dedupeIndex, insertedLead)

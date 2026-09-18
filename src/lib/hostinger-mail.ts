@@ -70,6 +70,17 @@ interface HostingerMailConfig {
   baseUrl: string
 }
 
+const HOSTINGER_READ_CONFIGURATION = [
+  'HOSTINGER_MAIL_API_TOKEN',
+  'HOSTINGER_MAILBOX_ID',
+  'HOSTINGER_MAILBOX_ADDRESS',
+  'HOSTINGER_MAIL_API_BASE_URL',
+] as const
+
+export function isHostingerMailboxConfigured(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return HOSTINGER_READ_CONFIGURATION.every((name) => !!environment[name]?.trim())
+}
+
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim()
   if (!value) throw new Error(`${name} is not configured`)

@@ -46,7 +46,7 @@ async function main() {
   assert.match(creator, /if \(initialEmail\.action === 'defer_to_writer'\)[\s\S]*saveInitialEmailModeSnapshot[\s\S]*return \{ ok: true/, 'AI CSV creation stages a snapshot and returns before generation')
   assert.ok(creator.indexOf("if (initialEmail.action === 'defer_to_writer')") < creator.indexOf('const generated = await routeInitialEmail'), 'deferred CSV path cannot reach synchronous routing')
   assert.match(writer, /loadInitialEmailModeSnapshots[\s\S]*importedModeSnapshots\.get\(lead\.id\) \?\? mode[\s\S]*writeOneLead\(supabase, lead, dedupeIndex, leadMode\)/, 'Writer consumes each imported lead snapshot instead of rereading settings')
-  assert.match(router, /if \(mode === 'template'\)[\s\S]*generateInitialEmailFromTemplate[\s\S]*const writer = aiWriter \?\? \(await import\('@\/ai\/workflows'\)\)/, 'Template branch completes before the lazy AI import')
+  assert.match(router, /if \(mode === 'template'\)[\s\S]*renderInitialTemplate[\s\S]*const writer = aiWriter \?\? \(await import\('@\/ai\/writer'\)\)\.writePersonalizedInitialContent/, 'Template branch completes before the lazy Writer capability import')
   assert.match(importer, /if \(result\.ok\) \{\s*imported\+\+[\s\S]*result\.generationError[\s\S]*continue/, 'a Template row failure preserves the imported lead, reports the row, and continues')
   assert.match(importer, /try \{\s*result = await createLead[\s\S]*catch \(error\)[\s\S]*failed\.push[\s\S]*continue/, 'an unexpected per-row failure is reported without stopping later CSV rows')
   assert.match(importer, /if \(result\.status === 409\) \{\s*duplicates\+\+\s*continue/, 'duplicate accounting remains unchanged')

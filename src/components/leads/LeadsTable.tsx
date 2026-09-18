@@ -31,6 +31,7 @@ import { captureInitialEmailModeSnapshot } from '@/lib/initial-email-mode-operat
 import { FilterToolbar } from '@/components/ui/FilterToolbar'
 import { DataCardField, ResponsiveDataCard } from '@/components/ui/ResponsiveDataCard'
 import { DataSkeleton, DataState } from '@/components/ui/DataState'
+import { ALL_STATUSES, STATUS_LABELS } from '@/lib/lead-status'
 
 interface Lead {
   id: string
@@ -64,18 +65,9 @@ interface RegenerateResult {
 }
 
 const STATUS_OPTIONS = [
-  { value: 'new', label: 'New' },
-  { value: 'researched', label: 'Researched' },
+  ...ALL_STATUSES.slice(0, 2).map((value) => ({ value, label: STATUS_LABELS[value] })),
   { value: SUPPRESSED_LEADS_FILTER, label: 'Suppressed' },
-  { value: 'email_ready', label: 'Email Ready' },
-  { value: 'contacted', label: 'Contacted' },
-  { value: 'replied', label: 'Replied' },
-  { value: 'negotiating', label: 'Negotiating' },
-  { value: 'interested', label: 'Interested' },
-  { value: 'closed', label: 'Closed' },
-  { value: 'closed_won', label: 'Closed Won' },
-  { value: 'closed_manual', label: 'Closed Manual' },
-  { value: 'dead', label: 'Dead' },
+  ...ALL_STATUSES.slice(2).map((value) => ({ value, label: STATUS_LABELS[value] })),
 ] as const
 const SEARCH_DEBOUNCE_MS = 300
 

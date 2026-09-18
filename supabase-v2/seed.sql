@@ -1,0 +1,6 @@
+-- Intentionally empty.
+--
+-- The golden baseline has no universal data dependency. AI provider/model and
+-- workflow choices are deployment configuration, not schema prerequisites.
+-- Aussie Venture categories, templates, settings, city/suburb configuration,
+-- credentials, and operational data are explicitly excluded from this seed.

@@ -1,7 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { composeOutreachEmailBody } from '@/lib/outreach-signature'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
-import { generateInitialEmailFromTemplate } from '@/lib/initial-email-template'
+import { renderInitialTemplate } from '@/services/initial-content/template-renderer'
+import type { PersonalizedInitialWriter } from '@/ai/writer'
 import { isInitialEmailMode, type InitialEmailMode } from '@/lib/settingsDefaults'
 import { claimRecipientOutreach, releaseRecipientOutreachClaim, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
 
@@ -30,11 +31,9 @@ function failure(lead: InitialEmailLead, mode: InitialEmailMode, code: string, r
   return { ok: false, mode, error: { leadId: lead.id, businessName: lead.business_name, categoryId: lead.category_id, categoryName, code, reason } }
 }
 
-type AiInitialWriter = (params: { business_name: string; category: string; suburb: string; city: string; website: string; description: string; services: string; content_type: string }) => Promise<{ subject: string; body: string }>
-
-async function generateContent(supabase: SupabaseClient, lead: InitialEmailLead, mode: InitialEmailMode, aiWriter?: AiInitialWriter): Promise<InitialEmailResult> {
+async function generateContent(supabase: SupabaseClient, lead: InitialEmailLead, mode: InitialEmailMode, aiWriter?: PersonalizedInitialWriter): Promise<InitialEmailResult> {
   if (mode === 'template') {
-    const result = await generateInitialEmailFromTemplate(supabase, lead)
+    const result = await renderInitialTemplate(supabase, lead)
     if (!result.ok) return failure(lead, mode, result.code, result.reason, result.categoryName)
     const composed = composeOutreachEmailBody(result.body)
     return {
@@ -47,7 +46,7 @@ async function generateContent(supabase: SupabaseClient, lead: InitialEmailLead,
       generationSource: 'template',
     }
   }
-  const writer = aiWriter ?? (await import('@/ai/workflows')).writeOutreachEmail
+  const writer = aiWriter ?? (await import('@/ai/writer')).writePersonalizedInitialContent
   const result = await writer({
     business_name: lead.business_name, category: lead.category_name ?? '', suburb: lead.suburb ?? '', city: lead.city ?? '',
     website: lead.website ?? '', description: lead.description ?? '', services: lead.services ?? '', content_type: lead.content_type ?? 'remote',
@@ -60,7 +59,7 @@ export async function routeInitialEmail(
   supabase: SupabaseClient,
   lead: InitialEmailLead,
   mode: InitialEmailMode,
-  options: { operation?: 'normal' | 'regenerate' | 'content_only'; pendingEmailId?: string; aiWriter?: AiInitialWriter } = {},
+  options: { operation?: 'normal' | 'regenerate' | 'content_only'; pendingEmailId?: string; aiWriter?: PersonalizedInitialWriter } = {},
 ): Promise<InitialEmailResult> {
   const operation = options.operation ?? 'normal'
   if (operation === 'content_only') return generateContent(supabase, lead, mode, options.aiWriter)

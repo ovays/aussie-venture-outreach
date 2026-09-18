@@ -5,6 +5,7 @@ import { acceptHostingerInboundEvent } from '@/lib/hostinger-inbound-queue'
 import { createHostingerInboundReceiptStore } from '@/lib/hostinger-inbound-receipts'
 import { handleHostingerWebhookRequest } from '@/lib/hostinger-webhook-handler'
 import { logger } from '@/lib/logger'
+import { assertTriggerJobsEnabled } from '@/lib/side-effect-safety'
 
 export const runtime = 'nodejs'
 
@@ -15,7 +16,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     mailboxId: process.env.HOSTINGER_MAILBOX_ID,
     mailboxAddress: process.env.HOSTINGER_MAILBOX_ADDRESS,
     accept: (locator) => acceptHostingerInboundEvent(locator, store, async (receiptId, idempotencyKey) => {
-      const secretKey = process.env.TRIGGER_SECRET_KEY_PROD ?? process.env.TRIGGER_SECRET_KEY ?? ''
+      assertTriggerJobsEnabled('Hostinger inbound Trigger.dev dispatch')
+      const secretKey = process.env.TRIGGER_SECRET_KEY ?? ''
       return auth.withAuth(
         { accessToken: secretKey },
         () => tasks.trigger<typeof hostingerInboundTask>(

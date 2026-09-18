@@ -122,8 +122,7 @@ const STATUS_RANK: Record<string, number> = {
   interested: 60,
   negotiating: 70,
   closed_manual: 80,
-  closed: 85,
-  closed_won: 90,
+  closed: 90,
 }
 
 const IDENTITY_FIELDS = [

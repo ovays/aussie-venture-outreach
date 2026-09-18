@@ -33,11 +33,14 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+!.env.v2.example
 
 # vercel
-.vercel
+.vercel/
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
 .trigger/tmp/ 
+.v2-local/
+supabase-v2/.temp/

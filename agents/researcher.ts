@@ -1,8 +1,11 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { logger } from '@/lib/logger'
 import { fetchRawHtml, extractMailtoEmail } from '@/lib/email-extraction'
-import { researchOneLead, researchPurposeForInitialEmailMode } from '@/lib/research-lead'
+import { researchLead, researchPurposeForMode } from '@/services/research'
 import type { InitialEmailMode } from '@/lib/settingsDefaults'
+import { BOUNCED_EMAIL_REPAIR_BATCH_SIZE, RESEARCHER_BATCH_SIZE } from '@/lib/agent-batches'
+import { decideNextAction, loadDecisionContexts } from '@/domain/decision-engine'
+import { observability } from '@/lib/observability/service'
 
 // ── Bounced email fixer ──────────────────────────────────────────────────────
 
@@ -11,6 +14,9 @@ async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>
     .from('emails')
     .select('id, lead_id, leads(id, email, website, business_name)')
     .eq('status', 'bounced')
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(BOUNCED_EMAIL_REPAIR_BATCH_SIZE)
 
   if (!bouncedEmails?.length) {
     logger.info('researcher', 'No bounced emails to fix')
@@ -57,7 +63,7 @@ async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>
 
 export async function runResearcherAgent(mode: InitialEmailMode = 'ai_personalised'): Promise<number> {
   const supabase = createServiceClient()
-  const researchPurpose = researchPurposeForInitialEmailMode(mode)
+  const researchPurpose = researchPurposeForMode(mode)
 
   try {
     const { data: systemSetting } = await supabase
@@ -76,8 +82,11 @@ export async function runResearcherAgent(mode: InitialEmailMode = 'ai_personalis
 
     const { data: leads } = await supabase
       .from('leads')
-      .select('*')
+      .select('id,business_name,email,website,instagram_handle,facebook_url,phone,address,suburb,city,state,category_id,category_name,description,services,content_type,halal,halal_confidence_score,halal_reasons,google_reviews_count,status,source,delivery_suppressed_emails,outreach_suppressed_at,outreach_suppression_reason,created_at,updated_at')
       .eq('status', 'new')
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(RESEARCHER_BATCH_SIZE)
 
     logger.info('researcher', `Found ${leads?.length ?? 0} leads with status=new`)
 
@@ -86,20 +95,43 @@ export async function runResearcherAgent(mode: InitialEmailMode = 'ai_personalis
       return 0
     }
 
-    let processed = 0
+    const loadedContexts = await loadDecisionContexts(supabase, leads.map((lead) => lead.id), { initialEmailMode: mode })
+    const decisionByLeadId = new Map(loadedContexts.contexts.map((context) => [context.leadId, decideNextAction(context)]))
+    await observability().recordDecisionResults([...decisionByLeadId.values()], 'research_decision', 21)
+    const templateReadyIds = loadedContexts.contexts
+      .filter((context) => decisionByLeadId.get(context.leadId)?.action === 'GENERATE_INITIAL')
+      .map((context) => context.leadId)
+    if (templateReadyIds.length > 0) {
+      const { data: advancedLeads, error: advanceError } = await supabase.from('leads').update({ status: 'researched' }).in('id', templateReadyIds).eq('status', 'new').select('id')
+      if (advanceError) throw new Error(`Template-ready lead advancement failed: ${advanceError.message}`)
+      await observability().observeLeadStatusTransitions((advancedLeads ?? []).map((lead) => ({
+        leadId: lead.id, fromStatus: 'new', toStatus: 'researched', actor: 'researcher', reasonCode: 'TEMPLATE_READY',
+      })))
+      await supabase.from('activity_log').insert(templateReadyIds.map((leadId) => ({
+        event_type: 'research_skipped_template_ready',
+        lead_id: leadId,
+        description: 'Research skipped because template mode already has all required lead data',
+        metadata: { decision_action: 'GENERATE_INITIAL', decision_reason: decisionByLeadId.get(leadId)?.reasonCode ?? 'TEMPLATE_READY' },
+      })))
+    }
+
+    let processed = templateReadyIds.length
     let emailsFound = 0
     const methodCounts: Record<string, number> = {}
 
     for (const lead of leads) {
+      const decision = decisionByLeadId.get(lead.id)
+      if (decision?.action !== 'RESEARCH') continue
       logger.info('researcher', `Lead: "${lead.business_name}"`, {
         email: lead.email ?? 'NONE',
         website: lead.website ?? 'NONE',
       })
 
-      const result = await researchOneLead(supabase, lead, researchPurpose)
-      if (result.success) {
+      const result = await researchLead({ client: supabase, leadId: lead.id, purpose: researchPurpose })
+      if (result.outcome === 'completed') {
         if (result.emailFound) emailsFound++
-        methodCounts[result.emailMethod] = (methodCounts[result.emailMethod] ?? 0) + 1
+        const method = result.summary?.emailMethod ?? 'unknown'
+        methodCounts[method] = (methodCounts[method] ?? 0) + 1
         processed++
       }
     }

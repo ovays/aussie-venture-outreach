@@ -5,6 +5,7 @@ import { writeOneLead } from '@/lib/write-lead'
 import { readInitialEmailMode } from '@/lib/initial-email-router'
 import type { InitialEmailMode } from '@/lib/settingsDefaults'
 import { loadInitialEmailModeSnapshots } from '@/lib/initial-email-mode-snapshot'
+import { WRITER_BATCH_SIZE, WRITER_STALE_RESET_BATCH_SIZE } from '@/lib/agent-batches'
 
 type CategoryStatusRow = {
   name: string
@@ -55,6 +56,9 @@ export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<v
       .from('leads')
       .select('id')
       .eq('status', 'email_ready')
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(WRITER_STALE_RESET_BATCH_SIZE)
 
     if (emailReadyLeads?.length) {
       const emailReadyIds = emailReadyLeads.map((l: { id: string }) => l.id)
@@ -76,13 +80,17 @@ export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<v
       }
     }
 
-    // Fetch all researched leads
+    // Fetch one deterministic bounded batch. Completed rows leave this status,
+    // so later invocations naturally advance the cursor without an offset.
     const { data: leads, error: leadsErr } = await supabase
       .from('leads')
-      .select('*, categories(*)')
+      .select('id,business_name,email,website,instagram_handle,facebook_url,phone,address,suburb,city,state,category_id,category_name,description,services,content_type,halal,halal_confidence_score,halal_reasons,status,source,delivery_suppressed_emails,outreach_suppressed_at,outreach_suppression_reason,created_at,updated_at,categories(id,name,status,content_type)')
       .eq('status', 'researched')
       .is('outreach_suppressed_at', null)
       .is('outreach_suppression_reason', null)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(WRITER_BATCH_SIZE)
 
     if (leadsErr) logger.error('writer', 'Error fetching researched leads', { error: leadsErr.message })
 

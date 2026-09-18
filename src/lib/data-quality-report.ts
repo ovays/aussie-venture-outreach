@@ -72,7 +72,7 @@ function protectionReasons(input: {
   if (input.hasReply) reasons.push('Has reply')
   if (input.hasDeal) reasons.push('Has deal')
   if (input.hasNotes) reasons.push('Has notes')
-  if (['replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual'].includes(input.status)) {
+  if (['replied', 'negotiating', 'interested', 'closed', 'closed_manual'].includes(input.status)) {
     reasons.push('Active/positive lifecycle')
   }
   return reasons
@@ -156,8 +156,8 @@ export async function enrichDataQualityRows(
     const status = String(lead.status ?? 'new')
     const repliedDates = emails.map((email) => typeof email.replied_at === 'string' ? email.replied_at : null).filter((date): date is string => !!date).sort()
     const hasVerifiedReply = repliedDates.length > 0
-    const hasReply = hasVerifiedReply || ['replied', 'negotiating', 'interested', 'closed', 'closed_won', 'closed_manual'].includes(status)
-    const hasDeal = deals.length > 0 || ['closed', 'closed_won', 'closed_manual'].includes(status)
+    const hasReply = hasVerifiedReply || ['replied', 'negotiating', 'interested', 'closed', 'closed_manual'].includes(status)
+    const hasDeal = deals.length > 0 || ['closed', 'closed_manual'].includes(status)
     const hasNotes = typeof lead.notes === 'string' && lead.notes.trim().length > 0
     const hasEmailHistory = emails.length > 0
     const reasons = protectionReasons({ status, hasReply, hasDeal, hasNotes, hasEmailHistory })

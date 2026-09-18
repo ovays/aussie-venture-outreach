@@ -1,0 +1,15 @@
+project_id = "reachagent-v2-local"
+
+[db]
+major_version = 17
+
+# The verified dump-derived baseline contains owner statements that the local
+# CLI migration role cannot execute. Start the Supabase platform without CLI
+# replay, then apply the one unchanged baseline as local postgres (documented in
+# docs/reachagent-v2-application-baseline.md).
+[db.migrations]
+enabled = false
+
+[db.seed]
+enabled = false
+sql_paths = ["./seed.sql"]

@@ -192,10 +192,12 @@ export async function researchOneLead(
       .update({
         ...(foundEmail && !lead.email ? { email: foundEmail } : {}),
         ...(halalConfidence ? { halal_confidence_score: halalConfidence.confidence } : {}),
-        description: enriched.description || null,
-        services: enriched.services || null,
-        instagram_handle: enriched.instagram_handle || null,
-        facebook_url: enriched.facebook_url || null,
+        ...(purpose === 'full_personalisation' ? {
+          description: enriched.description || null,
+          services: enriched.services || null,
+          instagram_handle: enriched.instagram_handle || null,
+          facebook_url: enriched.facebook_url || null,
+        } : {}),
         status: 'researched',
       })
       .eq('id', lead.id)

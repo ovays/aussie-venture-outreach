@@ -73,7 +73,6 @@ export function statusColor(status: string): string {
     negotiating: 'bg-[var(--warning-muted)] text-[var(--warning)]',
     interested: 'bg-[var(--sand-muted)] text-[var(--sand)]',
     closed: 'bg-[var(--success-muted)] text-[var(--success)]',
-    closed_won: 'bg-[var(--success-muted)] text-[var(--success)]',
     closed_manual: 'bg-[var(--success-muted)] text-[var(--success)]',
     awaiting_reply: 'bg-[var(--warning-muted)] text-[var(--warning)]',
     failed: 'bg-[var(--error-muted)] text-[var(--error)]',
@@ -93,7 +92,6 @@ export function statusLabel(status: string): string {
     negotiating: 'Negotiating',
     interested: 'Interested',
     closed: 'Closed',
-    closed_won: 'Closed Won',
     closed_manual: 'Closed (Manual)',
     dead: 'Dead',
   }

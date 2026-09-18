@@ -168,12 +168,12 @@ export type CleanupCandidate = DuplicateSignalLead & {
 }
 
 const LIFECYCLE_RANK: Record<string, number> = {
-  closed_won: 70, closed: 65, negotiating: 60, interested: 55, replied: 50,
+  closed: 65, negotiating: 60, interested: 55, replied: 50,
   contacted: 30, email_ready: 20, researched: 10, new: 0, dead: -10,
 }
 
 export function isProtectedFromAutoDelete(lead: CleanupCandidate): boolean {
-  return Boolean(lead.hasReply || lead.hasDeal || lead.hasBooking || lead.hasNotes || lead.hasEmailHistory || (lead.outreachCount ?? 0) > 0 || ['replied', 'negotiating', 'interested', 'closed', 'closed_won'].includes(lead.status ?? ''))
+  return Boolean(lead.hasReply || lead.hasDeal || lead.hasBooking || lead.hasNotes || lead.hasEmailHistory || (lead.outreachCount ?? 0) > 0 || ['replied', 'negotiating', 'interested', 'closed'].includes(lead.status ?? ''))
 }
 
 export function choosePreferredLead(leads: CleanupCandidate[]): CleanupCandidate | null {

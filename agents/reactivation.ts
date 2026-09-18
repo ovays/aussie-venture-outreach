@@ -1,11 +1,16 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail } from '@/lib/resend'
 import { logger } from '@/lib/logger'
-import { generateStoredReactivation } from '@/lib/stored-sequence-templates'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
+import { generateStoredReactivation } from '@/lib/stored-sequence-templates'
 import { getAnalyticsDayRange } from '@/lib/analytics'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
+import { decideContactedOutreach, sentStage } from '@/domain/decision-engine'
 import { claimRecipientOutreach } from '@/lib/data-quality'
+import { REACTIVATION_BATCH_SIZE } from '@/lib/agent-batches'
+import { ensureOutboundEmailIntent, outboundIdempotencyKey, outboundMessageId } from '@/lib/outbound-send'
+import type { LeadDecisionResult } from '@/domain/decision-engine'
+import { observability } from '@/lib/observability/service'
 
 interface LeadEmail {
   id: string
@@ -98,6 +103,9 @@ export async function runReactivationAgent(): Promise<void> {
       .from('leads')
       .select('id, business_name, email, reactivation_sent_at, category_id, category_name, suburb, city, content_type, delivery_suppressed_emails, emails(id, type, subject, sent_at, status)')
       .eq('status', 'contacted')
+      .order('updated_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(REACTIVATION_BATCH_SIZE)
 
     if (!contactedLeads?.length) {
       logger.info('reactivation', 'No contacted leads to process')
@@ -114,6 +122,7 @@ export async function runReactivationAgent(): Promise<void> {
     // collect leads eligible for a NEW reactivation send into a queue instead of
     // sending immediately. Eligibility logic itself is unchanged from before.
     const eligibleForSend: Array<{ lead: ContactedLead; daysSinceInitial: number }> = []
+    const observedDecisions: LeadDecisionResult[] = []
 
     for (const lead of contactedLeads as ContactedLead[]) {
       if (!lead.email) continue
@@ -126,6 +135,20 @@ export async function runReactivationAgent(): Promise<void> {
 
       try {
       const emailsList = lead.emails ?? []
+      const initialEmail = emailsList.find((e) => e.type === 'initial_pitch' && e.sent_at)
+      const centralDecision = decideContactedOutreach({
+        leadId: lead.id,
+        email: lead.email,
+        initialSentAt: initialEmail?.sent_at ?? null,
+        followUp1: sentStage(emailsList.find((e) => e.type === 'follow_up_1' && e.sent_at)?.sent_at),
+        followUp2: sentStage(emailsList.find((e) => e.type === 'follow_up_2' && e.sent_at)?.sent_at),
+        followUp3: sentStage(emailsList.find((e) => e.type === 'follow_up_3' && e.sent_at)?.sent_at),
+        reactivationEnabled,
+        reactivationSentAt: lead.reactivation_sent_at,
+        asOf: new Date(),
+        schedule: { reactivationDelayDays, deadAfterReactivationDays },
+      })
+      observedDecisions.push(centralDecision)
 
       // Dead-after-reactivation path: reactivation was already sent, check if lead should now be marked dead.
       // Timing is relative to reactivation_sent_at, NOT the initial outreach date.
@@ -133,12 +156,16 @@ export async function runReactivationAgent(): Promise<void> {
         const daysSinceReactivation = Math.floor(
           (Date.now() - new Date(lead.reactivation_sent_at).getTime()) / 86_400_000
         )
-        if (daysSinceReactivation >= deadAfterReactivationDays) {
+        if (centralDecision.action === 'MARK_DEAD') {
           console.log(`[REACTIVATION_DEAD] lead=${lead.business_name} days_since_reactivation=${daysSinceReactivation}`)
-          await supabase.from('leads').update({ status: 'dead' }).eq('id', lead.id)
-          await supabase.from('activity_log').insert({
-            event_type: 'lead_marked_dead',
-            lead_id: lead.id,
+          const { data: deadLead, error: deadError } = await supabase.from('leads').update({ status: 'dead' })
+            .eq('id', lead.id).eq('status', 'contacted').select('id').maybeSingle()
+          if (deadError) throw deadError
+          if (!deadLead) continue
+          await observability().observeLeadStatusTransition({
+            leadId: lead.id, fromStatus: 'contacted', toStatus: 'dead', actor: 'reactivation',
+            reasonCode: centralDecision.reasonCode,
+            eventType: 'lead_marked_dead',
             description: `Lead marked dead after reactivation: ${lead.business_name} (${daysSinceReactivation}d since reactivation, no reply)`,
             metadata: {
               days_since_reactivation: daysSinceReactivation,
@@ -153,7 +180,6 @@ export async function runReactivationAgent(): Promise<void> {
       // Reactivation eligibility.
       // Must have completed follow_up_3 to ensure lead went through the full outreach flow.
       // Timing is relative to initial outreach date (NOT dead date or followup date).
-      const initialEmail = emailsList.find((e) => e.type === 'initial_pitch' && e.sent_at)
       if (!initialEmail?.sent_at) continue
 
       const hasFollowUp3 = emailsList.some((e) => e.type === 'follow_up_3' && e.sent_at)
@@ -163,7 +189,7 @@ export async function runReactivationAgent(): Promise<void> {
         (Date.now() - new Date(initialEmail.sent_at).getTime()) / 86_400_000
       )
 
-      if (daysSinceInitial < reactivationDelayDays) continue
+      if (centralDecision.action !== 'REACTIVATE') continue
 
       eligible++
       console.log(`[REACTIVATION_ELIGIBLE] lead=${lead.business_name} days_since_initial=${daysSinceInitial}`)
@@ -180,6 +206,7 @@ export async function runReactivationAgent(): Promise<void> {
     // Phase 2: apply the daily cap — send only the first N eligible leads this run.
     // Anything past the cap is left untouched (still status='contacted',
     // reactivation_sent_at NULL) and re-evaluated as eligible on the next run.
+    await observability().recordDecisionResults(observedDecisions, 'reactivation_decision', 61)
     const toSend = eligibleForSend.slice(0, remainingReactivationBudget)
     const deferredForLimit = eligibleForSend.length - toSend.length
 
@@ -242,27 +269,35 @@ export async function runReactivationAgent(): Promise<void> {
         continue
       }
 
+      const { intent } = await ensureOutboundEmailIntent(supabase, {
+        leadId: lead.id,
+        type: 'reactivation',
+        subject,
+        bodyHtml: html,
+        bodyText: body,
+      })
+      if (intent.status === 'sent' || intent.status === 'email_sync_failed') continue
+
       const result = await sendEmail({
         to: sendTimeLead.email,
-        subject,
-        html,
-        text: body,
+        subject: intent.subject,
+        html: intent.body_html,
+        text: intent.body_text,
         leadId: lead.id,
+        idempotencyKey: outboundIdempotencyKey(intent.id),
+        messageId: outboundMessageId(intent.id),
+        emailIntentId: intent.id,
+        phase: 'reactivation',
       })
 
       const sentAt = new Date().toISOString()
 
-      const { error: insertErr } = await supabase.from('emails').insert({
-        lead_id:    lead.id,
-        type:       'reactivation',
-        subject,
-        body_html:  html,
-        body_text:  body,
+      const { error: insertErr } = await supabase.from('emails').update({
         resend_id:  result?.id ?? null,
         message_id: result?.messageId ?? null,
         status:     result ? 'sent' : 'failed',
         sent_at:    result ? sentAt : null,
-      })
+      }).eq('id', intent.id)
 
       if (insertErr) {
         if (result) {

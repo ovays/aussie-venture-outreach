@@ -6,13 +6,19 @@ import {
   fetchEmailReportLeads,
   parseEmailReportDateRange,
 } from '@/lib/email-report'
-import { fetchHostingerReportMessages } from '@/lib/hostinger-mail'
+import { fetchHostingerReportMessages, isHostingerMailboxConfigured } from '@/lib/hostinger-mail'
 import { logger } from '@/lib/logger'
 import { createClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  if (!isHostingerMailboxConfigured()) {
+    return NextResponse.json(
+      { error: 'Mailbox not configured', configured: false },
+      { status: 503 },
+    )
+  }
   let range
   try {
     range = parseEmailReportDateRange(

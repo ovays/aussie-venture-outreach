@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { isAuthErrorResponse, requireApiUser } from '@/lib/auth'
 import { deleteLeads, LeadIdsValidationError, normalizeLeadIds } from '@/lib/delete-leads'
 import { createClient } from '@/lib/supabase/server'
+import { ALL_STATUSES } from '@/lib/lead-status'
+import { z } from 'zod'
+
+const patchLeadSchema = z.object({
+  status: z.enum(ALL_STATUSES).optional(),
+}).catchall(z.unknown())
 
 export async function GET(
   _req: NextRequest,
@@ -61,7 +67,11 @@ export async function PATCH(
 ) {
   const { id } = await params
   const supabase = await createClient()
-  const updates = await request.json() as Record<string, unknown>
+  const parsed = patchLeadSchema.safeParse(await request.json())
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid request body', issues: parsed.error.issues }, { status: 400 })
+  }
+  const updates = parsed.data
 
   const { data, error } = await supabase
     .from('leads')

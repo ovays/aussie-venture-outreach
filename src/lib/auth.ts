@@ -18,12 +18,6 @@ function isUserRole(role: unknown): role is UserRole {
   return role === 'admin' || role === 'member'
 }
 
-function fallbackRole(email?: string): UserRole {
-  return email && email.toLowerCase() === process.env.ADMIN_EMAIL?.toLowerCase()
-    ? 'admin'
-    : 'member'
-}
-
 async function ensureProfile(user: { id: string; email?: string; user_metadata?: Record<string, unknown> }) {
   const service = createServiceClient()
   const { data: existing, error: existingError } = await service
@@ -38,7 +32,6 @@ async function ensureProfile(user: { id: string; email?: string; user_metadata?:
 
   if (existing) return existing as Profile
 
-  const role = fallbackRole(user.email)
   const fullName = typeof user.user_metadata?.full_name === 'string'
     ? user.user_metadata.full_name
     : null
@@ -49,7 +42,7 @@ async function ensureProfile(user: { id: string; email?: string; user_metadata?:
       id: user.id,
       email: user.email ?? '',
       full_name: fullName,
-      role,
+      role: 'member',
       is_active: true,
     })
     .select('id, email, full_name, role, is_active, created_at')

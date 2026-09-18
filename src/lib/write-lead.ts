@@ -1,7 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { logger } from '@/lib/logger'
 import { addLeadToDedupeIndex, checkLeadDedupe, type LeadDedupeIndex } from '@/lib/deduplication'
-import { routeInitialEmail } from '@/lib/initial-email-router'
+import { generateInitialContent } from '@/services/initial-content'
 import type { InitialEmailMode } from '@/lib/settingsDefaults'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 
@@ -67,7 +67,7 @@ export async function writeOneLead(
   }
 
   // Email quality is intentionally adjudicated by claim_recipient_outreach()
-  // inside routeInitialEmail(). Returning on an in-memory classification here
+  // inside generateInitialContent(). Returning on an in-memory classification here
   // would skip migration 053's authoritative suppression persistence.
   if (lead.outreach_suppressed_at || lead.outreach_suppression_reason) {
     return { success: true, channel: 'duplicate' }
@@ -93,7 +93,7 @@ export async function writeOneLead(
         // The pipeline index is only a hint. Recipient ownership is the
         // authority, and claim_recipient_outreach() also persists suppression
         // atomically when another lead owns this exact address. Continue to
-        // routeInitialEmail() so that claim cannot be bypassed by this early
+        // generateInitialContent() so that claim cannot be bypassed by this early
         // duplicate check.
       } else {
         logger.info('writer', '[DEBUG_DEDUPLICATION] duplicate domain detected', duplicateMeta)
@@ -108,7 +108,7 @@ export async function writeOneLead(
       }
     }
 
-    const emailResult = await routeInitialEmail(supabase, lead, mode)
+    const emailResult = await generateInitialContent({ client: supabase, leadId: lead.id, mode })
     if (!emailResult.ok) {
       logger.warn('writer', `Initial Email not created for "${lead.business_name}"`, {
         lead_id: lead.id,

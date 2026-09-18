@@ -80,6 +80,7 @@ function makeFakeSupabase(
         eq(col: string, val: unknown) { eqFilters.push([col, val]); return builder },
         in(col: string, vals: unknown[]) { inFilters.push([col, vals]); return builder },
         limit(n: number) { limitN = n; return builder },
+        order() { return builder },
         select() { if (mode !== 'insert') mode = 'select'; return builder },
         insert(row: Row) {
           mode = 'insert'
@@ -91,13 +92,13 @@ function makeFakeSupabase(
           if (mode === 'insert') {
             if (
               opts.enforceUniqueDeliveredPerLeadType &&
-              (insertRow.status === 'sent' || insertRow.status === 'email_sync_failed')
+              ['pending_send', 'sent', 'email_sync_failed'].includes(String(insertRow.status))
             ) {
               const conflict = rowsFor().some(
                 (r) =>
                   r.lead_id === insertRow.lead_id &&
                   r.type === insertRow.type &&
-                  (r.status === 'sent' || r.status === 'email_sync_failed')
+                  ['pending_send', 'sent', 'email_sync_failed'].includes(String(r.status))
               )
               if (conflict) {
                 return {
@@ -228,6 +229,7 @@ async function main() {
           eq(col: string, val: unknown) { eqFilters.push([col, val]); return builder },
           in(col: string, vals: unknown[]) { inFilters.push([col, vals]); return builder },
           limit(n: number) { limitN = n; return builder },
+          order() { return builder },
           select() { if (mode !== 'insert') mode = 'select'; return builder },
           insert(row: Row) { mode = 'insert'; insertRow = row; return builder },
           async single() {
@@ -236,7 +238,7 @@ async function main() {
                 (r) =>
                   r.lead_id === insertRow.lead_id &&
                   r.type === insertRow.type &&
-                  (r.status === 'sent' || r.status === 'email_sync_failed')
+                  ['pending_send', 'sent', 'email_sync_failed'].includes(String(r.status))
               )
               if (conflict) {
                 return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "emails_lead_type_delivered_key"' } }

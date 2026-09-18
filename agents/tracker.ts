@@ -1,7 +1,8 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendEmail, getReceivedEmailHeaders } from '@/lib/resend'
-import { getDashboardMetrics, getLeadName, logAnalyticsMetrics } from '@/lib/analytics'
+import { getAnalyticsDateKey, getDashboardMetrics, getLeadName, logAnalyticsMetrics } from '@/lib/analytics'
 import { logger } from '@/lib/logger'
+import { observability } from '@/lib/observability/service'
 import {
   isTerminalDeliveryStatus,
   normalizeDeliveryEmail,
@@ -44,6 +45,11 @@ export async function handleEmailReply(
       .eq('status', lead.status)
     if (leadUpdateError) {
       throw new Error(`Reply lead status could not be stored: ${leadUpdateError.message}`)
+    }
+    if (!supabaseOverride) {
+      await observability().observeLeadStatusTransition({
+        leadId, fromStatus: lead.status, toStatus: 'replied', actor: 'inbound_reply', reasonCode: 'REPLY_RECEIVED',
+      })
     }
   }
 
@@ -611,13 +617,17 @@ ${(agentErrors ?? []).length > 0 ? `<h3 style="color: #f87171;">Pipeline Errors 
 </body>
 </html>`
 
-    await sendEmail({
+    const digestDateKey = getAnalyticsDateKey(now)
+    const digestResult = await sendEmail({
       to: digestEmail,
       subject: `ReachAgent: Daily Summary ${date}`,
       html,
       text: body,
       leadId: 'digest',
+      idempotencyKey: `reachagent-digest-${digestDateKey}`,
+      messageId: `<digest-${digestDateKey}@aussieventure.com>`,
     })
+    if (!digestResult) throw new Error('Daily digest provider rejected the send')
 
     await supabase.from('activity_log').insert({
       event_type: 'digest_sent',

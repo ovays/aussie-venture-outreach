@@ -4,6 +4,7 @@ import { emailBodyToHtml } from '@/lib/utils'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resolveContentType } from '@/lib/content-type'
 import { Resend } from 'resend'
+import { assertOutreachSendEnabled } from '@/lib/side-effect-safety'
 
 function getResend() {
   const key = process.env.RESEND_API_KEY
@@ -74,6 +75,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'send') {
+      assertOutreachSendEnabled('test email delivery')
       const { subject, body: emailBody } = body
 
       if (!subject || !emailBody) {

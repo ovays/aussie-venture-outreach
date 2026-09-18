@@ -7,7 +7,11 @@ import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
 import { generateFollowUpEmail } from '@/lib/followup-generation'
 import { buildEmailHistory, buildReferenceChain } from '@/lib/email-sequence'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
+import { decideContactedOutreach, sentStage } from '@/domain/decision-engine'
+import type { LeadDecisionResult } from '@/domain/decision-engine'
+import { observability } from '@/lib/observability/service'
 import { claimRecipientOutreach } from '@/lib/data-quality'
+import { ensureOutboundEmailIntent, outboundIdempotencyKey, outboundMessageId } from '@/lib/outbound-send'
 
 // Re-exported for scripts/test-email-threading.ts, which verifies this
 // function against the live sender's exact behavior.
@@ -39,6 +43,7 @@ interface ContactedLead {
   services: string | null
   notes: string | null
   delivery_suppressed_emails?: string[] | null
+  reactivation_sent_at?: string | null
   emails: LeadEmail[]
 }
 
@@ -182,31 +187,40 @@ export async function sendFollowUp(
   const sendTo = await currentAddressIfAllowed()
   if (!sendTo) return false
 
+  const { intent } = await ensureOutboundEmailIntent(supabase, {
+    leadId: candidate.lead.id,
+    type,
+    subject,
+    bodyHtml: html,
+    bodyText: body,
+  })
+  if (intent.status === 'sent' || intent.status === 'email_sync_failed') return false
+
   const result = await sendEmailFn({
     to: sendTo,
-    subject,
-    html,
-    text: body,
+    subject: intent.subject,
+    html: intent.body_html,
+    text: intent.body_text,
     leadId: candidate.lead.id,
     references: references.length ? references : undefined,
+    idempotencyKey: outboundIdempotencyKey(intent.id),
+    messageId: outboundMessageId(intent.id),
+    emailIntentId: intent.id,
+    phase: type,
   })
 
   const sentAt = new Date().toISOString()
 
   const { data: emailRow, error: insertErr } = await supabase
     .from('emails')
-    .insert({
-      lead_id:    candidate.lead.id,
-      type,
-      subject,
-      body_html:  html,
-      body_text:  body,
+    .update({
       resend_id:  result?.id ?? null,
       message_id: result?.messageId ?? null,
       status:     result ? 'sent' : 'failed',
       sent_at:    result ? sentAt : null,
     })
-    .select()
+    .eq('id', intent.id)
+    .select('id')
     .single()
 
   if (insertErr) {
@@ -395,6 +409,7 @@ export async function runFollowUpAgent(
     const FU_BATCH_SIZE = 1000
     let fuOffset = 0
     let totalProcessed = 0
+    const observedDecisions: LeadDecisionResult[] = []
 
     while (true) {
       const { data: batch, error: batchErr } = await supabase
@@ -457,6 +472,19 @@ export async function runFollowUpAgent(
           { fu1Days: followUp1Days, fu2Days: followUp2Days, fu3Days: followUp3Days },
           now
         )
+        const centralDecision = decideContactedOutreach({
+          leadId: lead.id,
+          email: lead.email,
+          initialSentAt: initialEmail.sent_at,
+          followUp1: sentStage(emailsList.find((email) => email.type === 'follow_up_1' && isFuEmailSent(email))?.sent_at),
+          followUp2: sentStage(emailsList.find((email) => email.type === 'follow_up_2' && isFuEmailSent(email))?.sent_at),
+          followUp3: sentStage(emailsList.find((email) => email.type === 'follow_up_3' && isFuEmailSent(email))?.sent_at),
+          reactivationEnabled,
+          reactivationSentAt: lead.reactivation_sent_at ?? null,
+          asOf: now,
+          schedule: { followUp1Days, followUp2Days, followUp3Days },
+        })
+        observedDecisions.push(centralDecision)
 
         logger.info('followup', '[FU_DUE_DEBUG]', {
           lead_id:        lead.id,
@@ -466,6 +494,8 @@ export async function runFollowUpAgent(
           due_at_days:    eligibility.dueAtDays,
           days_until_due: eligibility.daysUntilDue,
           is_due:         eligibility.isDue,
+          central_action: centralDecision.action,
+          central_reason: centralDecision.reasonCode,
           now_utc:        now.toISOString(),
         })
 
@@ -475,10 +505,14 @@ export async function runFollowUpAgent(
           const fu3Email = emailsList.find((email) => email.type === 'follow_up_3' && isFuEmailSent(email))
           if (!reactivationEnabled && fu3Email?.sent_at && fu3Email.sent_at < today.start && eligibility.daysSince >= followUp3Days) {
             try {
-              await supabase.from('leads').update({ status: 'dead' }).eq('id', lead.id)
-              await supabase.from('activity_log').insert({
-                event_type: 'lead_marked_dead',
-                lead_id: lead.id,
+              const { data: deadLead, error: deadError } = await supabase.from('leads').update({ status: 'dead' })
+                .eq('id', lead.id).eq('status', 'contacted').select('id').maybeSingle()
+              if (deadError) throw deadError
+              if (!deadLead) continue
+              await observability().observeLeadStatusTransition({
+                leadId: lead.id, fromStatus: 'contacted', toStatus: 'dead', actor: 'followup',
+                reasonCode: centralDecision.reasonCode,
+                eventType: 'lead_marked_dead',
                 description: `Lead marked as dead: ${lead.business_name} (${eligibility.daysSince} days no reply)`,
                 metadata: { days_since: eligibility.daysSince },
               })
@@ -499,7 +533,9 @@ export async function runFollowUpAgent(
 
         const candidate = { lead, initialEmail, daysSince: eligibility.daysSince }
 
-        if (eligibility.isDue) {
+        const expectedAction = eligibility.nextFuType === 'follow_up_1' ? 'SEND_FOLLOWUP_1'
+          : eligibility.nextFuType === 'follow_up_2' ? 'SEND_FOLLOWUP_2' : 'SEND_FOLLOWUP_3'
+        if (centralDecision.action === expectedAction) {
           queues[eligibility.nextFuType].push(candidate)
         } else {
           skipNotYetDue++
@@ -519,6 +555,7 @@ export async function runFollowUpAgent(
     }
 
     logger.info('followup', `[FU_ELIGIBILITY] contacted leads fetched: ${totalProcessed}`)
+    await observability().recordDecisionResults(observedDecisions, 'followup_decision', 51)
 
     if (totalProcessed === 0) {
       logger.info('followup', 'No contacted leads to follow up')

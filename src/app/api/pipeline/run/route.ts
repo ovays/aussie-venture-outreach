@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { tasks, auth } from '@trigger.dev/sdk/v3'
 import { checkRateLimit } from '@/lib/rateLimit'
 import type { dailyPipelineJob } from '../../../../../trigger/daily-pipeline'
+import { assertTriggerJobsEnabled } from '@/lib/side-effect-safety'
 
 export const maxDuration = 30
 
 export async function POST(request: NextRequest) {
+  assertTriggerJobsEnabled('manual pipeline trigger')
   const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
   const { allowed } = checkRateLimit(`pipeline:${ip}`, 3)
   if (!allowed) {
@@ -13,9 +15,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // TRIGGER_SECRET_KEY_PROD targets production when running locally (where TRIGGER_SECRET_KEY is a dev key).
-    // On Vercel, set TRIGGER_SECRET_KEY to the prod key and omit TRIGGER_SECRET_KEY_PROD.
-    const secretKey = process.env.TRIGGER_SECRET_KEY_PROD ?? process.env.TRIGGER_SECRET_KEY ?? ''
+    const secretKey = process.env.TRIGGER_SECRET_KEY ?? ''
 
     const handle = await auth.withAuth(
       { accessToken: secretKey },
