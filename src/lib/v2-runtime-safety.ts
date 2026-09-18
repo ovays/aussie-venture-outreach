@@ -1,3 +1,5 @@
+import { parseCanaryLeadIds } from './v2-canary-safety'
+
 export const V2_RUNTIME = 'v2'
 export const V2_DEPLOYMENT_BRANCH = 'reachagent-v2-application'
 export const KNOWN_V1_SUPABASE_PROJECT_REF = 'obppfnujusqiwjhwzosv'
@@ -108,6 +110,28 @@ export function assertV2TriggerDeploymentTarget(environment: Environment = proce
   }
 }
 
+function validateV2CanaryGateCombination(environment: Environment): void {
+  if (environment.V2_CANARY_ENABLED?.trim().toLowerCase() !== 'true') {
+    throw new Error('REACHAGENT_ENV=v2_canary requires V2_CANARY_ENABLED=true.')
+  }
+  const leadIds = parseCanaryLeadIds(environment.V2_CANARY_LEAD_IDS)
+  if (leadIds.length !== 1) {
+    throw new Error('REACHAGENT_ENV=v2_canary requires exactly one V2_CANARY_LEAD_IDS UUID.')
+  }
+
+  const mustBeTrue = new Set(['ORCHESTRATOR_ENABLED', 'OUTREACH_SEND_ENABLED'])
+  for (const name of V2_IRREVERSIBLE_GATES) {
+    const value = environment[name]?.trim().toLowerCase()
+    if (mustBeTrue.has(name)) {
+      if (value !== 'true') throw new Error(`REACHAGENT_ENV=v2_canary requires ${name}=true.`)
+    } else if (value === 'true') {
+      throw new Error(`Unsafe ReachAgent V2 canary gate: ${name} must remain false.`)
+    } else if (value !== 'false') {
+      throw new Error(`Remote ReachAgent V2 canary requires explicit ${name}=false.`)
+    }
+  }
+}
+
 export function validateV2DeploymentEnvironment(environment: Environment = process.env): void {
   const reachAgentEnvironment = nonEmpty(environment, 'REACHAGENT_ENV')
   if (!reachAgentEnvironment || !V2_ENVIRONMENTS.has(reachAgentEnvironment)) {
@@ -116,11 +140,15 @@ export function validateV2DeploymentEnvironment(environment: Environment = proce
 
   assertV2SupabaseTarget(environment)
 
-  for (const name of V2_IRREVERSIBLE_GATES) {
-    const value = environment[name]?.trim().toLowerCase()
-    if (value === 'true') throw new Error(`Unsafe ReachAgent V2 deployment gate: ${name} must remain false.`)
-    if (REMOTE_V2_ENVIRONMENTS.has(reachAgentEnvironment) && value !== 'false') {
-      throw new Error(`Remote ReachAgent V2 deployment requires explicit ${name}=false.`)
+  if (reachAgentEnvironment === 'v2_canary') {
+    validateV2CanaryGateCombination(environment)
+  } else {
+    for (const name of V2_IRREVERSIBLE_GATES) {
+      const value = environment[name]?.trim().toLowerCase()
+      if (value === 'true') throw new Error(`Unsafe ReachAgent V2 deployment gate: ${name} must remain false.`)
+      if (REMOTE_V2_ENVIRONMENTS.has(reachAgentEnvironment) && value !== 'false') {
+        throw new Error(`Remote ReachAgent V2 deployment requires explicit ${name}=false.`)
+      }
     }
   }
 

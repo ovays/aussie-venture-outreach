@@ -20,6 +20,55 @@ export interface OutboundEmailIntent {
   body_text: string
 }
 
+export interface OutboundSendEnvelope {
+  content_hash: string
+  sender_identity: string
+  recipient_fingerprint: string | null
+  idempotency_key: string
+  correlation_id: string | null
+  approval_reference: string | null
+}
+
+export interface ClaimedOutboundEmailIntent extends OutboundEmailIntent {
+  claimed_at: string | null
+  send_envelope: OutboundSendEnvelope | null
+}
+
+/**
+ * Atomic conditional claim. Only the worker whose single UPDATE transitions one
+ * row from `pending_send` to `sending` may call the provider. The envelope is
+ * persisted before provider submission and never contains message content.
+ */
+export async function claimOutboundEmailIntent(
+  supabase: SupabaseClient,
+  params: {
+    leadId: string
+    emailId: string
+    messageId: string
+    envelope: OutboundSendEnvelope
+  },
+): Promise<{ claimed: boolean; intent: ClaimedOutboundEmailIntent | null }> {
+  const result = await supabase
+    .from('emails')
+    .update({
+      status: 'sending',
+      claimed_at: new Date().toISOString(),
+      message_id: params.messageId,
+      send_envelope: params.envelope as unknown as Record<string, unknown>,
+    })
+    .eq('id', params.emailId)
+    .eq('lead_id', params.leadId)
+    .eq('type', 'initial_pitch')
+    .eq('status', 'pending_send')
+    .select('id,status,resend_id,message_id,subject,body_html,body_text,claimed_at,send_envelope')
+    .maybeSingle()
+  if (result.error) throw new Error(`Atomic initial send claim failed: ${result.error.message}`)
+  return {
+    claimed: !!result.data,
+    intent: result.data as unknown as ClaimedOutboundEmailIntent | null,
+  }
+}
+
 export function outboundIdempotencyKey(emailId: string): string {
   return `reachagent-email-${emailId}`
 }
@@ -62,7 +111,7 @@ export async function ensureOutboundEmailIntent(
     .select('id,status,resend_id,message_id,subject,body_html,body_text')
     .eq('lead_id', content.leadId)
     .eq('type', content.type)
-    .in('status', ['pending_send', 'sent', 'email_sync_failed'])
+    .in('status', ['pending_send', 'sending', 'sent', 'delivery_uncertain', 'email_sync_failed'])
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle()

@@ -1,11 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { logger } from '@/lib/logger'
 
-export type EmailStatus = 'pending_send' | 'sent' | 'failed' | 'bounced' | 'suppressed' | 'email_sync_failed'
+export type EmailStatus = 'pending_send' | 'sending' | 'sent' | 'delivery_uncertain' | 'failed' | 'bounced' | 'suppressed' | 'email_sync_failed'
 
 export const EMAIL_STATUS = {
   PENDING_SEND:      'pending_send'      as const,
+  SENDING:           'sending'           as const,
   SENT:              'sent'              as const,
+  DELIVERY_UNCERTAIN:'delivery_uncertain' as const,
   FAILED:            'failed'            as const,
   BOUNCED:           'bounced'           as const,
   SUPPRESSED:        'suppressed'        as const,

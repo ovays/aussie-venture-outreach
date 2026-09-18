@@ -75,7 +75,7 @@ check('Decision regressions cover template, personalized, existing-content, and 
     'new template lead with sufficient data', 'template new lead missing email',
     'new personalized lead', 'researched personalized lead',
     'duplicate pending content is sent not regenerated',
-    'contacted after FU1 due', 'FU1 sent and FU2 due', 'FU2 sent and FU3 due',
+    'valid category and FU1 eligible', 'valid category and FU2 eligible', 'valid category and FU3 eligible',
   ]) assert.ok(decisions.includes(scenario), `missing decision case: ${scenario}`)
 })
 

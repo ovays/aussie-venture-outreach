@@ -7,7 +7,8 @@ $KnownV1ProjectRef = 'obppfnujusqiwjhwzosv'
 $ExpectedFiles = @(
   @{ Name = '00000000000000_reachagent_v2_golden_baseline.sql'; Hash = '797D845B5505D7BA6B5AFE856582D4D08B9919614BBD791E507C81A9235C24C4' },
   @{ Name = '00000000000001_performance_reliability.sql'; Hash = '75DA9844FB2BAAFC3CF1E46AE8E85E792F256CCD22909FB759D5090DF95D25D1' },
-  @{ Name = '00000000000002_observability_foundation.sql'; Hash = 'CB07CE3BA5D469B8F47B168923D16FC7BEE8CC9208609A04C33E9534BD2E544B' }
+  @{ Name = '00000000000002_observability_foundation.sql'; Hash = 'CB07CE3BA5D469B8F47B168923D16FC7BEE8CC9208609A04C33E9534BD2E544B' },
+  @{ Name = '00000000000003_v2_canary_send_claim.sql'; Hash = '24957C16FB13930B9614F57A3023C56016058003F611F19DD25CC86776CB8511' }
 )
 
 if (-not $ProjectRef) { throw 'Set V2_SUPABASE_PROJECT_REF explicitly.' }
@@ -37,7 +38,7 @@ if (-not $psql) { throw 'psql is required. Install PostgreSQL client tools, then
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $migrationRoot = Join-Path $repositoryRoot 'supabase-v2\migrations'
 $actualFiles = @(Get-ChildItem -LiteralPath $migrationRoot -File -Filter '*.sql' | Sort-Object Name)
-if ($actualFiles.Count -ne $ExpectedFiles.Count) { throw 'V2 migration root must contain exactly the three approved migrations.' }
+if ($actualFiles.Count -ne $ExpectedFiles.Count) { throw 'V2 migration root must contain exactly the approved migrations.' }
 for ($index = 0; $index -lt $ExpectedFiles.Count; $index++) {
   $expected = $ExpectedFiles[$index]
   if ($actualFiles[$index].Name -ne $expected.Name) { throw 'Unexpected V2 migration inventory or order.' }

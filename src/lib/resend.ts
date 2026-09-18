@@ -3,12 +3,15 @@ import { randomUUID } from 'crypto'
 import { withRetry } from './retry'
 import { assertOutreachSendEnabled } from './side-effect-safety'
 import { observability } from './observability/service'
+import { assertCanaryProviderBoundary, isV2CanaryEnabled } from './v2-canary-safety'
+import { V2_CANARY_SENDER_IDENTITY } from './v2-canary-approval'
 
 const MESSAGE_ID_DOMAIN = 'aussieventure.com'
 
 function getResend(): Resend {
-  const key = process.env.RESEND_API_KEY
-  if (!key) throw new Error('RESEND_API_KEY is not set')
+  const canary = isV2CanaryEnabled()
+  const key = canary ? process.env.RESEND_API_KEY_V2 : process.env.RESEND_API_KEY
+  if (!key) throw new Error(canary ? 'RESEND_API_KEY_V2 is not set for the V2 canary' : 'RESEND_API_KEY is not set')
   return new Resend(key)
 }
 
@@ -51,6 +54,7 @@ export async function sendEmail(params: {
   phase?: string
 }): Promise<{ id: string; messageId: string } | null> {
   assertOutreachSendEnabled('Resend email delivery')
+  assertCanaryProviderBoundary({ leadId: params.leadId, phase: params.phase })
   // Generated once, outside the retry closure: withRetry only retries when
   // the Resend call *throws* (network timeout/reset) — the case where the
   // request may have already reached Resend and been accepted before the
@@ -76,7 +80,7 @@ export async function sendEmail(params: {
       const resend = getResend()
 
       const { data, error } = await resend.emails.send({
-        from: 'Owais | Aussie Venture <hello@aussieventure.com>',
+        from: V2_CANARY_SENDER_IDENTITY,
         to: params.to,
         subject: params.subject,
         html: params.html,
@@ -91,7 +95,7 @@ export async function sendEmail(params: {
       }
 
       return data ? { id: data.id, messageId } : null
-      }, { maxAttempts: 3, baseDelayMs: 1000, onRetry: () => { retryCount++ } })
+      }, { maxAttempts: isV2CanaryEnabled() ? 1 : 3, baseDelayMs: 1000, onRetry: () => { retryCount++ } })
     })()
     if (result) {
       await telemetry.completeWorkflowStep(stepId, {

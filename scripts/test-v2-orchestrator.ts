@@ -22,6 +22,7 @@ function context(overrides: Partial<MutableContext> = {}): MutableContext {
     },
     reply: { received: false, classification: null }, reactivation: { enabled: true, sentAt: null },
     schedule: { followUp1Days: 7, followUp2Days: 14, followUp3Days: 21, deadLeadDays: 21, reactivationDelayDays: 60, deadAfterReactivationDays: 14 },
+    operationalFacts: { categoryIdPresent: true, hasUsableCategoryContext: true, manualSource: false, recipientOwnership: 'owned_by_lead', openDuplicateFlag: false },
     asOf: '2026-09-15T00:00:00.000Z', manualOverride: null, ...overrides,
   }
 }
@@ -208,6 +209,7 @@ function testStaticBoundaries() {
     '00000000000000_reachagent_v2_golden_baseline.sql',
     '00000000000001_performance_reliability.sql',
     '00000000000002_observability_foundation.sql',
+    '00000000000003_v2_canary_send_claim.sql',
   ], 'Prompt 11 adds or edits no database migration')
 }
 

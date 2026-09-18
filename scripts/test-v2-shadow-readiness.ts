@@ -166,6 +166,7 @@ function testStaticBoundariesAndCompatibility() {
     '00000000000000_reachagent_v2_golden_baseline.sql',
     '00000000000001_performance_reliability.sql',
     '00000000000002_observability_foundation.sql',
+    '00000000000003_v2_canary_send_claim.sql',
   ])
 }
 

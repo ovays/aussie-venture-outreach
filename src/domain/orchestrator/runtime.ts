@@ -7,6 +7,12 @@ import { createProductionExecutorRegistry } from './executors'
 import { orchestrateLead } from './orchestrate-lead'
 import { orchestrateLeadBatch, MAX_ORCHESTRATION_BATCH_SIZE } from './batch'
 import { readOrchestratorFlags } from './flags'
+import {
+  assertCanaryAllowlistLeadId,
+  assertCanarySingleRun,
+  isV2CanaryEnabled,
+  V2_CANARY_WORKFLOW_TYPE,
+} from '@/lib/v2-canary-safety'
 import type { OrchestrationRequest, OrchestrationResult, OrchestratorDependencies } from './types'
 import type { Database } from '@/types/database'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -39,6 +45,12 @@ function dependencies(
 
 export async function runLeadOrchestration(request: OrchestrationRequest): Promise<OrchestrationResult> {
   if (request.shadow) throw new Error('Operational Orchestrator shadow is disabled; use evaluateLeadShadow().')
+  if (isV2CanaryEnabled()) {
+    assertCanarySingleRun()
+    assertCanaryAllowlistLeadId(request.leadId)
+    if (request.workflowType !== V2_CANARY_WORKFLOW_TYPE) throw new Error('V2 canary only permits the dedicated exact-lead workflow.')
+    if ((request.maxIterations ?? 1) !== 1) throw new Error('V2 canary requires maxIterations=1.')
+  }
   const client = createServiceClient() as SupabaseClient<Database>
   return orchestrateLead(request, dependencies(client))
 }
@@ -68,6 +80,7 @@ export async function runConfiguredLeadBatch(input: {
   attempt?: number
 }): Promise<ReturnType<typeof orchestrateLeadBatch> extends Promise<infer T> ? T : never> {
   if (input.leadIds.length > MAX_ORCHESTRATION_BATCH_SIZE) throw new Error(`Orchestration batch exceeds ${MAX_ORCHESTRATION_BATCH_SIZE} leads`)
+  if (isV2CanaryEnabled()) throw new Error('V2 canary forbids broad orchestration batches.')
   const client = createServiceClient() as SupabaseClient<Database>
   const flags = readOrchestratorFlags()
   if (flags.shadow) throw new Error('Operational Orchestrator shadow is disabled; use the dedicated shadow evaluator.')

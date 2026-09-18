@@ -734,6 +734,7 @@ export type Database = {
         Row: {
           body_html: string
           body_text: string
+          claimed_at: string | null
           created_at: string | null
           edited_at: string | null
           edited_by_user: boolean | null
@@ -744,6 +745,7 @@ export type Database = {
           opened_at: string | null
           replied_at: string | null
           resend_id: string | null
+          send_envelope: Json
           sent_at: string | null
           status: string | null
           subject: string
@@ -752,6 +754,7 @@ export type Database = {
         Insert: {
           body_html: string
           body_text: string
+          claimed_at?: string | null
           created_at?: string | null
           edited_at?: string | null
           edited_by_user?: boolean | null
@@ -762,6 +765,7 @@ export type Database = {
           opened_at?: string | null
           replied_at?: string | null
           resend_id?: string | null
+          send_envelope?: Json
           sent_at?: string | null
           status?: string | null
           subject: string
@@ -770,6 +774,7 @@ export type Database = {
         Update: {
           body_html?: string
           body_text?: string
+          claimed_at?: string | null
           created_at?: string | null
           edited_at?: string | null
           edited_by_user?: boolean | null
@@ -780,6 +785,7 @@ export type Database = {
           opened_at?: string | null
           replied_at?: string | null
           resend_id?: string | null
+          send_envelope?: Json
           sent_at?: string | null
           status?: string | null
           subject?: string

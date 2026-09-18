@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { DecisionAction, LeadDecisionContext, LeadDecisionResult } from '@/domain/decision-engine'
 import type { Database } from '@/types/database'
 
-export const ORCHESTRATION_WORKFLOW_TYPES = ['lead_lifecycle'] as const
+export const ORCHESTRATION_WORKFLOW_TYPES = ['lead_lifecycle', 'v2_initial_send_canary'] as const
 export type OrchestrationWorkflowType = (typeof ORCHESTRATION_WORKFLOW_TYPES)[number]
 
 export interface OrchestrationRequest {
