@@ -167,6 +167,11 @@ function testStaticBoundariesAndCompatibility() {
     '00000000000001_performance_reliability.sql',
     '00000000000002_observability_foundation.sql',
     '00000000000003_v2_canary_send_claim.sql',
+    '00000000000004_workspace_tenancy_tables.sql',
+    '00000000000005_workspace_id_columns_and_backfill.sql',
+    '00000000000006_workspace_settings_seed.sql',
+    '00000000000007_workspace_rls_policies.sql',
+    '00000000000008_workspace_indexes_and_constraints.sql',
   ])
 }
 

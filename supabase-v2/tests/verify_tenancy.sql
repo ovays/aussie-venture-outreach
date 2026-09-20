@@ -19,11 +19,13 @@ $$;
 INSERT INTO public.workspaces (id, name, slug) VALUES
   ('aaaaaaaa-0000-0000-0000-000000000002', 'Second Tenant', 'second-tenant');
 
-INSERT INTO public.profiles (id, email, full_name, role, is_active) VALUES
-  ('10000000-0000-0000-0000-000000000001', 'member-a@example.test', 'Member A', 'member', true),
-  ('10000000-0000-0000-0000-000000000002', 'admin@example.test', 'Admin', 'admin', true),
-  ('10000000-0000-0000-0000-000000000003', 'member-b@example.test', 'Member B', 'member', true),
-  ('10000000-0000-0000-0000-000000000004', 'outsider@example.test', 'Outsider', 'member', true);
+INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+  ('10000000-0000-0000-0000-000000000001', 'member-a@example.test', '{"full_name":"Member A"}'),
+  ('10000000-0000-0000-0000-000000000002', 'admin@example.test', '{"full_name":"Admin"}'),
+  ('10000000-0000-0000-0000-000000000003', 'member-b@example.test', '{"full_name":"Member B"}'),
+  ('10000000-0000-0000-0000-000000000004', 'outsider@example.test', '{"full_name":"Outsider"}');
+
+UPDATE public.profiles SET role = 'admin' WHERE id = '10000000-0000-0000-0000-000000000002';
 
 INSERT INTO public.workspace_members (workspace_id, user_id, role, status) VALUES
   ('00000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'member', 'active'),
