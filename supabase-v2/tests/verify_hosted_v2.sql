@@ -8,10 +8,10 @@ END
 $$;
 
 SELECT pg_temp.assert_true(
-  (SELECT count(*) = 27 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r'),
-  'exactly 27 V2 public tables');
+  (SELECT count(*) = 30 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r'),
+  'exactly 30 V2 public tables');
 SELECT pg_temp.assert_true(
-  (SELECT count(*) = 27 AND bool_and(relrowsecurity) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r'),
+  (SELECT count(*) = 30 AND bool_and(relrowsecurity) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r'),
   'RLS enabled on every V2 public table');
 SELECT pg_temp.assert_true(
   NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = ANY(ARRAY['clients','customers','conversations','bookings','escalations','knowledge_base','weekly_reports'])),
@@ -26,13 +26,13 @@ SELECT pg_temp.assert_true(
       AND privilege_type IN ('TRUNCATE','REFERENCES','TRIGGER')
   ),
   'client/service table grants contain no infrastructure privileges');
-SELECT pg_temp.assert_true((SELECT count(*) = 49 FROM pg_catalog.pg_policies WHERE schemaname = 'public'), 'exactly 49 security policies');
-SELECT pg_temp.assert_true((SELECT count(*) = 49 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'), 'exactly 49 public functions');
-SELECT pg_temp.assert_true((SELECT count(*) = 10 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'reachagent_private'), 'exactly 10 private functions');
-SELECT pg_temp.assert_true((SELECT count(*) = 96 FROM pg_catalog.pg_indexes WHERE schemaname = 'public'), 'exactly 96 public indexes');
+SELECT pg_temp.assert_true((SELECT count(*) = 54 FROM pg_catalog.pg_policies WHERE schemaname = 'public'), 'exactly 54 security policies');
+SELECT pg_temp.assert_true((SELECT count(*) = 51 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'), 'exactly 51 public functions');
+SELECT pg_temp.assert_true((SELECT count(*) = 12 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'reachagent_private'), 'exactly 12 private functions');
+SELECT pg_temp.assert_true((SELECT count(*) = 129 FROM pg_catalog.pg_indexes WHERE schemaname = 'public'), 'exactly 129 public indexes');
 SELECT pg_temp.assert_true(
-  (SELECT count(*) = 15 FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE NOT t.tgisinternal AND n.nspname IN ('public','auth')),
-  'exactly 15 ReachAgent/Auth triggers');
+  (SELECT count(*) = 18 FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE NOT t.tgisinternal AND n.nspname IN ('public','auth')),
+  'exactly 18 ReachAgent/Auth triggers');
 SELECT pg_temp.assert_true(
   (SELECT r.rolname = 'reachagent_function_owner' AND NOT r.rolcanlogin AND r.rolbypassrls
    FROM pg_catalog.pg_namespace n JOIN pg_catalog.pg_roles r ON r.oid = n.nspowner
@@ -86,8 +86,8 @@ SELECT pg_temp.assert_true(
   ),
   'function-owner routines do not depend on managed auth schema privileges');
 SELECT pg_temp.assert_true(
-  (SELECT count(*) = 15 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.prosecdef),
-  'exactly 15 public SECURITY DEFINER functions');
+  (SELECT count(*) = 17 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.prosecdef),
+  'exactly 17 public SECURITY DEFINER functions');
 SELECT pg_temp.assert_true(
   NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
@@ -138,7 +138,8 @@ BEGIN
   FOR item IN
     SELECT c.oid::regclass AS relation, c.relname
     FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname <> 'profiles'
+    WHERE n.nspname = 'public' AND c.relkind = 'r'
+      AND c.relname <> ALL (ARRAY['profiles', 'workspaces', 'workspace_members', 'workspace_settings'])
   LOOP
     EXECUTE format('SELECT count(*) FROM %s', item.relation) INTO row_count;
     expected_count := CASE

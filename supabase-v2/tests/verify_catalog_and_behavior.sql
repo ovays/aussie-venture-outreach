@@ -9,8 +9,8 @@ $$;
 
 -- Catalog inventory and exclusions.
 SELECT pg_temp.assert_true(
-  (SELECT count(*)=27 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r'),
-  'exactly 27 public ReachAgent tables after the observability migration');
+  (SELECT count(*)=30 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r'),
+  'exactly 30 public ReachAgent tables after the tenancy migration');
 SELECT pg_temp.assert_true(
   NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=ANY(ARRAY['clients','customers','conversations','bookings','escalations','knowledge_base','weekly_reports','v_conversation_thread','v_bookings_full','v_daily_summary'])),
   'unrelated WhatsApp/bookings objects are absent');
@@ -61,10 +61,10 @@ SELECT pg_temp.assert_true(
 
 -- RLS, policies, grants and definer inventory.
 SELECT pg_temp.assert_true(
-  (SELECT count(*)=27 AND bool_and(relrowsecurity) AND NOT bool_or(relforcerowsecurity)
+  (SELECT count(*)=30 AND bool_and(relrowsecurity) AND NOT bool_or(relforcerowsecurity)
    FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
    WHERE n.nspname='public' AND c.relkind='r'),
-  'RLS enabled and not forced on all 27 tables');
+  'RLS enabled and not forced on all 30 tables');
 SELECT pg_temp.assert_true(
   NOT has_schema_privilege('anon','public','USAGE')
   AND NOT has_schema_privilege('anon','public','CREATE'),
@@ -83,8 +83,8 @@ SELECT pg_temp.assert_true(
     WHERE table_schema='public' AND grantee IN ('anon','PUBLIC')
   ), 'anon/PUBLIC have no table grants');
 SELECT pg_temp.assert_true(
-  (SELECT count(*)=15 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prosecdef),
-  'exactly 15 public SECURITY DEFINER functions');
+  (SELECT count(*)=17 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prosecdef),
+  'exactly 17 public SECURITY DEFINER functions');
 SELECT pg_temp.assert_true(
   NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
@@ -130,6 +130,13 @@ SELECT pg_temp.assert_true(
   'signup metadata role is ignored');
 UPDATE public.profiles SET role='admin' WHERE id='10000000-0000-0000-0000-000000000002';
 UPDATE public.profiles SET is_active=false WHERE id='10000000-0000-0000-0000-000000000003';
+
+-- Seed workspace membership for the fixtures (mirrors the SaaS 1A backfill for
+-- freshly created profiles: admin -> owner, member -> member, inactive -> suspended).
+INSERT INTO public.workspace_members (workspace_id, user_id, role, status) VALUES
+  ('00000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'member', 'active'),
+  ('00000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'owner', 'active'),
+  ('00000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000003', 'member', 'suspended');
 
 -- Synthetic roots.
 INSERT INTO public.categories(id,name,status) VALUES
