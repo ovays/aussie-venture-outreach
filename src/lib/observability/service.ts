@@ -15,6 +15,7 @@ export type WorkflowStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'pa
 export interface StartWorkflowRunInput {
   workflowType: string
   source: string
+  workspaceId?: string
   triggerTaskId?: string
   triggerRunId?: string
   correlationId?: string
@@ -29,6 +30,7 @@ export interface StartWorkflowRunInput {
 
 export interface StartWorkflowStepInput {
   workflowRunId?: string
+  workspaceId?: string
   stepName: string
   stepType?: string
   leadId?: string
@@ -103,6 +105,7 @@ export class ObservabilityService {
         workflow_type: input.workflowType,
         status: 'running',
         source: input.source,
+        workspace_id: input.workspaceId,
         trigger_task_id: input.triggerTaskId ?? null,
         trigger_run_id: input.triggerRunId ?? null,
         correlation_id: input.correlationId ?? input.triggerRunId ?? null,
@@ -149,6 +152,7 @@ export class ObservabilityService {
     const row = await this.write<{ id: string }>('start_workflow_step', async () => {
       const result = await this.client.from('workflow_steps').insert({
         workflow_run_id: workflowRunId, lead_id: input.leadId ?? null,
+        workspace_id: input.workspaceId,
         step_name: input.stepName, step_type: input.stepType ?? input.stepName, status: 'running',
         sequence: input.sequence ?? 0, attempt: input.attempt ?? 1, started_at: new Date().toISOString(),
         provider: input.provider ?? null, model: input.model ?? null,
