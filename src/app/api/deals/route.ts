@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { resolvePagination } from '@/lib/pagination'
 import { normalizeSearchTerm } from '@/lib/search'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const supabase = await createClient()
@@ -33,7 +34,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const supabase = await createClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase, workspace } = access
   const body = await request.json() as {
     lead_id: string
     deal_value: number
@@ -43,7 +46,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const { data, error } = await supabase
     .from('deals')
-    .insert(body)
+    .insert({ ...body, workspace_id: workspace.workspaceId })
     .select()
     .single()
 
@@ -65,8 +68,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const supabase = await createClient()
-  const body = await request.json() as { id: string; [key: string]: unknown }
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase } = access
+  const body = await request.json() as {
+    id: string
+    deal_value?: number
+    deal_type?: string
+    content_created?: boolean | null
+    content_created_at?: string | null
+    payment_received?: boolean | null
+    payment_received_at?: string | null
+    closed_at?: string | null
+    notes?: string | null
+  }
 
   const { id, ...updates } = body
 

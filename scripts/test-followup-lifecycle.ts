@@ -128,7 +128,7 @@ async function main() {
 
   console.log('STEP 2 → Triggering FU1')
 
-  await runFollowUpAgent(sendTestEmail)
+  await runFollowUpAgent('00000000-0000-0000-0000-000000000001', sendTestEmail)
 
   const { data: emailsAfterFU1, error: emailsAfterFU1Error } = await supabase
     .from('emails')
@@ -158,7 +158,7 @@ async function main() {
 
   console.log('STEP 3 → Triggering FU2')
 
-  await runFollowUpAgent(sendTestEmail)
+  await runFollowUpAgent('00000000-0000-0000-0000-000000000001', sendTestEmail)
 
   const { data: emailsAfterFU2, error: emailsAfterFU2Error } = await supabase
     .from('emails')
@@ -188,7 +188,7 @@ async function main() {
 
   console.log('STEP 4 → Triggering FU3')
 
-  await runFollowUpAgent(sendTestEmail)
+  await runFollowUpAgent('00000000-0000-0000-0000-000000000001', sendTestEmail)
 
   const { data: emailsAfterFU3, error: emailsAfterFU3Error } = await supabase
     .from('emails')

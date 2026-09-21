@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isInitialEmailMode, type InitialEmailMode } from '@/lib/settingsDefaults'
+import { workspaceRow } from '@/lib/supabase/workspace-service'
 
 export const INITIAL_EMAIL_MODE_SNAPSHOT_EVENT = 'initial_email_mode_snapshot'
 
@@ -15,12 +16,12 @@ export async function saveInitialEmailModeSnapshot(
   mode: InitialEmailMode,
   source: 'csv_import',
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { error } = await supabase.from('activity_log').insert({
+  const { error } = await supabase.from('activity_log').insert(workspaceRow(supabase, {
     event_type: INITIAL_EMAIL_MODE_SNAPSHOT_EVENT,
     lead_id: leadId,
     description: `Initial Email Mode captured for ${source}`,
     metadata: { initial_email_mode: mode, source },
-  })
+  }))
 
   return error ? { ok: false, error: error.message } : { ok: true }
 }

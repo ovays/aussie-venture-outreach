@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { logger } from '@/lib/logger'
 import type { LeadDecisionResult } from '@/domain/decision-engine'
 import { currentWorkflowTrace, withWorkflowTrace } from './context'
@@ -15,7 +16,7 @@ export type WorkflowStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'pa
 export interface StartWorkflowRunInput {
   workflowType: string
   source: string
-  workspaceId?: string
+  workspaceId: string
   triggerTaskId?: string
   triggerRunId?: string
   correlationId?: string
@@ -147,12 +148,13 @@ export class ObservabilityService {
   }
 
   async startWorkflowStep(input: StartWorkflowStepInput): Promise<string | null> {
-    const workflowRunId = input.workflowRunId ?? currentWorkflowTrace()?.workflowRunId
+    const trace = currentWorkflowTrace()
+    const workflowRunId = input.workflowRunId ?? trace?.workflowRunId
     if (!workflowRunId) return null
     const row = await this.write<{ id: string }>('start_workflow_step', async () => {
       const result = await this.client.from('workflow_steps').insert({
         workflow_run_id: workflowRunId, lead_id: input.leadId ?? null,
-        workspace_id: input.workspaceId,
+        workspace_id: input.workspaceId ?? trace?.workspaceId,
         step_name: input.stepName, step_type: input.stepType ?? input.stepName, status: 'running',
         sequence: input.sequence ?? 0, attempt: input.attempt ?? 1, started_at: new Date().toISOString(),
         provider: input.provider ?? null, model: input.model ?? null,
@@ -214,7 +216,7 @@ export class ObservabilityService {
       const batch = decisions.slice(offset, offset + 250)
       await this.write('record_decision_results', async () => {
         const result = await this.client.from('workflow_steps').insert(batch.map((decision) => ({
-          workflow_run_id: runId, lead_id: decision.leadId, step_name: stepName, step_type: 'decision',
+          workflow_run_id: runId, workspace_id: currentWorkflowTrace()?.workspaceId, lead_id: decision.leadId, step_name: stepName, step_type: 'decision',
           status: 'succeeded', sequence, attempt: 1, started_at: now, completed_at: now,
           decision_action: decision.action, decision_reason_code: decision.reasonCode,
           input_summary: sanitizeObservabilityMetadata({ inputs_used: decision.inputsUsed }),
@@ -235,7 +237,7 @@ export class ObservabilityService {
       const batch = inputs.slice(offset, offset + 250)
       await this.write('observe_lead_status_transition', async () => {
         const result = await this.client.from('activity_log').insert(batch.map((input) => ({
-          event_type: input.eventType ?? 'lead_status_transition', lead_id: input.leadId,
+          workspace_id: trace?.workspaceId, event_type: input.eventType ?? 'lead_status_transition', lead_id: input.leadId,
           description: input.description ?? `Lead status changed from ${input.fromStatus} to ${input.toStatus}`,
           metadata: sanitizeObservabilityMetadata({
             ...input.metadata,
@@ -250,17 +252,26 @@ export class ObservabilityService {
   }
 }
 
-let singleton: ObservabilityService | undefined
-export function observability(): ObservabilityService {
-  singleton ??= new ObservabilityService(createServiceClient())
-  return singleton
+const workspaceServices = new Map<string, ObservabilityService>()
+let unscopedService: ObservabilityService | undefined
+export function observability(workspaceId = currentWorkflowTrace()?.workspaceId): ObservabilityService {
+  if (!workspaceId) {
+    unscopedService ??= new ObservabilityService(createServiceClient())
+    return unscopedService
+  }
+  let service = workspaceServices.get(workspaceId)
+  if (!service) {
+    service = new ObservabilityService(createWorkspaceServiceClient(workspaceId))
+    workspaceServices.set(workspaceId, service)
+  }
+  return service
 }
 
 export async function withObservedWorkflow<T>(input: StartWorkflowRunInput, work: () => Promise<T>): Promise<T> {
   const service = observability()
   const runId = await service.startWorkflowRun(input)
   try {
-    const result = runId ? await withWorkflowTrace({ workflowRunId: runId }, work) : await work()
+    const result = runId ? await withWorkflowTrace({ workspaceId: input.workspaceId, workflowRunId: runId }, work) : await work()
     await service.completeWorkflowRun(runId)
     return result
   } catch (error) {

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decideNextAction, loadDecisionContext } from '@/domain/decision-engine'
 import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { observability } from '@/lib/observability/service'
 import { sendInitialOutreach } from '@/services/outbound'
 import type { ServiceExecutionResult } from '@/services/result'
@@ -109,7 +110,11 @@ export async function runCanaryInitialSend(input: RunCanaryInitialSendInput): Pr
   assertCanarySingleRun()
   assertCanaryAllowlistLeadId(input.leadId)
 
-  const client = createServiceClient() as SupabaseClient<Database>
+  const controlClient = createServiceClient() as SupabaseClient<Database>
+  const ownership = await controlClient.from('leads').select('workspace_id').eq('id', input.leadId).maybeSingle()
+  if (ownership.error || !ownership.data?.workspace_id) return { status: 'failed', reason: 'LEAD_NOT_FOUND' }
+  const workspaceId = ownership.data.workspace_id
+  const client = createWorkspaceServiceClient(workspaceId) as SupabaseClient<Database>
   const context = await loadDecisionContext(client, input.leadId)
   if (!context) return { status: 'failed', reason: 'LEAD_NOT_FOUND' }
 
@@ -118,8 +123,9 @@ export async function runCanaryInitialSend(input: RunCanaryInitialSendInput): Pr
     return { status: 'manual_review', reason: decision.reasonCode, action: decision.action }
   }
 
-  const telemetry = observability()
+  const telemetry = observability(workspaceId)
   const workflowRunId = await telemetry.startWorkflowRun({
+    workspaceId,
     workflowType: V2_CANARY_WORKFLOW_TYPE,
     source: 'manual_canary',
     correlationId: input.correlationId,
@@ -130,6 +136,7 @@ export async function runCanaryInitialSend(input: RunCanaryInitialSendInput): Pr
   })
 
   const decisionStepId = await telemetry.startWorkflowStep({
+    workspaceId,
     workflowRunId: workflowRunId ?? undefined,
     stepName: 'canary_decision',
     stepType: 'decision',
@@ -143,6 +150,7 @@ export async function runCanaryInitialSend(input: RunCanaryInitialSendInput): Pr
   })
 
   const executorStepId = await telemetry.startWorkflowStep({
+    workspaceId,
     workflowRunId: workflowRunId ?? undefined,
     stepName: 'canary_initial_send',
     stepType: 'executor',

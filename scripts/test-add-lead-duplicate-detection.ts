@@ -70,7 +70,7 @@ async function check(
   existingLeads: ExistingLead[],
   expected: 'created' | 'email_duplicate' | 'domain_duplicate',
 ): Promise<void> {
-  const result = await createLead(createSupabaseStub(existingLeads), { ...baseInput, ...input })
+  const result = await createLead(createSupabaseStub(existingLeads), '00000000-0000-4000-8000-000000000099', { ...baseInput, ...input })
   const actual = result.ok ? 'created' : result.status === 409 ? result.type : `error_${result.status}`
   if (actual !== expected) throw new Error(`${name}: expected ${expected}, received ${actual}`)
   console.log(`PASS ${name}`)

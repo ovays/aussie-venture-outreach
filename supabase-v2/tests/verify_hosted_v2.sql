@@ -27,7 +27,7 @@ SELECT pg_temp.assert_true(
   ),
   'client/service table grants contain no infrastructure privileges');
 SELECT pg_temp.assert_true((SELECT count(*) = 54 FROM pg_catalog.pg_policies WHERE schemaname = 'public'), 'exactly 54 security policies');
-SELECT pg_temp.assert_true((SELECT count(*) = 51 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'), 'exactly 51 public functions');
+SELECT pg_temp.assert_true((SELECT count(*) = 52 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'), 'exactly 52 public functions');
 SELECT pg_temp.assert_true((SELECT count(*) = 12 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'reachagent_private'), 'exactly 12 private functions');
 SELECT pg_temp.assert_true((SELECT count(*) = 129 FROM pg_catalog.pg_indexes WHERE schemaname = 'public'), 'exactly 129 public indexes');
 SELECT pg_temp.assert_true(

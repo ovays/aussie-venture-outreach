@@ -14,6 +14,7 @@ import {
 import { createServiceClient } from '../src/lib/supabase/server'
 
 const NOW = '2026-09-15T00:00:00.000Z'
+const WORKSPACE_ID = '00000000-0000-0000-0000-000000000001'
 const daysAgo = (days: number) => new Date(Date.parse(NOW) - days * 86_400_000).toISOString()
 const missing = () => ({ state: 'missing' as const, sentAt: null })
 const pending = () => ({ state: 'pending' as const, sentAt: null })
@@ -144,16 +145,16 @@ const fixtureIds = [randomUUID(), randomUUID()]
 const categoryName = `Decision Fixture ${randomUUID()}`
 let categoryId: string | null = null
 try {
-  const categoryResult = await supabase.from('categories').insert({ name: categoryName, status: 'active' }).select('id').single()
+  const categoryResult = await supabase.from('categories').insert({ workspace_id: WORKSPACE_ID, name: categoryName, status: 'active' }).select('id').single()
   assert.equal(categoryResult.error, null)
   categoryId = categoryResult.data!.id
   const { error: leadError } = await supabase.from('leads').insert([
-    { id: fixtureIds[0], business_name: 'Decision Fixture New', category_name: 'Synthetic', city: 'Sydney', status: 'new', email: 'decision-new@example.test' },
-    { id: fixtureIds[1], business_name: 'Decision Fixture Ready', category_id: categoryId, category_name: 'Synthetic', city: 'Sydney', status: 'email_ready', email: 'decision-ready@example.test' },
+    { workspace_id: WORKSPACE_ID, id: fixtureIds[0], business_name: 'Decision Fixture New', category_name: 'Synthetic', city: 'Sydney', status: 'new', email: 'decision-new@example.test' },
+    { workspace_id: WORKSPACE_ID, id: fixtureIds[1], business_name: 'Decision Fixture Ready', category_id: categoryId, category_name: 'Synthetic', city: 'Sydney', status: 'email_ready', email: 'decision-ready@example.test' },
   ])
   assert.equal(leadError, null)
   const { error: emailError } = await supabase.from('emails').insert({
-    lead_id: fixtureIds[1], type: 'initial_pitch', subject: 'Synthetic', body_html: '<p>Synthetic</p>', body_text: 'Synthetic', status: 'pending_send',
+    workspace_id: WORKSPACE_ID, lead_id: fixtureIds[1], type: 'initial_pitch', subject: 'Synthetic', body_html: '<p>Synthetic</p>', body_text: 'Synthetic', status: 'pending_send',
   })
   assert.equal(emailError, null)
   const loaded = await loadDecisionContexts(supabase, fixtureIds, { asOf: NOW, initialEmailMode: 'ai_personalised' })

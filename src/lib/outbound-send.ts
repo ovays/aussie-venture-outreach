@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { workspaceRow } from '@/lib/supabase/workspace-service'
 
 export type OutboundEmailType = 'initial_pitch' | 'follow_up_1' | 'follow_up_2' | 'follow_up_3' | 'reactivation'
 
@@ -88,14 +89,14 @@ export async function ensureOutboundEmailIntent(
 ): Promise<{ intent: OutboundEmailIntent; created: boolean }> {
   const inserted = await supabase
     .from('emails')
-    .insert({
+    .insert(workspaceRow(supabase, {
       lead_id: content.leadId,
       type: content.type,
       subject: content.subject,
       body_html: content.bodyHtml,
       body_text: content.bodyText,
       status: 'pending_send',
-    })
+    }))
     .select('id,status,resend_id,message_id,subject,body_html,body_text')
     .single()
 

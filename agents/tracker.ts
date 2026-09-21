@@ -1,4 +1,5 @@
-import { createServiceClient } from '@/lib/supabase/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { createWorkspaceServiceClient, requireWorkspaceIdForServiceClient, workspaceRow } from '@/lib/supabase/workspace-service'
 import { sendEmail, getReceivedEmailHeaders } from '@/lib/resend'
 import { getAnalyticsDateKey, getDashboardMetrics, getLeadName, logAnalyticsMetrics } from '@/lib/analytics'
 import { logger } from '@/lib/logger'
@@ -14,12 +15,13 @@ import {
 // production call site omits it and gets the real service-role client.
 export async function handleEmailReply(
   leadId: string,
-  supabaseOverride?: ReturnType<typeof createServiceClient>,
+  supabaseOverride?: SupabaseClient,
   matchedEmailId?: string,
   repliedAt?: string,
   inboundReceiptId?: string,
 ): Promise<void> {
-  const supabase = supabaseOverride ?? createServiceClient()
+  if (!supabaseOverride) throw new Error('Workspace-scoped database client required for inbound reply handling')
+  const supabase = supabaseOverride
 
   const { data: lead, error: leadError } = await supabase
     .from('leads')
@@ -71,12 +73,12 @@ export async function handleEmailReply(
     throw new Error(`Reply email timestamp could not be stored: ${replyUpdateError.message}`)
   }
 
-  const { error: activityError } = await supabase.from('activity_log').insert({
+  const { error: activityError } = await supabase.from('activity_log').insert(workspaceRow(supabase, {
     event_type: 'reply_received',
     lead_id: leadId,
     description: `Reply received from ${lead.business_name}`,
     metadata: inboundReceiptId ? { inbound_receipt_id: inboundReceiptId } : {},
-  })
+  }))
   if (activityError && activityError.code !== '23505') {
     throw new Error(`Reply activity could not be stored: ${activityError.message}`)
   }
@@ -164,7 +166,7 @@ export function isAutomatedInboundEmail(params: {
   return /^(automatic reply|auto(?:matic)?[ -]?reply|out of office|away from (?:the )?office|delivery status notification|undeliverable|delivery failure|mail delivery failed|returned mail|mail delivery subsystem)\b/.test(subject)
 }
 
-type ServiceClient = ReturnType<typeof createServiceClient>
+type ServiceClient = SupabaseClient
 
 async function findUniqueEmailByMessageIds(
   messageIds: string[],
@@ -240,7 +242,7 @@ async function logUnmatchedInbound(
   outcome: 'unmatched' | 'unmatched_ambiguous',
   supabase: ServiceClient,
 ): Promise<void> {
-  const { error } = await supabase.from('activity_log').insert({
+  const { error } = await supabase.from('activity_log').insert(workspaceRow(supabase, {
     event_type: 'inbound_reply_unmatched',
     lead_id: null,
     description: outcome === 'unmatched_ambiguous'
@@ -255,7 +257,7 @@ async function logUnmatchedInbound(
       status: outcome,
       inbound_receipt_id: message.receiptId ?? null,
     },
-  })
+  }))
   if (error && error.code !== '23505') throw new Error(`Inbound unmatched marker could not be stored: ${error.message}`)
 }
 
@@ -263,7 +265,8 @@ export async function processInboundReply(
   message: NormalizedInboundMessage,
   supabaseOverride?: ServiceClient,
 ): Promise<InboundReplyResult> {
-  const supabase = supabaseOverride ?? createServiceClient()
+  if (!supabaseOverride) throw new Error('Workspace-scoped database client required for inbound processing')
+  const supabase = supabaseOverride
   const headers = message.headers ?? {}
 
   if (isAutomatedInboundEmail({ from: message.from, subject: message.subject, headers })) {
@@ -337,7 +340,7 @@ export async function processInboundReply(
 // invoked; it does not itself require any further setup once that is in place.
 export async function handleInboundEmail(
   params: { emailId: string; from: string; subject?: string },
-  supabaseOverride?: ReturnType<typeof createServiceClient>,
+  supabaseOverride?: SupabaseClient,
   fetchHeaders: typeof getReceivedEmailHeaders = getReceivedEmailHeaders
 ): Promise<void> {
   const headers = await fetchHeaders(params.emailId)
@@ -361,9 +364,10 @@ export async function handleTerminalDeliveryFailure(
     recipient?: string | null
     providerReason?: unknown
   },
-  supabaseOverride?: ReturnType<typeof createServiceClient>,
+  supabaseOverride?: SupabaseClient,
 ): Promise<boolean> {
-  const supabase = supabaseOverride ?? createServiceClient()
+  if (!supabaseOverride) throw new Error('Workspace-scoped database client required for delivery failure handling')
+  const supabase = supabaseOverride
   const terminalStatus = TERMINAL_RESEND_EVENTS[params.eventType]
 
   const { data: email, error: lookupErr } = await supabase
@@ -419,6 +423,7 @@ export async function handleTerminalDeliveryFailure(
 
   if (recipient) {
     const { error: suppressErr } = await supabase.rpc('suppress_lead_delivery_email', {
+      p_workspace_id: requireWorkspaceIdForServiceClient(supabase),
       p_lead_id: leadId,
       p_email: recipient,
     })
@@ -434,7 +439,7 @@ export async function handleTerminalDeliveryFailure(
     if (cancelErr) throw new Error(`Failed to cancel pending follow-ups: ${cancelErr.message}`)
   }
 
-  const { error: logErr } = await supabase.from('activity_log').insert({
+  const { error: logErr } = await supabase.from('activity_log').insert(workspaceRow(supabase, {
     event_type: 'delivery_terminal_failure',
     lead_id: leadId,
     description: `Terminal Resend delivery failure (${params.eventType})`,
@@ -450,7 +455,7 @@ export async function handleTerminalDeliveryFailure(
       affects_current_address: affectsCurrentAddress,
       duplicate: alreadySameTerminal,
     },
-  })
+  }))
   if (logErr) throw new Error(`Failed to record terminal provider event: ${logErr.message}`)
 
   logger.warn('tracker', 'DELIVERY_TERMINAL_FAILURE', {
@@ -471,7 +476,7 @@ export async function handleTerminalDeliveryFailure(
 export async function handleEmailBounce(
   leadId: string,
   resendId: string,
-  supabaseOverride?: ReturnType<typeof createServiceClient>,
+  supabaseOverride?: SupabaseClient,
 ): Promise<void> {
   await handleTerminalDeliveryFailure(
     { taggedLeadId: leadId, resendId, eventType: 'email.bounced' },
@@ -479,8 +484,8 @@ export async function handleEmailBounce(
   )
 }
 
-export async function sendDailyDigest(): Promise<void> {
-  const supabase = createServiceClient()
+export async function sendDailyDigest(workspaceId: string): Promise<void> {
+  const supabase = createWorkspaceServiceClient(workspaceId)
 
   try {
     const { data: digestSetting } = await supabase.from('settings').select('value').eq('key', 'digest_email').single()
@@ -558,7 +563,7 @@ export async function sendDailyDigest(): Promise<void> {
         const meta = error.metadata as { agent?: string; error?: string } | null
         const agent = meta?.agent ?? 'unknown'
         const errorMsg = meta?.error ?? error.description ?? ''
-        const time = new Date(error.created_at).toLocaleTimeString('en-AU', {
+        const time = new Date(error.created_at ?? Date.now()).toLocaleTimeString('en-AU', {
           timeZone: metrics.todayEmailStats.range.timezone,
           hour: '2-digit',
           minute: '2-digit',
@@ -629,7 +634,7 @@ ${(agentErrors ?? []).length > 0 ? `<h3 style="color: #f87171;">Pipeline Errors 
     })
     if (!digestResult) throw new Error('Daily digest provider rejected the send')
 
-    await supabase.from('activity_log').insert({
+    await supabase.from('activity_log').insert(workspaceRow(supabase, {
       event_type: 'digest_sent',
       description: `Daily digest sent to ${digestEmail}`,
       metadata: {
@@ -639,7 +644,7 @@ ${(agentErrors ?? []).length > 0 ? `<h3 style="color: #f87171;">Pipeline Errors 
         new_replies: metrics.replyStats.repliesToday,
         deals_this_week: (dealsThisWeek ?? []).length,
       },
-    })
+    }))
 
     logger.info('tracker', 'Daily digest sent', { to: digestEmail })
   } catch (error) {
@@ -648,7 +653,7 @@ ${(agentErrors ?? []).length > 0 ? `<h3 style="color: #f87171;">Pipeline Errors 
       error: message,
       stack: error instanceof Error ? error.stack : null,
     })
-    await supabase.from('activity_log').insert({
+    await supabase.from('activity_log').insert(workspaceRow(supabase, {
       event_type: 'agent_error',
       description: `Agent failed: ${message}`,
       metadata: {
@@ -657,7 +662,7 @@ ${(agentErrors ?? []).length > 0 ? `<h3 style="color: #f87171;">Pipeline Errors 
         stack: error instanceof Error ? error.stack : null,
         timestamp: new Date().toISOString(),
       },
-    })
+    }))
     throw error
   }
 }

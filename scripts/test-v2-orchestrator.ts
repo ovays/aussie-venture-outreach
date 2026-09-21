@@ -28,7 +28,7 @@ function context(overrides: Partial<MutableContext> = {}): MutableContext {
 }
 
 function request(leadId = context().leadId): OrchestrationRequest {
-  return { workflowType: 'lead_lifecycle', leadId, source: 'synthetic.test' }
+  return { workspaceId: '00000000-0000-0000-0000-000000000001', workflowType: 'lead_lifecycle', leadId, source: 'synthetic.test' }
 }
 
 function harness(input: {
@@ -216,7 +216,8 @@ function testStaticBoundaries() {
     '00000000000007_workspace_rls_policies.sql',
     '00000000000008_workspace_indexes_and_constraints.sql',
     '00000000000009_workspace_scope_functions_and_keys.sql',
-  ], 'SaaS 1A + partial 1B migration set matches the approved foundation only')
+    '00000000000010_remove_workspace_default.sql',
+  ], 'SaaS 1B migration set matches the approved foundation only')
 }
 
 async function main() {

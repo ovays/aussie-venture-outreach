@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { logger } from '@/lib/logger'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
 import { writeOneLead } from '@/lib/write-lead'
@@ -17,10 +18,10 @@ const RECOVERABLE_TEMPLATE_CODES = new Set([
   'invalid_template', 'missing_lead_value', 'unresolved_placeholder',
 ])
 
-export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<void> {
+export async function runWriterAgent(workspaceId: string, modeSnapshot?: InitialEmailMode): Promise<void> {
   logger.info('writer', 'Writer agent starting')
 
-  const supabase = createServiceClient()
+  const supabase = createWorkspaceServiceClient(workspaceId)
   const mode = modeSnapshot ?? await readInitialEmailMode(supabase)
   logger.info('writer', 'Initial Email Mode captured', { initial_email_mode: mode })
 
@@ -69,8 +70,8 @@ export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<v
         supabase.from('emails').select('lead_id').in('lead_id', emailReadyIds).eq('status', 'email_sync_failed'),
       ])
 
-      const withPendingSet    = new Set(emailsWithPending?.map((e: { lead_id: string }) => e.lead_id) ?? [])
-      const withSyncFailedSet = new Set(emailsWithSyncFailed?.map((e: { lead_id: string }) => e.lead_id) ?? [])
+      const withPendingSet    = new Set(emailsWithPending?.flatMap((e) => e.lead_id ? [e.lead_id] : []) ?? [])
+      const withSyncFailedSet = new Set(emailsWithSyncFailed?.flatMap((e) => e.lead_id ? [e.lead_id] : []) ?? [])
       const toReset = emailReadyIds.filter((id: string) => !withPendingSet.has(id) && !withSyncFailedSet.has(id))
 
       if (toReset.length) {
@@ -182,6 +183,7 @@ export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<v
     })
 
     await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
       event_type: 'writer_complete',
       description: `Writer complete: ${emailsQueued} emails, ${deadCount} dead`,
       metadata: {
@@ -200,6 +202,7 @@ export async function runWriterAgent(modeSnapshot?: InitialEmailMode): Promise<v
     const message = error instanceof Error ? error.message : String(error)
     logger.error('writer', 'Fatal error', { error: message, stack: error instanceof Error ? error.stack : null })
     await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
       event_type: 'agent_error',
       description: `Agent failed: ${message}`,
       metadata: {

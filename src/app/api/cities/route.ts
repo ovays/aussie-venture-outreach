@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 
 export async function GET() {
-  const supabase = createServiceClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase } = access
   const { data, error } = await supabase
     .from('city_suburbs')
     .select('city')

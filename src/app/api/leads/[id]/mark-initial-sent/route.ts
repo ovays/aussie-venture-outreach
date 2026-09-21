@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { claimRecipientOutreach, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
 
 export async function POST(
@@ -7,7 +7,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const supabase = await createClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase, workspace } = access
 
   const { data: lead, error: leadErr } = await supabase
     .from('leads')
@@ -66,6 +68,7 @@ export async function POST(
       .update({ status: 'contacted', updated_at: now })
       .eq('id', id),
     supabase.from('activity_log').insert({
+      workspace_id: workspace.workspaceId,
       event_type:  'email_sent',
       lead_id:     id,
       description: `Initial email marked as sent for ${lead.business_name} (${lead.email ?? 'no email'})`,

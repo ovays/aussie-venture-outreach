@@ -3,6 +3,8 @@ import type { WebhookEventPayload } from 'resend'
 import { verifyResendWebhook } from '@/lib/webhook-verify'
 import { handleInboundEmail, handleTerminalDeliveryFailure } from '../../../../../agents/tracker'
 import { logger } from '@/lib/logger'
+import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 
 // ─── Reply detection prerequisite ───────────────────────────────────────────
 // Resend has no "email.replied" event — replies are only observable via the
@@ -41,6 +43,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       case 'email.bounced':
       case 'email.failed':
       case 'email.suppressed': {
+        const control = createServiceClient()
+        const ownership = await control.from('emails').select('workspace_id').eq('resend_id', event.data.email_id).maybeSingle()
+        if (ownership.error || !ownership.data?.workspace_id) throw new Error(`No workspace found for Resend id ${event.data.email_id}`)
         const providerReason = event.type === 'email.bounced'
           ? event.data.bounce
           : event.type === 'email.failed'
@@ -52,7 +57,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           eventType: event.type,
           recipient: event.data.to?.[0],
           providerReason,
-        })
+        }, createWorkspaceServiceClient(ownership.data.workspace_id))
         // Returning 500 asks Resend to retry a valid event that raced the
         // post-send database write, rather than acknowledging and losing it.
         if (!handled) throw new Error(`No email row found for Resend id ${event.data.email_id}`)
@@ -60,11 +65,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
 
       case 'email.received': {
+        const workspaceId = process.env.RESEND_INBOUND_WORKSPACE_ID ?? ''
         await handleInboundEmail({
           emailId: event.data.email_id,
           from: event.data.from,
           subject: event.data.subject,
-        })
+        }, createWorkspaceServiceClient(workspaceId))
         break
       }
 

@@ -1,4 +1,4 @@
-import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { sendEmail, UncertainEmailDeliveryError } from '@/lib/resend'
 import { logger } from '@/lib/logger'
 import { getAnalyticsDayRange } from '@/lib/analytics'
@@ -19,8 +19,8 @@ import { observability } from '@/lib/observability/service'
 // backstop that holds regardless of how runSenderAgent() is invoked.
 const SENDER_LOCK_KEY = 'sender_agent'
 
-export async function runSenderAgent(): Promise<{ sent: number; failed: number }> {
-  const supabase = createServiceClient()
+export async function runSenderAgent(workspaceId: string): Promise<{ sent: number; failed: number }> {
+  const supabase = createWorkspaceServiceClient(workspaceId)
 
   try {
   const { data: systemSetting } = await supabase
@@ -36,7 +36,7 @@ export async function runSenderAgent(): Promise<{ sent: number; failed: number }
     return { sent: 0, failed: 0 }
   }
 
-  const lockToken = await acquireLock(supabase, SENDER_LOCK_KEY)
+  const lockToken = await acquireLock(supabase, SENDER_LOCK_KEY, undefined, workspaceId)
   if (!lockToken) {
     logger.warn('sender', '[PIPELINE_STAGE] Sender exiting', { reason: 'concurrent_run_in_progress' })
     return { sent: 0, failed: 0 }
@@ -191,7 +191,9 @@ console.log("FILTERED PENDING", pendingEmails)
   }
 
   // Apply hard cap: never send more initial outreach than remaining quota allows.
-  const toSend = pendingEmails.slice(0, remainingToday)
+  const toSend = pendingEmails
+    .filter((email): email is typeof email & { lead_id: string } => typeof email.lead_id === 'string')
+    .slice(0, remainingToday)
   const loadedDecisionContexts = await loadDecisionContexts(supabase, toSend.map((email) => email.lead_id))
   const decisionByLeadId = new Map(loadedDecisionContexts.contexts.map((context) => [context.leadId, decideNextAction(context)]))
   await observability().recordDecisionResults([...decisionByLeadId.values()], 'send_initial_decision', 41)
@@ -335,6 +337,7 @@ const result = await sendEmail({
         })
 
         await supabase.from('activity_log').insert({
+          workspace_id: workspaceId,
           event_type: 'email_sent',
           lead_id: emailRecord.lead_id,
           description: `Email sent to ${lead.business_name} (${lead.email})`,
@@ -348,12 +351,14 @@ const result = await sendEmail({
         await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
 
         await supabase.from('dead_letter_queue').insert({
+          workspace_id: workspaceId,
           operation: 'send_email',
           payload: { lead_id: emailRecord.lead_id, email: lead.email, subject: emailRecord.subject, email_id: emailRecord.id },
           error: 'Resend API returned null/error',
         })
 
         await supabase.from('activity_log').insert({
+          workspace_id: workspaceId,
           event_type: 'email_failed',
           lead_id: emailRecord.lead_id,
           description: `Failed to send email to ${lead.business_name} (${lead.email})`,
@@ -371,6 +376,7 @@ const result = await sendEmail({
         // idempotency key, so it confirms the same delivery instead of sending
         // a second message after an ambiguous transport failure.
         await supabase.from('dead_letter_queue').insert({
+          workspace_id: workspaceId,
           operation: 'send_email_uncertain',
           payload: { lead_id: emailRecord.lead_id, email_id: emailRecord.id },
           error: msg,
@@ -382,12 +388,14 @@ const result = await sendEmail({
       await supabase.from('emails').update({ status: 'failed' }).eq('id', emailRecord.id)
 
       await supabase.from('dead_letter_queue').insert({
+        workspace_id: workspaceId,
         operation: 'send_email',
         payload: { lead_id: emailRecord.lead_id, email: lead.email, subject: emailRecord.subject, email_id: emailRecord.id },
         error: msg,
       })
 
       await supabase.from('activity_log').insert({
+        workspace_id: workspaceId,
         event_type: 'agent_error',
         lead_id: emailRecord.lead_id,
         description: `Exception sending to ${lead.business_name} (${lead.email}): ${msg}`,
@@ -398,6 +406,7 @@ const result = await sendEmail({
   }
 
   await supabase.from('activity_log').insert({
+    workspace_id: workspaceId,
     event_type: 'sender_complete',
     description: `Sender agent completed - ${sent} sent, ${failed} failed`,
     metadata: { sent, failed, global_daily_send_limit: globalDailyLimit, daily_initial_outreach_limit: dailyLimit, initial_pitch_sent_before_run: sentToday ?? 0 },
@@ -411,13 +420,14 @@ const result = await sendEmail({
   return { sent, failed }
 
   } finally {
-    await releaseLock(supabase, SENDER_LOCK_KEY, lockToken)
+    await releaseLock(supabase, SENDER_LOCK_KEY, lockToken, workspaceId)
   }
 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     logger.error('sender', 'Fatal error', { error: message, stack: error instanceof Error ? error.stack : null })
     await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
       event_type: 'agent_error',
       description: `Agent failed: ${message}`,
       metadata: {

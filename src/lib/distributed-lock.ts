@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { randomUUID } from 'crypto'
 import { logger } from '@/lib/logger'
+import { workspaceIdForServiceClient } from '@/lib/supabase/workspace-service'
 
 // Cross-invocation mutex backed by `distributed_locks`. Callers should pass an
 // explicit workspace_id so tenant-local keys never contend across workspaces;
@@ -9,8 +10,14 @@ import { logger } from '@/lib/logger'
 
 const DEFAULT_TTL_MS = 15 * 60 * 1000
 
-function scopedKey(workspaceId: string | undefined, key: string): string {
-  return workspaceId ? `${workspaceId}:${key}` : key
+function requiredWorkspaceId(client: object, explicit?: string): string {
+  const workspaceId = explicit ?? workspaceIdForServiceClient(client)
+  if (!workspaceId) throw new Error('Distributed locks require workspace context')
+  return workspaceId
+}
+
+function scopedKey(workspaceId: string, key: string): string {
+  return `${workspaceId}:${key}`
 }
 
 export async function acquireLock(
@@ -20,13 +27,14 @@ export async function acquireLock(
   ttlMs: number = DEFAULT_TTL_MS,
   workspaceId?: string,
 ): Promise<string | null> {
+  const resolvedWorkspaceId = requiredWorkspaceId(supabase, workspaceId)
   const nowIso = new Date().toISOString()
   const token = randomUUID()
-  const lockKey = scopedKey(workspaceId, key)
+  const lockKey = scopedKey(resolvedWorkspaceId, key)
 
   const { error } = await supabase.from('distributed_locks').insert({
     lock_key: lockKey,
-    workspace_id: workspaceId,
+    workspace_id: resolvedWorkspaceId,
     locked_at: nowIso,
     owner_token: token,
   })
@@ -53,7 +61,7 @@ export async function acquireLock(
 
   const { error: retryErr } = await supabase.from('distributed_locks').insert({
     lock_key: lockKey,
-    workspace_id: workspaceId,
+    workspace_id: resolvedWorkspaceId,
     locked_at: nowIso,
     owner_token: token,
   })
@@ -71,7 +79,8 @@ export async function releaseLock(
   token: string,
   workspaceId?: string,
 ): Promise<void> {
-  const lockKey = scopedKey(workspaceId, key)
+  const resolvedWorkspaceId = requiredWorkspaceId(supabase, workspaceId)
+  const lockKey = scopedKey(resolvedWorkspaceId, key)
   const { error } = await supabase.from('distributed_locks').delete().eq('lock_key', lockKey).eq('owner_token', token)
   if (error) {
     logger.error('distributed-lock', 'Failed to release lock — it will self-heal via TTL reclaim', { key, workspaceId, error: error.message })

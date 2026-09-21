@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { sendEmail } from '@/lib/resend'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
 import { researchOneLead, researchPurposeForInitialEmailMode } from '@/lib/research-lead'
@@ -28,13 +28,17 @@ const BULK_SEND_LOCK_TTL_MS = 3 * 60 * 1000
 type FailedItem = { lead_id: string; business_name: string; reason: string }
 
 export async function GET(): Promise<NextResponse> {
-  const supabase = createServiceClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase } = access
   const initialEmailMode = await readInitialEmailMode(supabase)
   return NextResponse.json({ initial_email_mode: initialEmailMode })
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const supabase = createServiceClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase, workspace } = access
   const raw = await request.json()
 
   const parsed = leadsBulkRequestSchema.safeParse(raw)
@@ -204,6 +208,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
         await supabase.from('leads').update({ status: 'contacted', updated_at: sentAt }).eq('id', lead_id)
         await supabase.from('activity_log').insert({
+          workspace_id: workspace.workspaceId,
           event_type: 'email_sent',
           lead_id,
           description: `Email sent to ${lead.business_name} (${lead.email}) via bulk send`,
@@ -289,9 +294,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         outcomes.push({ lead_id, business_name: lead_id, status: 'failed', reason: 'Lead not found' })
         continue
       }
+      if (!lead.status) {
+        outcomes.push({ lead_id, business_name: lead.business_name, status: 'skipped', reason: 'Lead has no workflow status' })
+        continue
+      }
+      const researchedLead = { ...lead, status: lead.status }
 
       try {
-        outcomes.push(await processResearchedLead(supabase, lead, dedupeIndex, initialEmailMode!))
+        outcomes.push(await processResearchedLead(supabase, researchedLead, dedupeIndex, initialEmailMode!))
       } catch (error) {
         outcomes.push({
           lead_id,

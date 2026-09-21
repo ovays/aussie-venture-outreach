@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
-import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin } from '@/lib/api-workspace'
 
 const TABLES = ['emails', 'dm_queue', 'follow_ups', 'activity_log', 'deals'] as const
 
 export async function POST() {
-  const auth = await requireApiAdmin()
-  if (isAuthErrorResponse(auth)) return auth
+  const access = await requireApiWorkspaceAdmin()
+  if (isApiWorkspaceError(access)) return access
 
   try {
-    const supabase = createServiceClient()
+    const { supabase } = access
     const results: Record<string, string> = {}
 
     // Delete child tables individually — a missing table won't block the others

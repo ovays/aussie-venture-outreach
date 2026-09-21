@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { workspaceRow } from '@/lib/supabase/workspace-service'
 import { logger } from '@/lib/logger'
 
 export type EmailStatus = 'pending_send' | 'sending' | 'sent' | 'delivery_uncertain' | 'failed' | 'bounced' | 'suppressed' | 'email_sync_failed'
@@ -142,7 +143,7 @@ export async function insertEmailSyncFailedRecovery(
   // would be redundant at best and could silently change subject/body if the
   // caller somehow passed different values (e.g. regenerated copy).
   const { error: insertErr } = await supabase.from('emails').upsert(
-    {
+    workspaceRow(supabase, {
       lead_id:   leadId,
       type,
       subject,
@@ -152,8 +153,8 @@ export async function insertEmailSyncFailedRecovery(
       message_id: messageId ?? null,
       status:     EMAIL_STATUS.EMAIL_SYNC_FAILED,
       sent_at:    sentAt,
-    },
-    { onConflict: 'resend_id', ignoreDuplicates: true }
+    }),
+    { onConflict: 'workspace_id,resend_id', ignoreDuplicates: true }
   )
 
   if (insertErr) {

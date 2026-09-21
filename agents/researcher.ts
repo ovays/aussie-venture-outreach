@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { logger } from '@/lib/logger'
 import { fetchRawHtml, extractMailtoEmail } from '@/lib/email-extraction'
 import { researchLead, researchPurposeForMode } from '@/services/research'
@@ -9,7 +10,7 @@ import { observability } from '@/lib/observability/service'
 
 // ── Bounced email fixer ──────────────────────────────────────────────────────
 
-async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>): Promise<void> {
+async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>, workspaceId: string): Promise<void> {
   const { data: bouncedEmails } = await supabase
     .from('emails')
     .select('id, lead_id, leads(id, email, website, business_name)')
@@ -50,6 +51,7 @@ async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>
       await supabase.from('leads').update({ email: newEmail, status: 'researched' }).eq('id', lead.id)
 
       await supabase.from('activity_log').insert({
+        workspace_id: workspaceId,
         event_type: 'email_fixed',
         lead_id: lead.id,
         description: `Bounced email corrected for ${lead.business_name}: ${lead.email} → ${newEmail}`,
@@ -61,8 +63,8 @@ async function fixBouncedEmails(supabase: ReturnType<typeof createServiceClient>
   }
 }
 
-export async function runResearcherAgent(mode: InitialEmailMode = 'ai_personalised'): Promise<number> {
-  const supabase = createServiceClient()
+export async function runResearcherAgent(workspaceId: string, mode: InitialEmailMode = 'ai_personalised'): Promise<number> {
+  const supabase = createWorkspaceServiceClient(workspaceId)
   const researchPurpose = researchPurposeForMode(mode)
 
   try {
@@ -78,7 +80,7 @@ export async function runResearcherAgent(mode: InitialEmailMode = 'ai_personalis
     }
 
     // Fix any bounced emails from previous sends before processing new leads
-    await fixBouncedEmails(supabase)
+    await fixBouncedEmails(supabase, workspaceId)
 
     const { data: leads } = await supabase
       .from('leads')
@@ -108,6 +110,7 @@ export async function runResearcherAgent(mode: InitialEmailMode = 'ai_personalis
         leadId: lead.id, fromStatus: 'new', toStatus: 'researched', actor: 'researcher', reasonCode: 'TEMPLATE_READY',
       })))
       await supabase.from('activity_log').insert(templateReadyIds.map((leadId) => ({
+        workspace_id: workspaceId,
         event_type: 'research_skipped_template_ready',
         lead_id: leadId,
         description: 'Research skipped because template mode already has all required lead data',
@@ -139,6 +142,7 @@ export async function runResearcherAgent(mode: InitialEmailMode = 'ai_personalis
     logger.info('researcher', `Done: ${processed} leads processed, ${emailsFound} emails found`, { methodCounts })
 
     await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
       event_type: 'researcher_complete',
       description: `Researcher agent completed — ${processed} leads, ${emailsFound} emails found`,
       metadata: { total_processed: processed, emails_found: emailsFound, method_counts: methodCounts },
@@ -149,6 +153,7 @@ export async function runResearcherAgent(mode: InitialEmailMode = 'ai_personalis
     const message = error instanceof Error ? error.message : String(error)
     logger.error('researcher', 'Fatal error', { error: message, stack: error instanceof Error ? error.stack : null })
     await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
       event_type: 'agent_error',
       description: `Agent failed: ${message}`,
       metadata: {

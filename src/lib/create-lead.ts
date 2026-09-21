@@ -52,7 +52,7 @@ export type CreateLeadResult =
     }
   | { ok: false; status: 400 | 500; error: string }
 
-export async function createLead(supabase: SupabaseClient, input: CreateLeadInput): Promise<CreateLeadResult> {
+export async function createLead(supabase: SupabaseClient, workspaceId: string, input: CreateLeadInput): Promise<CreateLeadResult> {
   const {
     business_name, email, website, suburb, city, category_id, category_name, force,
     current_stage, stage_completed_date, source, initialEmail,
@@ -107,6 +107,7 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
   const { data: lead, error: leadErr } = await supabase
     .from('leads')
     .insert({
+      workspace_id: workspaceId,
       business_name,
       email: normalizedEmail,
       website:       website || null,
@@ -161,6 +162,7 @@ export async function createLead(supabase: SupabaseClient, input: CreateLeadInpu
     // inserted above stranded without its backfilled stage history.
     try {
       const backfillResult = await backfillLeadStageHistory(supabase, {
+        workspaceId,
         leadId:       lead.id,
         businessName: business_name,
         website,
@@ -235,6 +237,7 @@ async function rollbackStagedLead(
 async function backfillLeadStageHistory(
   supabase: SupabaseClient,
   params: {
+    workspaceId: string
     leadId: string
     businessName: string
     website?: string
@@ -248,7 +251,7 @@ async function backfillLeadStageHistory(
     initialEmailMode: InitialEmailMode
   }
 ): Promise<{ ok: true; lead: unknown } | { ok: false; error: string }> {
-  const { leadId, businessName, website, suburb, city, categoryName, categoryId, contentType, stage, completedDate, initialEmailMode } = params
+  const { workspaceId, leadId, businessName, website, suburb, city, categoryName, categoryId, contentType, stage, completedDate, initialEmailMode } = params
 
   const { data: settingsRows } = await supabase
     .from('settings')
@@ -279,6 +282,7 @@ async function backfillLeadStageHistory(
   // path the live daily sender uses, so imported and organic leads never
   // diverge in how their follow-up content is produced.
   const emailRows: Array<{
+    workspace_id: string
     lead_id: string
     type: string
     subject: string
@@ -293,6 +297,7 @@ async function backfillLeadStageHistory(
   for (const stageEmail of stageEmails) {
     if (stageEmail.type === 'initial_pitch') {
       emailRows.push({
+        workspace_id: workspaceId,
         lead_id:   leadId,
         type:      'initial_pitch',
         subject:   emailResult.subject,
@@ -325,6 +330,7 @@ async function backfillLeadStageHistory(
     )
 
     emailRows.push({
+      workspace_id: workspaceId,
       lead_id:   leadId,
       type:      stageEmail.type,
       subject:   generated.subject,
@@ -338,7 +344,7 @@ async function backfillLeadStageHistory(
 
   const { data: insertedEmails, error: emailInsertErr } = await supabase
     .from('emails')
-    .insert(emailRows)
+    .insert(emailRows.map((row) => ({ ...row, workspace_id: workspaceId })))
     .select('id, type')
 
   if (emailInsertErr) {
@@ -350,6 +356,7 @@ async function backfillLeadStageHistory(
     .map((e) => {
       const stageEmail = stageEmails.find((se) => se.type === e.type)!
       return {
+        workspace_id: workspaceId,
         lead_id:          leadId,
         follow_up_number: FOLLOW_UP_NUMBER[e.type],
         scheduled_at:     stageEmail.sentAt.toISOString(),
@@ -360,7 +367,7 @@ async function backfillLeadStageHistory(
     })
 
   if (followUpAuditRows.length > 0) {
-    await supabase.from('follow_ups').insert(followUpAuditRows)
+    await supabase.from('follow_ups').insert(followUpAuditRows.map((row) => ({ ...row, workspace_id: workspaceId })))
   }
 
   const nowIso = new Date().toISOString()
@@ -377,6 +384,7 @@ async function backfillLeadStageHistory(
   }
 
   await supabase.from('activity_log').insert({
+    workspace_id: workspaceId,
     event_type:  'lead_imported_at_stage',
     lead_id:     leadId,
     description: `Lead imported with "${STAGE_LABELS[stage]}" marked completed on ${completedDate.toISOString().slice(0, 10)}`,

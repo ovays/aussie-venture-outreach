@@ -13,6 +13,7 @@ const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const serviceClient = createClient<Database>(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
 const telemetry = new ObservabilityService(serviceClient as never)
+const WORKSPACE_ID = '00000000-0000-0000-0000-000000000001'
 
 const suffix = Date.now().toString(36)
 const password = `V2-observe-${suffix}!`
@@ -53,10 +54,11 @@ async function main() {
   const failing = new ObservabilityService({
     from: () => ({ insert: () => { throw new Error('database offline') } }),
   } as never, true, (message) => failedWrites.push(message))
-  assert.equal(await failing.startWorkflowRun({ workflowType: 'sender', source: 'test' }), null)
+  assert.equal(await failing.startWorkflowRun({ workspaceId: WORKSPACE_ID, workflowType: 'sender', source: 'test' }), null)
   assert.equal(failedWrites.length, 1, 'best-effort telemetry failures must be reported without breaking sender/core work')
 
   const leadInsert = await serviceClient.from('leads').insert({
+    workspace_id: WORKSPACE_ID,
     business_name: `Observability Synthetic ${suffix}`, category_name: 'Synthetic', city: 'Test City', status: 'new', source: 'manual',
   }).select('id').single()
   assert.ifError(leadInsert.error); leadId = leadInsert.data.id
@@ -65,6 +67,7 @@ async function main() {
 
   const integrationStarted = performance.now()
   parentRunId = await telemetry.startWorkflowRun({
+    workspaceId: WORKSPACE_ID,
     workflowType: 'daily_pipeline', source: 'test', triggerTaskId: 'daily-pipeline',
     triggerRunId: `trigger-${suffix}`, correlationId: `correlation-${suffix}`,
     idempotencyKey: `pipeline-${suffix}`, attempt: 2,
@@ -74,12 +77,13 @@ async function main() {
 
   const decision = { action: 'SEND_INITIAL', reasonCode: 'INITIAL_CONTENT_READY', leadId: syntheticLeadId, inputsUsed: ['initialEmail.state'] } as const
   childRunId = await telemetry.startWorkflowRun({
+    workspaceId: WORKSPACE_ID,
     workflowType: 'initial_outreach_lead', source: 'test', parentRunId,
     correlationId: `email-intent-${suffix}`, attempt: 1, decision,
   })
   assert(childRunId)
 
-  await withWorkflowTrace({ workflowRunId: childRunId }, async () => {
+  await withWorkflowTrace({ workspaceId: WORKSPACE_ID, workflowRunId: childRunId }, async () => {
     await telemetry.recordDecisionResults([decision], 'send_initial_decision', 10)
     const completedStep = await telemetry.startWorkflowStep({
       stepName: 'resend_send', stepType: 'provider_request', sequence: 20, attempt: 2,
@@ -103,6 +107,7 @@ async function main() {
     const aiStep = await telemetry.startWorkflowStep({ stepName: 'ai_generate', stepType: 'ai_request', sequence: 50, provider: 'openai', model: 'synthetic-model' })
     assert(aiStep)
     assert.ifError((await serviceClient.from('ai_request_logs').insert({
+      workspace_id: WORKSPACE_ID,
       workflow_run_id: childRunId, workflow_step_id: aiStep, provider_request_id: `ai-request-${suffix}`,
       created_at: new Date().toISOString(), started_at: new Date().toISOString(), finished_at: new Date().toISOString(),
       workflow: 'initial_email', provider: 'openai', model: 'synthetic-model', status: 'succeeded', duration_ms: 1,
@@ -167,7 +172,7 @@ async function main() {
   assert.ifError(adminRead.error); assert.equal(adminRead.data.length, 1)
   const memberRead = await member.from('workflow_runs').select('id').eq('id', parentRunId)
   assert.ifError(memberRead.error); assert.equal(memberRead.data.length, 0, 'member RLS must hide raw observability rows')
-  assert((await member.from('workflow_runs').insert({ workflow_type: 'denied', source: 'test' })).error, 'member mutation must be denied')
+  assert((await member.from('workflow_runs').insert({ workspace_id: WORKSPACE_ID, workflow_type: 'denied', source: 'test' })).error, 'member mutation must be denied')
   assert((await anon.from('workflow_runs').select('id')).error, 'anon read must be denied by table privileges')
   const detail = await admin.rpc('admin_workflow_run_detail', { p_run_id: childRunId })
   assert.ifError(detail.error); assert(detail.data)

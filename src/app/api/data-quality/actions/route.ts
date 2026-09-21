@@ -4,7 +4,8 @@ import { dataQualityActionSchema, friendlyDataQualityError } from '@/lib/data-qu
 import { POSITIVE_RESPONSE_STATUSES } from '@/lib/lead-status'
 import type { Database } from '@/types/database'
 import { deleteLeads } from '@/lib/delete-leads'
-import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
+import { requireWorkspaceContext } from '@/lib/workspace-context'
 
 const POSITIVE_STATUSES = new Set<string>(POSITIVE_RESPONSE_STATUSES)
 
@@ -15,11 +16,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const parsed = dataQualityActionSchema.safeParse(await request.json().catch(() => null))
   if (!parsed.success) return NextResponse.json({ error: 'Invalid Data Quality action request.' }, { status: 400 })
   const action = parsed.data
-  const supabase = createServiceClient()
+  const workspace = await requireWorkspaceContext(auth)
+  const supabase = createWorkspaceServiceClient(workspace.workspaceId)
 
   try {
     if (action.action === 'resolve' || action.action === 'reopen') {
       const args = {
+        p_workspace_id: workspace.workspaceId,
         p_issue_type: action.issue_type,
         p_normalized_email: action.normalized_email ?? undefined,
         p_lead_ids: action.lead_ids ?? undefined,
@@ -33,6 +36,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     if (action.action === 'remove_email') {
       const args = {
+        p_workspace_id: workspace.workspaceId,
         p_lead_ids: action.lead_ids,
       } satisfies Database['public']['Functions']['remove_data_quality_emails']['Args']
       const { data, error } = await supabase.rpc('remove_data_quality_emails', args)
@@ -64,11 +68,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       emails.data?.some((email) => !!email.replied_at) ? 'Has reply' : null,
       (deals.data?.length ?? 0) > 0 ? 'Has deal' : null,
       typeof lead.notes === 'string' && lead.notes.trim() ? 'Has notes' : null,
-      POSITIVE_STATUSES.has(lead.status) ? 'Active/positive lifecycle' : null,
+      lead.status && POSITIVE_STATUSES.has(lead.status) ? 'Active/positive lifecycle' : null,
     ].filter((reason): reason is string => !!reason)
 
     if (isOwner || (protectionReasons.length > 0 && !action.confirm_protected)) {
       await supabase.from('activity_log').insert({
+        workspace_id: workspace.workspaceId,
         event_type: 'data_quality_delete_blocked', lead_id: lead.id,
         description: 'Data Quality lead deletion was blocked by a safety check.',
         metadata: {
@@ -89,6 +94,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const { error: auditError } = await supabase.from('activity_log').insert({
+      workspace_id: workspace.workspaceId,
       event_type: 'data_quality_lead_deleted', lead_id: lead.id,
       description: 'Lead deleted from Data Quality by an admin.',
       metadata: {

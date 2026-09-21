@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 
 export interface WorkflowTraceContext {
+  workspaceId: string
   workflowRunId: string
   workflowStepId?: string
 }

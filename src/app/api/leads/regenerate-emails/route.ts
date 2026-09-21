@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 import { INITIAL_EMAIL_MODES } from '@/lib/settingsDefaults'
 import {
@@ -14,15 +14,19 @@ const schema = z.object({
 })
 
 export async function GET(): Promise<NextResponse> {
-  const supabase = await createClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase } = access
   const mode = await readInitialEmailMode(supabase)
   return NextResponse.json({ mode })
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
   const parsed = schema.safeParse(await request.json())
   if (!parsed.success) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
-  const supabase = await createClient()
+  const { supabase } = access
   const mode = parsed.data.mode
   const failed: Array<{ lead_id: string; business_name: string; category_id: string | null; category_name: string | null; code: string; reason: string }> = []
   const outcomes: LeadsBulkOutcome[] = []

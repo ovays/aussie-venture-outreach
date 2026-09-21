@@ -139,6 +139,7 @@ export interface RunShadowReportInput {
   environment?: NodeJS.ProcessEnv
   clientOverride?: SupabaseClient<Database>
   now?: Date
+  workspaceId?: string
 }
 
 export interface ShadowRuntimeReport {
@@ -171,8 +172,9 @@ export async function runShadowReport(input: RunShadowReportInput): Promise<Shad
     : await loadDecisionContexts(runtime.client, selectedLeadIds, { asOf: now.toISOString() })
   const contexts = new Map(loaded.contexts.map((context) => [context.leadId, context]))
   const correlationId = randomUUID()
-  const telemetry = safety.observabilityWriteEnabled ? observability() : null
+  const telemetry = safety.observabilityWriteEnabled && input.workspaceId ? observability(input.workspaceId) : null
   const workflowRunId = telemetry ? await telemetry.startWorkflowRun({
+    workspaceId: input.workspaceId!,
     workflowType: 'shadow_comparison', source: input.source, correlationId,
     metadata: { target: input.safety.target, selected_count: selectedLeadIds.length, cohort_status: input.selector.status ?? null, recent_days: input.selector.recentDays ?? null },
   }) : null

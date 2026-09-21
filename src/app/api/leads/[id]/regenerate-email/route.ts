@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
   const { id } = await params
-  const supabase = await createClient()
+  const { supabase } = access
 
   const { data: lead, error: leadErr } = await supabase
     .from('leads')

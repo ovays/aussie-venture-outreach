@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient, workspaceRow } from '@/lib/supabase/workspace-service'
 import {
   HOSTINGER_PROCESSING_STALE_MS,
   hostingerInboundReceiptKey,
@@ -35,14 +35,14 @@ function receiptFromRow(row: ReceiptRow, duplicate: boolean): HostingerInboundRe
 }
 
 export function createHostingerInboundReceiptStore(
-  supabase: ServiceClient = createServiceClient(),
+  supabase: ServiceClient,
 ): HostingerInboundReceiptStore {
   return {
     async register(locator) {
       const receiptKey = hostingerInboundReceiptKey(locator)
       const { data, error } = await supabase
         .from('inbound_receipts')
-        .insert({
+        .insert(workspaceRow(supabase, {
           provider: 'hostinger',
           receipt_key: receiptKey,
           mailbox_id: locator.mailboxId,
@@ -51,7 +51,7 @@ export function createHostingerInboundReceiptStore(
           provider_message_id: locator.providerMessageId ?? null,
           status: 'pending',
           payload: locator,
-        })
+        }))
         .select('id, receipt_key, status, attempts, processing_started_at, updated_at')
         .single()
 
@@ -103,13 +103,21 @@ export function createHostingerInboundReceiptStore(
 export async function processHostingerInboundReceipt(
   receiptId: string,
   runId: string,
-  dependencies?: {
+  workspaceIdOrDependencies: string | {
+    supabase?: ServiceClient
+    fetchMessage?: typeof import('@/lib/hostinger-mail').fetchHostingerInboundMessage
+    processReply?: typeof import('../../agents/tracker').processInboundReply
+  },
+  suppliedDependencies?: {
     supabase?: ServiceClient
     fetchMessage?: typeof import('@/lib/hostinger-mail').fetchHostingerInboundMessage
     processReply?: typeof import('../../agents/tracker').processInboundReply
   },
 ): Promise<{ status: InboundReceiptStatus; skipped?: boolean }> {
-  const supabase = dependencies?.supabase ?? createServiceClient()
+  const workspaceId = typeof workspaceIdOrDependencies === 'string' ? workspaceIdOrDependencies : undefined
+  const dependencies = typeof workspaceIdOrDependencies === 'string' ? suppliedDependencies : workspaceIdOrDependencies
+  const supabase = dependencies?.supabase ?? createWorkspaceServiceClient(workspaceId!)
+  if (!workspaceId) throw new Error('Inbound receipt processing requires workspace context')
   const { fetchHostingerInboundMessage } = dependencies?.fetchMessage
     ? { fetchHostingerInboundMessage: dependencies.fetchMessage }
     : await import('@/lib/hostinger-mail')
@@ -133,6 +141,7 @@ export async function processHostingerInboundReceipt(
   if (terminal.has(status)) return { status, skipped: true }
   const staleBefore = new Date(Date.now() - HOSTINGER_PROCESSING_STALE_MS).toISOString()
   const claimed = await supabase.rpc('claim_hostinger_inbound_receipt', {
+    p_workspace_id: workspaceId,
     p_receipt_id: receiptId,
     p_run_id: runId,
     p_stale_before: staleBefore,

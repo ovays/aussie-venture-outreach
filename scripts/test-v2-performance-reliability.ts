@@ -18,6 +18,7 @@ const db = createClient<Database>(url, required('SUPABASE_SERVICE_ROLE_KEY'), {
 })
 const runId = Date.now().toString(36)
 const prefix = `V2_PR_${runId}_`
+const WORKSPACE_ID = '00000000-0000-0000-0000-000000000001'
 
 function source(path: string): string {
   return readFileSync(path, 'utf8')
@@ -80,11 +81,12 @@ async function main(): Promise<void> {
     assert(migration.includes('WITH open_flags AS MATERIALIZED'), 'Data Quality begins from maintained open flags')
     assert(migration.includes('JOIN public.leads AS l ON l.id = candidate.lead_id'), 'Data Quality facts are restricted to flagged leads')
 
-    const categoryResult = await db.from('categories').insert({ name: `${prefix}Category`, status: 'active' }).select('id,name').single()
+    const categoryResult = await db.from('categories').insert({ workspace_id: WORKSPACE_ID, name: `${prefix}Category`, status: 'active' }).select('id,name').single()
     assert.ifError(categoryResult.error)
     const category = categoryResult.data!
 
     const leadRows = Array.from({ length: 37 }, (_, index) => ({
+      workspace_id: WORKSPACE_ID,
       business_name: `${prefix}Paged ${index.toString().padStart(2, '0')}`,
       category_id: category.id,
       category_name: category.name,
@@ -108,6 +110,7 @@ async function main(): Promise<void> {
     const contacted = await db.from('leads').select('id').like('business_name', `${prefix}Paged%`).eq('status', 'contacted')
     assert.ifError(contacted.error)
     const emails = (contacted.data ?? []).map((lead, index) => ({
+      workspace_id: WORKSPACE_ID,
       lead_id: lead.id, type: 'initial_pitch' as const, subject: 'Fixture', body_text: 'Fixture', body_html: '<p>Fixture</p>',
       status: 'sent', sent_at: new Date(Date.UTC(2026, 7, 1, 0, 0, index)).toISOString(),
     }))
@@ -121,6 +124,7 @@ async function main(): Promise<void> {
     assert(Array.isArray(lifecycle.data) && lifecycle.data.length <= 5, 'Lifecycle returns O(page size) JSON rows')
 
     const baseLeadResult = await db.from('leads').insert({
+      workspace_id: WORKSPACE_ID,
       business_name: `${prefix}Duplicate Place`, category_id: category.id, category_name: category.name,
       city: 'Sydney', phone: '0400111222', email: `${prefix.toLowerCase()}owner@example.com`,
       website: `https://${prefix.toLowerCase()}existing.example`, status: 'new', source: 'manual',
@@ -129,6 +133,7 @@ async function main(): Promise<void> {
     assert.ifError(baseLeadResult.error)
     const baseLead = baseLeadResult.data!
     assert.ifError((await db.from('leads').insert({
+      workspace_id: WORKSPACE_ID,
       business_name: `${prefix}Public COM`, category_id: category.id, category_name: category.name,
       city: 'Darwin', email: `${prefix.toLowerCase()}person@gmail.com`, status: 'new', source: 'manual',
     })).error)
@@ -139,7 +144,7 @@ async function main(): Promise<void> {
       { candidate_index: 2, business_name: `${prefix}Public AU`, city: 'Sydney', phone: null, normalized_email: `${prefix.toLowerCase()}person@gmail.com.au`, email_root_domain: 'gmail.com.au', is_public_email_domain: true, website_domain: null },
       { candidate_index: 3, business_name: `${prefix}New`, city: 'Brisbane', phone: '0400999888', normalized_email: `${prefix.toLowerCase()}new@new-domain.example`, email_root_domain: 'new-domain.example', is_public_email_domain: false, website_domain: 'new-domain.example' },
     ]
-    const lookup = await db.rpc('lookup_finder_candidates', { p_candidates: candidates })
+    const lookup = await db.rpc('lookup_finder_candidates', { p_workspace_id: WORKSPACE_ID, p_candidates: candidates })
     assert.ifError(lookup.error)
     const matches = lookup.data ?? []
     assert(matches.some((match) => match.candidate_index === 0 && match.matched_id), 'duplicate business/place is detected')
@@ -154,8 +159,8 @@ async function main(): Promise<void> {
       website: `https://${prefix.toLowerCase()}atomic.example`, status: 'new', source: 'finder',
     }
     const [atomicA, atomicB] = await Promise.all([
-      db.rpc('insert_finder_lead_if_new', { p_lead: insertPayload }),
-      db.rpc('insert_finder_lead_if_new', { p_lead: insertPayload }),
+      db.rpc('insert_finder_lead_if_new', { p_workspace_id: WORKSPACE_ID, p_lead: insertPayload }),
+      db.rpc('insert_finder_lead_if_new', { p_workspace_id: WORKSPACE_ID, p_lead: insertPayload }),
     ])
     assert.ifError(atomicA.error)
     assert.ifError(atomicB.error)
@@ -163,6 +168,7 @@ async function main(): Promise<void> {
     assert.equal(atomicOutcomes.filter((outcome) => outcome.inserted === true).length, 1, 'duplicate Finder workers insert exactly one row')
 
     const intentLeadResult = await db.from('leads').insert({
+      workspace_id: WORKSPACE_ID,
       business_name: `${prefix}Intent`, category_id: category.id, category_name: category.name,
       city: 'Sydney', email: `${prefix.toLowerCase()}intent@intent.example`, status: 'contacted', source: 'manual',
     }).select('id').single()
@@ -198,6 +204,7 @@ async function main(): Promise<void> {
     assert.equal(recovered.intent.status, 'sent', 'confirmed intent blocks later duplicate delivery')
 
     const invalid = await db.from('leads').insert({
+      workspace_id: WORKSPACE_ID,
       business_name: `${prefix}Invalid`, category_id: category.id, category_name: category.name,
       city: 'Sydney', email: 'not-an-email', status: 'new', source: 'manual',
     }).select('id').single()

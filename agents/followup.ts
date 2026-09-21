@@ -1,4 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
+import { workspaceRow } from '@/lib/supabase/workspace-service'
 import { sendEmail } from '@/lib/resend'
 import { getAnalyticsDayRange } from '@/lib/analytics'
 import { computeFollowUpEligibility, isFuEmailSent, type FollowUpType } from '@/lib/followup-eligibility'
@@ -262,22 +264,22 @@ export async function sendFollowUp(
   }
 
   if (emailRow) {
-    await supabase.from('follow_ups').insert({
+    await supabase.from('follow_ups').insert(workspaceRow(supabase, {
       lead_id: candidate.lead.id,
       follow_up_number: followUpNumber,
       scheduled_at: new Date().toISOString(),
       sent_at: result ? new Date().toISOString() : null,
       email_id: emailRow.id,
       status: result ? 'sent' : 'cancelled',
-    })
+    }))
   }
 
-  await supabase.from('activity_log').insert({
+  await supabase.from('activity_log').insert(workspaceRow(supabase, {
     event_type: `${type}_sent`,
     lead_id: candidate.lead.id,
     description: `Follow-up ${followUpNumber} sent to ${candidate.lead.business_name}`,
     metadata: { days_since: candidate.daysSince },
-  })
+  }))
 
   logger.info('followup', `Follow-up ${followUpNumber} sent: ${candidate.lead.business_name}`, {
     daysSince: candidate.daysSince,
@@ -287,9 +289,10 @@ export async function sendFollowUp(
 }
 
 export async function runFollowUpAgent(
+  workspaceId: string,
   sendEmailFn: FollowUpEmailSender = sendEmail
 ): Promise<void> {
-  const supabase = createServiceClient()
+  const supabase = createWorkspaceServiceClient(workspaceId)
 
   try {
     const { data: systemSetting } = await supabase.from('settings').select('value').eq('key', 'system_active').single()
@@ -690,6 +693,7 @@ export async function runFollowUpAgent(
     })
 
     await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
       event_type: 'followup_complete',
       description: `Follow-up agent done. FU1: ${sent.follow_up_1}, FU2: ${sent.follow_up_2}, FU3: ${sent.follow_up_3}, Dead: ${markedDead}`,
       metadata: {
@@ -716,6 +720,7 @@ export async function runFollowUpAgent(
     const message = error instanceof Error ? error.message : String(error)
     logger.error('followup', 'Fatal error', { error: message, stack: error instanceof Error ? error.stack : null })
     await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
       event_type: 'agent_error',
       description: `Agent failed: ${message}`,
       metadata: {

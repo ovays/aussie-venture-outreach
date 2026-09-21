@@ -34,6 +34,7 @@ export async function orchestrateLead(
 ): Promise<OrchestrationResult> {
   const startedAt = dependencies.now?.() ?? Date.now()
   const workflowRunId = await dependencies.telemetry.startWorkflowRun({
+    workspaceId: request.workspaceId,
     workflowType: request.workflowType,
     source: request.source,
     triggerRunId: request.triggerRunId,
@@ -84,6 +85,7 @@ export async function orchestrateLead(
       finalAction = decision.action
       finalReasonCode = decision.reasonCode
       const decisionStepId = await dependencies.telemetry.startWorkflowStep({
+        workspaceId: request.workspaceId,
         workflowRunId,
         stepName: `orchestrator_decision_${iteration}`,
         stepType: 'decision',
@@ -122,6 +124,7 @@ export async function orchestrateLead(
       if (!executor) return finish('UNSUPPORTED_ACTION')
 
       const stepId = await dependencies.telemetry.startWorkflowStep({
+        workspaceId: request.workspaceId,
         workflowRunId,
         stepName: `orchestrator_${decision.action.toLowerCase()}`,
         stepType: 'executor',

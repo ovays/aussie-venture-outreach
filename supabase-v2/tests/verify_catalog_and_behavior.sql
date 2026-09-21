@@ -201,7 +201,7 @@ UPDATE public.leads SET status='researched' WHERE id='40000000-0000-0000-0000-00
 DELETE FROM public.leads WHERE id='40000000-0000-0000-0000-000000000004';
 SELECT pg_temp.assert_true(EXISTS(SELECT 1 FROM public.leads WHERE id='40000000-0000-0000-0000-000000000004'),'member delete is blocked by RLS');
 SELECT pg_temp.assert_true(NOT has_table_privilege('authenticated','public.distributed_locks','INSERT'),'member cannot mutate infrastructure');
-SELECT pg_temp.assert_true(NOT has_function_privilege('authenticated','public.claim_recipient_outreach(uuid,text)','EXECUTE'),'member cannot call service claim RPC');
+SELECT pg_temp.assert_true(NOT has_function_privilege('authenticated','public.claim_recipient_outreach(uuid,uuid,text)','EXECUTE'),'member cannot call service claim RPC');
 COMMIT;
 
 -- Inactive member write is denied.
@@ -227,6 +227,7 @@ INSERT INTO public.category_suburb_priorities(workspace_id,category_id,city_subu
 VALUES ('00000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',7);
 SELECT pg_temp.assert_true(public.get_data_quality_summary() IS NOT NULL,'admin guarded report works');
 SELECT public.set_data_quality_flag_status(
+  '00000000-0000-0000-0000-000000000001',
   'invalid_email',NULL,ARRAY['40000000-0000-0000-0000-000000000003'::uuid],
   'resolved','synthetic verification'
 );
@@ -240,11 +241,11 @@ BEGIN;
 SET LOCAL ROLE service_role;
 SELECT set_config('request.jwt.claim.role','service_role',true);
 SELECT set_config('request.jwt.claim.sub','',true);
-SELECT pg_temp.assert_true(public.claim_recipient_outreach('40000000-0000-0000-0000-000000000001','initial')->>'allowed'='true','service recipient claim works');
+SELECT pg_temp.assert_true(public.claim_recipient_outreach('00000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','initial')->>'allowed'='true','service recipient claim works');
 INSERT INTO public.inbound_receipts(id,workspace_id,provider,receipt_key,status,payload)
 VALUES ('50000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','hostinger','synthetic-receipt','pending','{}');
 SELECT pg_temp.assert_true(
-  EXISTS (SELECT 1 FROM public.claim_hostinger_inbound_receipt('50000000-0000-0000-0000-000000000001','synthetic-run',now()-interval '1 minute')),
+  EXISTS (SELECT 1 FROM public.claim_hostinger_inbound_receipt('00000000-0000-0000-0000-000000000001','50000000-0000-0000-0000-000000000001','synthetic-run',now()-interval '1 minute')),
   'service inbound receipt claim works');
 COMMIT;
 

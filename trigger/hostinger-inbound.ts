@@ -22,15 +22,17 @@ export const hostingerInboundTask = task({
     assertTriggerJobsEnabled('Hostinger inbound task')
     const validated = validateHostingerInboundTaskPayload(payload)
     return withObservedWorkflow({
+      workspaceId: validated.workspaceId,
       workflowType: 'inbound_reply_processing', source: 'trigger.event',
       triggerTaskId: 'hostinger-inbound-message', triggerRunId: ctx.run.id,
       correlationId: validated.receiptId, idempotencyKey: validated.receiptId,
       attempt: ctx.attempt.number,
       metadata: { inbound_receipt_id: validated.receiptId, provider: 'hostinger' },
     }, () => withObservedStep({
+      workspaceId: validated.workspaceId,
       stepName: 'process_inbound_receipt', stepType: 'provider_event', sequence: 10,
       attempt: ctx.attempt.number, provider: 'hostinger',
       inputSummary: { inbound_receipt_id: validated.receiptId },
-    }, () => processHostingerInboundReceipt(validated.receiptId, ctx.run.id), (result) => ({ outcome: result })))
+    }, () => processHostingerInboundReceipt(validated.receiptId, ctx.run.id, validated.workspaceId), (result) => ({ outcome: result })))
   },
 })

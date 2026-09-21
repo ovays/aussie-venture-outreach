@@ -4,6 +4,7 @@
  * Keep this file only until production compatibility dependencies are audited.
  */
 import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { extractWebsiteData, extractEmailWithHaiku } from '@/ai/workflows'
 
 const EMAIL_REGEX = /[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/gi
@@ -118,8 +119,8 @@ async function enrichLead(lead: {
   return { email: null, emailMethod: 'not_found', instagramHandle, facebookUrl, description, services }
 }
 
-export async function runEnricherAgent(): Promise<number> {
-  const supabase = createServiceClient()
+export async function runEnricherAgent(workspaceId: string): Promise<number> {
+  const supabase = createWorkspaceServiceClient(workspaceId)
 
   const { data: systemSetting } = await supabase
     .from('settings')
@@ -197,6 +198,7 @@ export async function runEnricherAgent(): Promise<number> {
           console.log(`✅ Email lead: "${lead.business_name}" — ${found.email} (${found.emailMethod})`)
 
           await supabase.from('activity_log').insert({
+            workspace_id: workspaceId,
             event_type: 'lead_enriched',
             lead_id: lead.id,
             description: `Email found: ${lead.business_name} — ${found.email} via ${found.emailMethod}`,
@@ -224,6 +226,7 @@ export async function runEnricherAgent(): Promise<number> {
   console.log(`[enricher] Done — Email leads: ${emailLeadIds.length}/${EMAIL_TARGET}`)
 
   await supabase.from('activity_log').insert({
+    workspace_id: workspaceId,
     event_type: 'enricher_complete',
     description: `Enricher complete — ${emailLeadIds.length} email leads`,
     metadata: {

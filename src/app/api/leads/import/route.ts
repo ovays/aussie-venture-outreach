@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createServiceClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { createLead, type CreateLeadResult } from '@/lib/create-lead'
 import { STAGE_VALUES } from '@/lib/stage-import'
@@ -29,11 +29,13 @@ const importSchema = z.object({
 type FailedRow = { row_num: number; business_name: string; email: string; reason: string }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
   const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
   const { allowed } = checkRateLimit(`leads-import:${ip}`, 5)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
-  const supabase = createServiceClient()
+  const { supabase, workspace } = access
   const raw = await request.json()
 
   const parsed = importSchema.safeParse(raw)
@@ -73,7 +75,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     let result: CreateLeadResult
     try {
-      result = await createLead(supabase, {
+      result = await createLead(supabase, workspace.workspaceId, {
         business_name: row.business_name,
         email: row.email,
         website: row.website || undefined,

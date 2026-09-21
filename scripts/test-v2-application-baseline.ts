@@ -20,6 +20,7 @@ const runId = Date.now().toString(36)
 const password = `V2-only-${runId}!`
 const adminEmail = `v2-admin-${runId}@example.test`
 const memberEmail = `v2-member-${runId}@example.test`
+const WORKSPACE_ID = '00000000-0000-0000-0000-000000000001'
 
 async function createDisposableUser(email: string, metadata: Record<string, unknown>) {
   const { data, error } = await service.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: metadata })
@@ -35,6 +36,10 @@ async function main() {
 const adminUser = await createDisposableUser(adminEmail, { full_name: 'V2 Admin', role: 'admin' })
 const memberUser = await createDisposableUser(memberEmail, { full_name: 'V2 Member', role: 'admin' })
 assert.ifError((await service.from('profiles').update({ role: 'admin' }).eq('id', adminUser.id)).error)
+assert.ifError((await service.from('workspace_members').insert([
+  { workspace_id: WORKSPACE_ID, user_id: adminUser.id, role: 'owner', status: 'active' },
+  { workspace_id: WORKSPACE_ID, user_id: memberUser.id, role: 'member', status: 'active' },
+])).error)
 
 async function signedIn(email: string) {
   const client = createClient<Database>(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } })
@@ -46,17 +51,18 @@ async function signedIn(email: string) {
 const admin = await signedIn(adminEmail)
 const member = await signedIn(memberEmail)
 const categoryName = `Synthetic V2 ${runId}`
-const { data: category, error: categoryError } = await admin.from('categories').insert({ name: categoryName, status: 'active' }).select('id,name').single()
+const { data: category, error: categoryError } = await admin.from('categories').insert({ workspace_id: WORKSPACE_ID, name: categoryName, status: 'active' }).select('id,name').single()
 assert.ifError(categoryError)
 assert(category)
-assert((await member.from('categories').insert({ name: `Denied ${runId}` })).error, 'member config mutation must be denied')
+assert((await member.from('categories').insert({ workspace_id: WORKSPACE_ID, name: `Denied ${runId}` })).error, 'member config mutation must be denied')
 
-const { data: suburb, error: suburbError } = await admin.from('city_suburbs').insert({ city: 'Test City', suburb: `Test Suburb ${runId}`, active: true }).select('id,priority').single()
+const { data: suburb, error: suburbError } = await admin.from('city_suburbs').insert({ workspace_id: WORKSPACE_ID, city: 'Test City', suburb: `Test Suburb ${runId}`, active: true }).select('id,priority').single()
 assert.ifError(suburbError)
 assert.equal(suburb?.priority, 1)
-assert((await admin.from('city_suburbs').insert({ city: 'Test City', suburb: `Bad Priority ${runId}`, priority: 11 })).error)
+assert((await admin.from('city_suburbs').insert({ workspace_id: WORKSPACE_ID, city: 'Test City', suburb: `Bad Priority ${runId}`, priority: 11 })).error)
 
 const { data: lead, error: leadError } = await member.from('leads').insert({
+  workspace_id: WORKSPACE_ID,
   business_name: '  Synthetic V2 Lead  ', category_id: category.id, category_name: category.name,
   city: 'Test City', suburb: 'Test Suburb', email: `  lead-${runId}@example.com  `, status: 'new', source: 'manual',
 }).select('id,business_name,email,normalized_email,status,category_id').single()
@@ -77,8 +83,8 @@ for (const nextStatus of ['researched', 'email_ready', 'interested'] as const) {
   assert.equal(updatedLead.status, nextStatus)
 }
 assert.ifError((await member.from('leads').update({ business_name: 'Synthetic V2 Lead Edited' }).eq('id', lead.id)).error)
-assert((await member.from('leads').insert({ business_name: 'Bad Closed Won', category_name: category.name, city: 'Test City', status: 'closed_won' })).error)
-assert((await member.from('leads').insert({ business_name: 'Bad DM Queue', category_name: category.name, city: 'Test City', status: 'dm_queued' })).error)
+assert((await member.from('leads').insert({ workspace_id: WORKSPACE_ID, business_name: 'Bad Closed Won', category_name: category.name, city: 'Test City', status: 'closed_won' })).error)
+assert((await member.from('leads').insert({ workspace_id: WORKSPACE_ID, business_name: 'Bad DM Queue', category_name: category.name, city: 'Test City', status: 'dm_queued' })).error)
 assert.ifError((await member.from('leads').delete().eq('id', lead.id)).error)
 const { count: remainingAfterDeniedDelete, error: deniedDeleteCheckError } = await member
   .from('leads').select('id', { count: 'exact', head: true }).eq('id', lead.id)
@@ -87,6 +93,7 @@ assert.equal(remainingAfterDeniedDelete, 1, 'RLS must deny member lead deletion 
 assert((await member.from('profiles').update({ role: 'admin' }).eq('id', memberUser.id)).error, 'member role elevation must be denied')
 
 const { data: invalidLead, error: invalidLeadError } = await member.from('leads').insert({
+  workspace_id: WORKSPACE_ID,
   business_name: 'Synthetic Invalid Email', category_id: category.id, category_name: category.name,
   city: 'Test City', email: `invalid-${runId}`, status: 'new', source: 'manual',
 }).select('id').single()
@@ -96,6 +103,7 @@ const { data: flag, error: flagError } = await admin.from('lead_data_quality_fla
 assert.ifError(flagError)
 assert(flag)
 const statusArgs = {
+  p_workspace_id: WORKSPACE_ID,
   p_issue_type: flag.issue_type,
   p_lead_ids: [invalidLead.id],
   p_status: 'resolved',
@@ -103,7 +111,7 @@ const statusArgs = {
 } satisfies Database['public']['Functions']['set_data_quality_flag_status']['Args']
 assert.ifError((await admin.rpc('set_data_quality_flag_status', statusArgs)).error)
 assert.ifError((await admin.rpc('set_data_quality_flag_status', { ...statusArgs, p_status: 'open', p_resolution_reason: undefined })).error)
-assert.ifError((await admin.rpc('remove_data_quality_emails', { p_lead_ids: [invalidLead.id] })).error)
+assert.ifError((await admin.rpc('remove_data_quality_emails', { p_workspace_id: WORKSPACE_ID, p_lead_ids: [invalidLead.id] })).error)
 
 const { data: counts, error: countsError } = await service.rpc('get_lead_status_counts')
 assert.ifError(countsError)

@@ -149,8 +149,8 @@ function testStaticBoundariesAndCompatibility() {
   const daily = read('trigger/daily-pipeline.ts')
   assert.ok(daily.includes('orchestratorFlags.enabled && !orchestratorFlags.shadow'))
   assert.ok(!daily.includes('trigger.daily_pipeline.shadow'))
-  for (const legacyStage of ['runFinderAgent(workspaceId)', 'runResearcherAgent(initialEmailMode)', 'runWriterAgent(initialEmailMode)', 'runSenderAgent()', 'runFollowUpAgent()', 'runReactivationAgent()']) {
-    assert.ok(daily.includes(legacyStage), `V1 legacy path remains independent: ${legacyStage}`)
+  for (const legacyStage of ['runFinderAgent(workspaceId)', 'runResearcherAgent(workspaceId, initialEmailMode)', 'runWriterAgent(workspaceId, initialEmailMode)', 'runSenderAgent(workspaceId)', 'runFollowUpAgent(workspaceId)', 'runReactivationAgent(workspaceId)']) {
+    assert.ok(daily.includes(legacyStage), `legacy stage remains present and workspace-scoped: ${legacyStage}`)
   }
   const dedicated = read('trigger/v2-shadow-comparison.ts')
   assert.ok(dedicated.includes("id: 'v2-shadow-comparison'") && !dedicated.includes('schedules.task'))
@@ -173,6 +173,7 @@ function testStaticBoundariesAndCompatibility() {
     '00000000000007_workspace_rls_policies.sql',
     '00000000000008_workspace_indexes_and_constraints.sql',
     '00000000000009_workspace_scope_functions_and_keys.sql',
+    '00000000000010_remove_workspace_default.sql',
   ])
 }
 

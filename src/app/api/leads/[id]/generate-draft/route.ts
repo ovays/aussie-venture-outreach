@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
   const { id } = await params
-  const supabase = await createClient()
+  const { supabase } = access
 
   const { data: lead, error: leadErr } = await supabase
     .from('leads')
@@ -27,7 +29,7 @@ export async function POST(
     return NextResponse.json({ error: 'Lead has no email address' }, { status: 400 })
   }
 
-  if (!['researched', 'email_ready'].includes(lead.status)) {
+  if (!lead.status || !['researched', 'email_ready'].includes(lead.status)) {
     return NextResponse.json({ error: `Lead is already ${lead.status}` }, { status: 400 })
   }
 

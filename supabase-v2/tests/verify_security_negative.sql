@@ -51,7 +51,7 @@ SELECT pg_temp.expect_denied(
   $sql$INSERT INTO public.workflow_runs(workflow_type,source) VALUES ('denied','security_test')$sql$);
 DO $$
 BEGIN
-  IF has_function_privilege('authenticated','public.claim_recipient_outreach(uuid,text)','EXECUTE') THEN
+  IF has_function_privilege('authenticated','public.claim_recipient_outreach(uuid,uuid,text)','EXECUTE') THEN
     RAISE EXCEPTION 'authenticated unexpectedly has EXECUTE on service-only claim RPC';
   END IF;
 END

@@ -1,4 +1,4 @@
-import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { sendEmail } from '@/lib/resend'
 import { logger } from '@/lib/logger'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
@@ -33,8 +33,8 @@ interface ContactedLead {
   emails: LeadEmail[]
 }
 
-export async function runReactivationAgent(): Promise<void> {
-  const supabase = createServiceClient()
+export async function runReactivationAgent(workspaceId: string): Promise<void> {
+  const supabase = createWorkspaceServiceClient(workspaceId)
 
   try {
     const { data: systemSetting } = await supabase
@@ -329,6 +329,7 @@ export async function runReactivationAgent(): Promise<void> {
       }
 
       await supabase.from('activity_log').insert({
+        workspace_id: workspaceId,
         event_type: 'reactivation_sent',
         lead_id: lead.id,
         description: `Reactivation email ${result ? 'sent' : 'failed'}: ${lead.business_name} (${daysSinceInitial}d since initial outreach)`,
@@ -350,6 +351,7 @@ export async function runReactivationAgent(): Promise<void> {
     logger.info('reactivation', 'Reactivation agent complete', { eligible, reactivationSent, markedDead, deferredForLimit, suppressedDeliveryFailure })
 
     await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
       event_type: 'reactivation_complete',
       description: `Reactivation agent done. Eligible: ${eligible}, Sent: ${reactivationSent}, Dead: ${markedDead}, Deferred (daily limit): ${deferredForLimit}`,
       metadata: {
@@ -365,6 +367,7 @@ export async function runReactivationAgent(): Promise<void> {
     const message = error instanceof Error ? error.message : String(error)
     logger.error('reactivation', 'Fatal error', { error: message, stack: error instanceof Error ? error.stack : null })
     await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
       event_type: 'agent_error',
       description: `Agent failed: ${message}`,
       metadata: {

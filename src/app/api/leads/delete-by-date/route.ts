@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
-import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin, requireApiWorkspaceUser } from '@/lib/api-workspace'
 
 // GET /api/leads/delete-by-date?date=YYYY-MM-DD — returns count for that date
 export async function GET(request: NextRequest) {
@@ -9,7 +8,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'date param required (YYYY-MM-DD)' }, { status: 400 })
   }
 
-  const supabase = createServiceClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase } = access
   const dayStart = `${date}T00:00:00.000Z`
   const dayEnd   = `${date}T23:59:59.999Z`
 
@@ -26,8 +27,8 @@ export async function GET(request: NextRequest) {
 
 // DELETE /api/leads/delete-by-date  body: { date: "YYYY-MM-DD" }
 export async function DELETE(request: NextRequest) {
-  const auth = await requireApiAdmin()
-  if (isAuthErrorResponse(auth)) return auth
+  const access = await requireApiWorkspaceAdmin()
+  if (isApiWorkspaceError(access)) return access
 
   const body = await request.json() as { date?: string }
   const { date } = body
@@ -36,7 +37,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
   }
 
-  const supabase = createServiceClient()
+  const { supabase } = access
   const dayStart = `${date}T00:00:00.000Z`
   const dayEnd   = `${date}T23:59:59.999Z`
 

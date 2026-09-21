@@ -5,6 +5,7 @@ import { renderInitialTemplate } from '@/services/initial-content/template-rende
 import type { PersonalizedInitialWriter } from '@/ai/writer'
 import { isInitialEmailMode, type InitialEmailMode } from '@/lib/settingsDefaults'
 import { claimRecipientOutreach, releaseRecipientOutreachClaim, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
+import { workspaceRow } from '@/lib/supabase/workspace-service'
 
 export type InitialEmailLead = {
   id: string; business_name: string; category_id: string | null; category_name: string | null
@@ -105,7 +106,7 @@ export async function routeInitialEmail(
       if (error || !data) return failure(lead, mode, 'database_save_conflict', error?.message ?? 'The eligible email changed before it could be replaced.')
       return { ...generated, outcome: 'regenerated', emailId: data.id }
     }
-    const { data, error } = await supabase.from('emails').insert({ lead_id: lead.id, type: 'initial_pitch', status: 'pending_send', ...values }).select('id').single()
+    const { data, error } = await supabase.from('emails').insert(workspaceRow(supabase, { lead_id: lead.id, type: 'initial_pitch', status: 'pending_send', ...values })).select('id').single()
     if (error) {
       if (error.code === '23505') return { ok: true, mode, outcome: 'existing' }
       await releaseRecipientOutreachClaim(supabase, lead.id, ownership.normalizedEmail, ownership.claimToken)

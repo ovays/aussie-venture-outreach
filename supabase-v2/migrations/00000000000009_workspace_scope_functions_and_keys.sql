@@ -377,9 +377,250 @@ $$;
 
 ALTER FUNCTION public.insert_finder_lead_if_new(uuid, jsonb) OWNER TO reachagent_function_owner;
 
+DROP FUNCTION public.lookup_finder_candidates(jsonb);
+CREATE FUNCTION public.lookup_finder_candidates(p_workspace_id uuid, p_candidates jsonb)
+RETURNS TABLE (
+  candidate_index integer, matched_id uuid, matched_business_name text,
+  matched_email text, matched_status text, matched_suppression_reason text,
+  match_type text
+)
+LANGUAGE sql STABLE SET search_path TO 'pg_catalog'
+AS $$
+  WITH candidates AS (
+    SELECT candidate_index, NULLIF(pg_catalog.btrim(business_name), '') AS business_name,
+      NULLIF(pg_catalog.btrim(city), '') AS city, NULLIF(pg_catalog.btrim(phone), '') AS phone,
+      NULLIF(pg_catalog.lower(pg_catalog.btrim(email)), '') AS normalized_email,
+      NULLIF(pg_catalog.btrim(email_root_domain), '') AS email_root_domain,
+      COALESCE(is_public_email_domain, false) AS is_public_email_domain,
+      NULLIF(pg_catalog.lower(pg_catalog.btrim(website_domain)), '') AS website_domain
+    FROM pg_catalog.jsonb_to_recordset(COALESCE(p_candidates, '[]'::jsonb)) AS candidate(
+      candidate_index integer, business_name text, city text, phone text, email text,
+      email_root_domain text, is_public_email_domain boolean, website_domain text
+    ) LIMIT 500
+  )
+  SELECT candidates.candidate_index, matched.id, matched.business_name, matched.email,
+    matched.status, matched.outreach_suppression_reason, matched.match_type
+  FROM candidates
+  LEFT JOIN LATERAL (
+    SELECT leads.id, leads.business_name, leads.email, leads.status, leads.outreach_suppression_reason,
+      CASE WHEN leads.business_name=candidates.business_name AND leads.city=candidates.city THEN 'business_city'
+        WHEN candidates.phone IS NOT NULL AND leads.phone=candidates.phone THEN 'phone'
+        WHEN candidates.normalized_email IS NOT NULL AND leads.normalized_email=candidates.normalized_email THEN 'normalized_email'
+        WHEN candidates.website_domain IS NOT NULL AND public.finder_website_domain(leads.website)=candidates.website_domain THEN 'website_domain'
+        ELSE 'email_domain' END AS match_type
+    FROM public.leads AS leads
+    WHERE leads.workspace_id=p_workspace_id AND (
+      (leads.business_name=candidates.business_name AND leads.city=candidates.city)
+      OR (candidates.phone IS NOT NULL AND leads.phone=candidates.phone)
+      OR (candidates.normalized_email IS NOT NULL AND leads.normalized_email=candidates.normalized_email)
+      OR (candidates.website_domain IS NOT NULL AND leads.website IS NOT NULL AND public.finder_website_domain(leads.website)=candidates.website_domain)
+      OR (NOT candidates.is_public_email_domain AND candidates.email_root_domain IS NOT NULL AND leads.normalized_email IS NOT NULL AND public.finder_email_root_domain(leads.normalized_email)=candidates.email_root_domain)
+    ) ORDER BY leads.created_at,leads.id LIMIT 1
+  ) AS matched ON TRUE
+  ORDER BY candidates.candidate_index;
+$$;
+
+DROP FUNCTION public.claim_recipient_outreach(uuid, text);
+CREATE FUNCTION public.claim_recipient_outreach(p_workspace_id uuid, p_lead_id uuid, p_phase text) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'pg_catalog','public' AS $$
+BEGIN
+  IF COALESCE(NULLIF(pg_catalog.current_setting('request.jwt.claim.role', true), ''), (NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'))::text <> 'service_role' THEN RAISE EXCEPTION 'service_role required' USING ERRCODE='42501'; END IF;
+  IF p_workspace_id IS NULL OR p_lead_id IS NULL OR p_phase NOT IN ('initial','follow_up','reactivation') THEN RAISE EXCEPTION 'invalid outreach claim parameters'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.leads WHERE workspace_id=p_workspace_id AND id=p_lead_id) THEN RAISE EXCEPTION 'lead does not belong to workspace' USING ERRCODE='42501'; END IF;
+  RETURN reachagent_private.claim_recipient_outreach(p_lead_id,p_phase);
+END $$;
+ALTER FUNCTION public.claim_recipient_outreach(uuid, uuid, text) OWNER TO reachagent_function_owner;
+
+DROP FUNCTION public.release_recipient_outreach_claim(uuid, text, uuid);
+CREATE FUNCTION public.release_recipient_outreach_claim(p_workspace_id uuid, p_lead_id uuid, p_normalized_email text, p_claim_token uuid) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'pg_catalog','public' AS $$
+BEGIN
+  IF COALESCE(NULLIF(pg_catalog.current_setting('request.jwt.claim.role', true), ''), (NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'))::text <> 'service_role' THEN RAISE EXCEPTION 'service_role required' USING ERRCODE='42501'; END IF;
+  IF p_workspace_id IS NULL OR p_lead_id IS NULL OR p_claim_token IS NULL OR NULLIF(pg_catalog.btrim(p_normalized_email),'') IS NULL THEN RAISE EXCEPTION 'invalid release parameters'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.leads WHERE workspace_id=p_workspace_id AND id=p_lead_id) THEN RAISE EXCEPTION 'lead does not belong to workspace' USING ERRCODE='42501'; END IF;
+  RETURN reachagent_private.release_recipient_outreach_claim(p_lead_id,p_normalized_email,p_claim_token);
+END $$;
+ALTER FUNCTION public.release_recipient_outreach_claim(uuid, uuid, text, uuid) OWNER TO reachagent_function_owner;
+
+DROP FUNCTION public.refresh_lead_data_quality(uuid);
+CREATE FUNCTION public.refresh_lead_data_quality(p_workspace_id uuid, p_lead_id uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'pg_catalog','public' AS $$
+BEGIN
+  IF COALESCE(NULLIF(pg_catalog.current_setting('request.jwt.claim.role', true), ''), (NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'))::text <> 'service_role' THEN RAISE EXCEPTION 'service_role required' USING ERRCODE='42501'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.leads WHERE workspace_id=p_workspace_id AND id=p_lead_id) THEN RAISE EXCEPTION 'lead does not belong to workspace' USING ERRCODE='42501'; END IF;
+  PERFORM reachagent_private.refresh_lead_data_quality(p_lead_id);
+END $$;
+ALTER FUNCTION public.refresh_lead_data_quality(uuid, uuid) OWNER TO reachagent_function_owner;
+
+DROP FUNCTION public.suppress_lead_delivery_email(uuid, text);
+CREATE FUNCTION public.suppress_lead_delivery_email(p_workspace_id uuid, p_lead_id uuid, p_email text) RETURNS void
+LANGUAGE sql SET search_path TO '' AS $$
+  UPDATE public.leads SET delivery_suppressed_emails = CASE
+    WHEN pg_catalog.lower(pg_catalog.btrim(p_email))=ANY(delivery_suppressed_emails) THEN delivery_suppressed_emails
+    ELSE pg_catalog.array_append(delivery_suppressed_emails,pg_catalog.lower(pg_catalog.btrim(p_email))) END
+  WHERE workspace_id=p_workspace_id AND id=p_lead_id AND pg_catalog.btrim(p_email)<>'';
+$$;
+
+--
+-- Remaining SECURITY DEFINER writers: explicit workspace context.
+--
+
+DROP FUNCTION public.claim_hostinger_inbound_receipt(uuid, text, timestamptz);
+CREATE FUNCTION public.claim_hostinger_inbound_receipt(
+  p_workspace_id uuid, p_receipt_id uuid, p_run_id text, p_stale_before timestamptz
+) RETURNS TABLE(receipt_id uuid, attempt_count integer)
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'pg_catalog', 'public'
+AS $$
+BEGIN
+  IF COALESCE(NULLIF(pg_catalog.current_setting('request.jwt.claim.role', true), ''), (NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'))::text <> 'service_role' THEN RAISE EXCEPTION 'service_role required' USING ERRCODE='42501'; END IF;
+  IF p_workspace_id IS NULL OR p_receipt_id IS NULL OR NULLIF(pg_catalog.btrim(p_run_id),'') IS NULL OR length(p_run_id) > 200 THEN
+    RAISE EXCEPTION 'invalid receipt claim parameters';
+  END IF;
+  IF p_stale_before IS NULL OR p_stale_before > pg_catalog.now() OR p_stale_before < pg_catalog.now() - interval '7 days' THEN
+    RAISE EXCEPTION 'stale cutoff must be within the preceding 7 days';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.inbound_receipts WHERE id = p_receipt_id AND workspace_id = p_workspace_id) THEN
+    RAISE EXCEPTION 'receipt does not belong to workspace' USING ERRCODE='42501';
+  END IF;
+  RETURN QUERY SELECT * FROM reachagent_private.claim_hostinger_inbound_receipt(p_receipt_id,p_run_id,p_stale_before);
+END
+$$;
+ALTER FUNCTION public.claim_hostinger_inbound_receipt(uuid, uuid, text, timestamptz) OWNER TO reachagent_function_owner;
+
+DROP FUNCTION public.remove_data_quality_emails(uuid[]);
+CREATE FUNCTION public.remove_data_quality_emails(p_workspace_id uuid, p_lead_ids uuid[]) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'pg_catalog', 'public'
+AS $$
+DECLARE
+  v_ids uuid[]; v_requested integer; v_found integer; v_blocked record;
+  v_actor uuid := COALESCE(NULLIF(pg_catalog.current_setting('request.jwt.claim.sub', true), ''), (NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub'))::uuid;
+BEGIN
+  IF COALESCE(NULLIF(pg_catalog.current_setting('request.jwt.claim.role', true), ''), (NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'))::text <> 'service_role' AND NOT public.is_active_admin() THEN RAISE EXCEPTION 'active admin required' USING ERRCODE='42501'; END IF;
+  IF p_workspace_id IS NULL THEN RAISE EXCEPTION 'workspace_id required'; END IF;
+  SELECT COALESCE(array_agg(DISTINCT x.id),'{}'::uuid[]) INTO v_ids FROM pg_catalog.unnest(p_lead_ids) AS x(id);
+  v_requested := cardinality(v_ids);
+  IF v_requested < 1 OR v_requested > 100 THEN RAISE EXCEPTION 'Select between 1 and 100 leads'; END IF;
+  PERFORM 1 FROM public.leads WHERE workspace_id=p_workspace_id AND id=ANY(v_ids) FOR UPDATE;
+  SELECT count(*) INTO v_found FROM public.leads WHERE workspace_id=p_workspace_id AND id=ANY(v_ids);
+  IF v_found <> v_requested THEN RAISE EXCEPTION 'One or more selected leads do not belong to the workspace'; END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.leads l WHERE l.workspace_id=p_workspace_id AND l.id=ANY(v_ids) AND NOT EXISTS (
+      SELECT 1 FROM public.lead_data_quality_flags f
+      WHERE f.workspace_id=p_workspace_id AND f.lead_id=l.id AND f.status='open'
+        AND f.issue_type IN ('invalid_email','placeholder_email','technical_email')
+    )
+  ) THEN RAISE EXCEPTION 'Every selected lead must have an open invalid, placeholder, or technical email flag'; END IF;
+  SELECT l.id,l.business_name INTO v_blocked FROM public.leads l
+  WHERE l.workspace_id=p_workspace_id AND l.id=ANY(v_ids) AND (
+    l.status IN ('replied','negotiating','interested','closed','closed_manual')
+    OR NULLIF(pg_catalog.btrim(l.notes),'') IS NOT NULL
+    OR EXISTS (SELECT 1 FROM public.emails e WHERE e.workspace_id=p_workspace_id AND e.lead_id=l.id)
+    OR EXISTS (SELECT 1 FROM public.deals d WHERE d.workspace_id=p_workspace_id AND d.lead_id=l.id)
+  ) LIMIT 1;
+  IF FOUND THEN RAISE EXCEPTION 'Email removal blocked: lead % is protected by lifecycle or history',v_blocked.id; END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.leads l JOIN public.recipient_outreach_ownership o
+      ON o.workspace_id=p_workspace_id AND o.owner_lead_id=l.id AND o.normalized_email=l.normalized_email AND o.state='active'
+    WHERE l.workspace_id=p_workspace_id AND l.id=ANY(v_ids)
+  ) THEN RAISE EXCEPTION 'Email removal blocked: selected lead owns the active recipient outreach lifecycle'; END IF;
+  WITH originals AS (
+    SELECT l.id,l.normalized_email,
+      (SELECT f.issue_type FROM public.lead_data_quality_flags f
+       WHERE f.workspace_id=p_workspace_id AND f.lead_id=l.id AND f.status='open'
+         AND f.issue_type IN ('invalid_email','placeholder_email','technical_email')
+       ORDER BY f.created_at LIMIT 1) AS issue_type
+    FROM public.leads l WHERE l.workspace_id=p_workspace_id AND l.id=ANY(v_ids)
+  ), changed AS (
+    UPDATE public.leads l SET email=NULL,updated_at=pg_catalog.now()
+    FROM originals o WHERE l.workspace_id=p_workspace_id AND l.id=o.id
+    RETURNING l.id,o.normalized_email,o.issue_type
+  )
+  INSERT INTO public.activity_log(workspace_id,event_type,lead_id,description,metadata)
+  SELECT p_workspace_id,'data_quality_email_removed',id,'Invalid or junk email removed by an admin.',
+    pg_catalog.jsonb_strip_nulls(pg_catalog.jsonb_build_object(
+      'issue_type',issue_type,'normalized_email',normalized_email,
+      'actor_id',v_actor,'actor_kind',CASE WHEN v_actor IS NULL THEN 'service_role' ELSE 'user' END))
+  FROM changed;
+  RETURN pg_catalog.jsonb_build_object('updated',v_requested,'lead_ids',v_ids);
+END
+$$;
+ALTER FUNCTION public.remove_data_quality_emails(uuid, uuid[]) OWNER TO reachagent_function_owner;
+
+DROP FUNCTION public.set_data_quality_flag_status(text, text, uuid[], text, text);
+CREATE FUNCTION public.set_data_quality_flag_status(
+  p_workspace_id uuid, p_issue_type text, p_normalized_email text DEFAULT NULL,
+  p_lead_ids uuid[] DEFAULT NULL, p_status text DEFAULT 'resolved', p_resolution_reason text DEFAULT NULL
+) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'pg_catalog', 'public'
+AS $$
+DECLARE
+  v_ids uuid[]; v_count integer;
+  v_actor uuid := COALESCE(NULLIF(pg_catalog.current_setting('request.jwt.claim.sub', true), ''), (NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub'))::uuid;
+BEGIN
+  IF COALESCE(NULLIF(pg_catalog.current_setting('request.jwt.claim.role', true), ''), (NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'))::text <> 'service_role' AND NOT public.is_active_admin() THEN RAISE EXCEPTION 'active admin required' USING ERRCODE='42501'; END IF;
+  IF p_workspace_id IS NULL THEN RAISE EXCEPTION 'workspace_id required'; END IF;
+  IF p_issue_type NOT IN ('duplicate_lead','shared_email','uncertain_email_group','invalid_email','placeholder_email','technical_email','already_contacted_email') THEN RAISE EXCEPTION 'Unsupported data-quality issue type'; END IF;
+  IF p_status NOT IN ('resolved','open') THEN RAISE EXCEPTION 'Unsupported flag transition'; END IF;
+  IF COALESCE(cardinality(p_lead_ids),0) > 100 THEN RAISE EXCEPTION 'Select no more than 100 leads'; END IF;
+  IF p_issue_type IN ('duplicate_lead','shared_email','uncertain_email_group') AND NULLIF(pg_catalog.btrim(p_normalized_email),'') IS NULL THEN RAISE EXCEPTION 'A recipient email is required for grouped issues'; END IF;
+  IF p_issue_type NOT IN ('duplicate_lead','shared_email','uncertain_email_group') AND COALESCE(cardinality(p_lead_ids),0)=0 THEN RAISE EXCEPTION 'At least one lead is required'; END IF;
+  IF p_lead_ids IS NOT NULL AND EXISTS (
+    SELECT 1 FROM pg_catalog.unnest(p_lead_ids) x(id)
+    WHERE NOT EXISTS (SELECT 1 FROM public.leads l WHERE l.workspace_id=p_workspace_id AND l.id=x.id AND (p_normalized_email IS NULL OR l.normalized_email=p_normalized_email))
+  ) THEN RAISE EXCEPTION 'Selected leads do not belong to the addressed workspace/email group'; END IF;
+  IF p_status='resolved' THEN
+    WITH changed AS (
+      UPDATE public.lead_data_quality_flags SET status='resolved', resolved_at=pg_catalog.now(), updated_at=pg_catalog.now(),
+        resolution_reason=NULLIF(pg_catalog.btrim(p_resolution_reason),''), resolved_by=v_actor
+      WHERE workspace_id=p_workspace_id AND issue_type=p_issue_type AND status='open'
+        AND (p_normalized_email IS NULL OR normalized_email=p_normalized_email)
+        AND (p_lead_ids IS NULL OR lead_id=ANY(p_lead_ids))
+      RETURNING lead_id
+    ) SELECT COALESCE(array_agg(DISTINCT lead_id),'{}'::uuid[]) INTO v_ids FROM changed;
+  ELSE
+    WITH candidates AS (
+      SELECT DISTINCT ON (lead_id,issue_type,COALESCE(normalized_email,'')) id,lead_id
+      FROM public.lead_data_quality_flags f
+      WHERE workspace_id=p_workspace_id AND issue_type=p_issue_type AND status='resolved'
+        AND (p_normalized_email IS NULL OR normalized_email=p_normalized_email)
+        AND (p_lead_ids IS NULL OR lead_id=ANY(p_lead_ids))
+        AND NOT EXISTS (
+          SELECT 1 FROM public.lead_data_quality_flags o
+          WHERE o.workspace_id=p_workspace_id AND o.status='open' AND o.lead_id=f.lead_id AND o.issue_type=f.issue_type
+            AND COALESCE(o.normalized_email,'')=COALESCE(f.normalized_email,'')
+        )
+      ORDER BY lead_id,issue_type,COALESCE(normalized_email,''),resolved_at DESC NULLS LAST
+    ), changed AS (
+      UPDATE public.lead_data_quality_flags f SET status='open',resolved_at=NULL,updated_at=pg_catalog.now(),resolution_reason=NULL,resolved_by=NULL
+      FROM candidates c WHERE f.workspace_id=p_workspace_id AND f.id=c.id RETURNING f.lead_id
+    ) SELECT COALESCE(array_agg(DISTINCT lead_id),'{}'::uuid[]) INTO v_ids FROM changed;
+  END IF;
+  v_count:=cardinality(v_ids);
+  IF v_count=0 THEN RAISE EXCEPTION 'No matching flags were available for this transition'; END IF;
+  INSERT INTO public.activity_log(workspace_id,event_type,lead_id,description,metadata)
+  SELECT p_workspace_id,CASE WHEN p_status='resolved' THEN 'data_quality_flag_resolved' ELSE 'data_quality_flag_reopened' END,
+    id,CASE WHEN p_status='resolved' THEN 'Data Quality flag resolved by an admin.' ELSE 'Data Quality flag reopened by an admin.' END,
+    pg_catalog.jsonb_strip_nulls(pg_catalog.jsonb_build_object(
+      'issue_type',p_issue_type,'normalized_email',p_normalized_email,
+      'actor_id',v_actor,'actor_kind',CASE WHEN v_actor IS NULL THEN 'service_role' ELSE 'user' END,
+      'resolution_reason',NULLIF(pg_catalog.btrim(p_resolution_reason),'')))
+  FROM pg_catalog.unnest(v_ids) id;
+  RETURN pg_catalog.jsonb_build_object('updated',v_count,'lead_ids',v_ids,'status',p_status);
+END
+$$;
+ALTER FUNCTION public.set_data_quality_flag_status(uuid, text, text, uuid[], text, text) OWNER TO reachagent_function_owner;
+
 --
 -- Natural-key repartitioning.
 --
+
+ALTER TABLE public.distributed_locks
+  DROP CONSTRAINT distributed_locks_pkey;
+ALTER TABLE public.distributed_locks
+  ADD PRIMARY KEY (workspace_id, lock_key);
 
 ALTER TABLE public.recipient_outreach_ownership
   DROP CONSTRAINT recipient_outreach_ownership_pkey;
@@ -391,6 +632,35 @@ ALTER TABLE public.exhausted_queries
 ALTER TABLE public.exhausted_queries
   ADD PRIMARY KEY (workspace_id, query);
 
+ALTER TABLE public.category_email_templates
+  DROP CONSTRAINT category_email_templates_category_type_unique;
+ALTER TABLE public.category_email_templates
+  ADD CONSTRAINT category_email_templates_workspace_category_type_unique
+  UNIQUE (workspace_id, category_id, template_type);
+
+ALTER TABLE public.category_suburb_priorities
+  DROP CONSTRAINT category_suburb_priorities_category_suburb_unique;
+ALTER TABLE public.category_suburb_priorities
+  ADD CONSTRAINT category_suburb_priorities_workspace_category_suburb_unique
+  UNIQUE (workspace_id, category_id, city_suburb_id);
+
+ALTER TABLE public.category_suburb_search_state
+  DROP CONSTRAINT category_suburb_search_state_category_suburb_unique;
+ALTER TABLE public.category_suburb_search_state
+  ADD CONSTRAINT category_suburb_search_state_workspace_category_suburb_unique
+  UNIQUE (workspace_id, category_id, city_suburb_id);
+
+ALTER TABLE public.inbound_receipts
+  DROP CONSTRAINT inbound_receipts_receipt_key_key;
+ALTER TABLE public.inbound_receipts
+  ADD CONSTRAINT inbound_receipts_workspace_receipt_key_unique
+  UNIQUE (workspace_id, receipt_key);
+
+ALTER TABLE public.emails
+  DROP CONSTRAINT emails_resend_id_key;
+ALTER TABLE public.emails
+  ADD CONSTRAINT emails_workspace_resend_id_unique UNIQUE (workspace_id, resend_id);
+
 DROP INDEX IF EXISTS public.categories_name_trimmed_lower_key;
 CREATE UNIQUE INDEX categories_name_trimmed_lower_key
   ON public.categories (workspace_id, lower(btrim(name)));
@@ -398,6 +668,16 @@ CREATE UNIQUE INDEX categories_name_trimmed_lower_key
 DROP INDEX IF EXISTS public.search_cache_query_idx;
 CREATE UNIQUE INDEX search_cache_query_idx
   ON public.search_cache (workspace_id, query);
+
+DROP INDEX IF EXISTS public.activity_log_inbound_receipt_event_key;
+CREATE UNIQUE INDEX activity_log_inbound_receipt_event_key
+  ON public.activity_log (workspace_id, event_type, (metadata ->> 'inbound_receipt_id'))
+  WHERE metadata ->> 'inbound_receipt_id' IS NOT NULL;
+
+DROP INDEX IF EXISTS public.lead_data_quality_flags_open_key;
+CREATE UNIQUE INDEX lead_data_quality_flags_open_key
+  ON public.lead_data_quality_flags (workspace_id, lead_id, issue_type, COALESCE(normalized_email, ''))
+  WHERE status = 'open';
 
 DROP INDEX IF EXISTS public.emails_lead_type_delivered_key;
 CREATE UNIQUE INDEX emails_lead_type_delivered_key
@@ -422,6 +702,22 @@ REVOKE ALL ON FUNCTION public.refresh_email_group_quality(uuid, text) FROM PUBLI
 GRANT EXECUTE ON FUNCTION public.refresh_email_group_quality(uuid, text) TO service_role;
 REVOKE ALL ON FUNCTION public.insert_finder_lead_if_new(uuid, jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.insert_finder_lead_if_new(uuid, jsonb) TO service_role;
+REVOKE ALL ON FUNCTION public.lookup_finder_candidates(uuid, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.lookup_finder_candidates(uuid, jsonb) TO service_role;
+REVOKE ALL ON FUNCTION public.claim_recipient_outreach(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_recipient_outreach(uuid, uuid, text) TO service_role;
+REVOKE ALL ON FUNCTION public.release_recipient_outreach_claim(uuid, uuid, text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.release_recipient_outreach_claim(uuid, uuid, text, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.refresh_lead_data_quality(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.refresh_lead_data_quality(uuid, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.suppress_lead_delivery_email(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.suppress_lead_delivery_email(uuid, uuid, text) TO service_role;
+REVOKE ALL ON FUNCTION public.claim_hostinger_inbound_receipt(uuid, uuid, text, timestamptz) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_hostinger_inbound_receipt(uuid, uuid, text, timestamptz) TO service_role;
+REVOKE ALL ON FUNCTION public.remove_data_quality_emails(uuid, uuid[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.remove_data_quality_emails(uuid, uuid[]) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.set_data_quality_flag_status(uuid, text, text, uuid[], text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.set_data_quality_flag_status(uuid, text, text, uuid[], text, text) TO authenticated, service_role;
 REVOKE ALL ON FUNCTION reachagent_private.refresh_email_group_quality(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION reachagent_private.refresh_lead_data_quality(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION reachagent_private.claim_recipient_outreach(uuid, text) FROM PUBLIC;

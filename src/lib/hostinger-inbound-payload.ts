@@ -1,5 +1,6 @@
 export interface HostingerInboundTaskPayload {
   receiptId: string
+  workspaceId: string
 }
 
 export function validateHostingerInboundTaskPayload(payload: unknown): HostingerInboundTaskPayload {
@@ -8,10 +9,13 @@ export function validateHostingerInboundTaskPayload(payload: unknown): Hostinger
   }
 
   const keys = Object.keys(payload)
-  const receiptId = (payload as Record<string, unknown>).receiptId
-  if (keys.length !== 1 || keys[0] !== 'receiptId' || typeof receiptId !== 'string' || !receiptId.trim()) {
-    throw new Error('Invalid Hostinger inbound task payload: receiptId must be a non-empty string')
+  const record = payload as Record<string, unknown>
+  const receiptId = record.receiptId
+  const workspaceId = record.workspaceId
+  if (keys.length !== 2 || typeof receiptId !== 'string' || !receiptId.trim()
+      || typeof workspaceId !== 'string' || !/^[0-9a-f-]{36}$/i.test(workspaceId)) {
+    throw new Error('Invalid Hostinger inbound task payload: receiptId and workspaceId are required')
   }
 
-  return { receiptId: receiptId.trim() }
+  return { receiptId: receiptId.trim(), workspaceId }
 }

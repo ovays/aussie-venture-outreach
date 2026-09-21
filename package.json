@@ -32,6 +32,7 @@
     "test:decision-engine:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-decision-engine.ts",
     "test:prompt15-safety-gate:v2": "tsx scripts/test-prompt15-product-decision-safety-gate.ts",
     "test:observability:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-observability.ts",
+    "audit:tenancy:v2": "tsx scripts/audit-v2-operational-tenancy.ts",
     "test:orchestrator:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-orchestrator.ts",
     "test:agent-consolidation:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-agent-consolidation.ts",
     "shadow:v2": "dotenv -e .env.v2.local -- tsx scripts/shadow-v2.ts",

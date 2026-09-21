@@ -6,6 +6,7 @@ import { runSenderAgent } from "../agents/sender"
 import { runFollowUpAgent } from "../agents/followup"
 import { runReactivationAgent } from "../agents/reactivation"
 import { createServiceClient } from "../src/lib/supabase/server"
+import { createWorkspaceServiceClient } from "../src/lib/supabase/workspace-service"
 import { readInitialEmailMode } from "../src/lib/initial-email-router"
 import { assertFinderScheduleEnabled, assertTriggerJobsEnabled } from "../src/lib/side-effect-safety"
 import { acquireLock, releaseLock } from "../src/lib/distributed-lock"
@@ -35,30 +36,33 @@ export const dailyPipelineJob = schedules.task({
   run: async (_payload, { ctx }) => {
     assertTriggerJobsEnabled('scheduled daily pipeline')
     assertFinderScheduleEnabled('scheduled Finder run')
-    const pipelineSupabase = createServiceClient()
-    const { data: activeWorkspaces, error: workspaceError } = await pipelineSupabase
+    const controlSupabase = createServiceClient()
+    const { data: activeWorkspaces, error: workspaceError } = await controlSupabase
       .from('workspaces')
       .select('id')
       .eq('status', 'active')
       .order('created_at', { ascending: true })
-      .limit(1)
     if (workspaceError) throw new Error(`Workspace resolution failed: ${workspaceError.message}`)
-    const workspaceId = activeWorkspaces?.[0]?.id
-    if (!workspaceId) throw new Error('No active workspace available')
-    const telemetry = observability()
+    if (!activeWorkspaces?.length) throw new Error('No active workspace available')
+    const workspaceResults: unknown[] = []
+    for (const { id: workspaceId } of activeWorkspaces) {
+    const pipelineSupabase = createWorkspaceServiceClient(workspaceId)
+    const telemetry = observability(workspaceId)
     const workflowRunId = await telemetry.startWorkflowRun({
       workflowType: 'daily_pipeline', source: ctx.run.isTest ? 'trigger.manual_test' : 'trigger.schedule', triggerTaskId: 'daily-pipeline',
       triggerRunId: ctx.run.id, correlationId: ctx.run.rootTaskRunId ?? ctx.run.id,
       idempotencyKey: ctx.run.idempotencyKey, attempt: ctx.attempt.number,
-      metadata: { scheduled: true, is_test: ctx.run.isTest ?? false, is_replay: ctx.run.isReplay ?? false },
+      workspaceId,
+      metadata: { scheduled: true, workspace_id: workspaceId, is_test: ctx.run.isTest ?? false, is_replay: ctx.run.isReplay ?? false },
     })
     const pipelineLockToken = await acquireLock(
-      pipelineSupabase, DAILY_PIPELINE_LOCK_KEY, DAILY_PIPELINE_LOCK_TTL_MS,
+      pipelineSupabase, DAILY_PIPELINE_LOCK_KEY, DAILY_PIPELINE_LOCK_TTL_MS, workspaceId,
     )
     if (!pipelineLockToken) {
       console.log("[PIPELINE_STAGE] Pipeline skipped", { reason: "concurrent_run_in_progress" })
       await telemetry.completeWorkflowRun(workflowRunId, 'skipped', { reason: 'concurrent_run_in_progress' })
-      return { leadsFound: 0, skipped: "concurrent_run_in_progress" }
+      workspaceResults.push({ workspaceId, leadsFound: 0, skipped: "concurrent_run_in_progress" })
+      continue
     }
 
     const executePipeline = async () => {
@@ -92,7 +96,7 @@ export const dailyPipelineJob = schedules.task({
       console.log("[PIPELINE_STAGE] Finder starting")
       const finderResult = await withObservedStep(
         { stepName: 'finder', stepType: 'agent', sequence: 10, attempt: ctx.attempt.number },
-        () => runFinderAgent(workspaceId),
+      () => runFinderAgent(workspaceId),
         (result) => result,
       )
       leadsFound = finderResult.leadsFound
@@ -109,9 +113,9 @@ export const dailyPipelineJob = schedules.task({
     // unscheduled v2-shadow-comparison task. This operational task never treats
     // ORCHESTRATOR_SHADOW as permission to compare or execute.
     if (orchestratorFlags.enabled && !orchestratorFlags.shadow) {
-      const leadIds = await selectOrchestrationCandidateIds(pipelineSupabase, { limit: 100 })
+      const leadIds = await selectOrchestrationCandidateIds(pipelineSupabase, workspaceId, { limit: 100 })
       const orchestrated = await runConfiguredLeadBatch({
-        leadIds,
+        workspaceId, leadIds,
         source: 'trigger.daily_pipeline',
         triggerRunId: ctx.run.id,
         parentRunId: workflowRunId ?? undefined,
@@ -140,7 +144,7 @@ export const dailyPipelineJob = schedules.task({
         console.log("[PIPELINE_STAGE] Researcher starting", { leadsFound })
         const researched = await withObservedStep(
           { stepName: 'researcher', stepType: 'agent', sequence: 20, attempt: ctx.attempt.number },
-          () => runResearcherAgent(initialEmailMode),
+          () => runResearcherAgent(workspaceId, initialEmailMode),
           (count) => ({ processed: count }),
         )
         console.log("[PIPELINE_STAGE] Researcher complete", { researched })
@@ -154,7 +158,7 @@ export const dailyPipelineJob = schedules.task({
         console.log("[PIPELINE_STAGE] Writer starting")
         await withObservedStep(
           { stepName: 'writer', stepType: 'agent', sequence: 30, attempt: ctx.attempt.number },
-          () => runWriterAgent(initialEmailMode),
+          () => runWriterAgent(workspaceId, initialEmailMode),
         )
         console.log("[PIPELINE_STAGE] Writer complete")
       } catch (error) {
@@ -167,7 +171,7 @@ export const dailyPipelineJob = schedules.task({
         console.log("[PIPELINE_STAGE] Sender starting")
         const senderResult = await withObservedStep(
           { stepName: 'sender', stepType: 'agent', sequence: 40, attempt: ctx.attempt.number },
-          () => runSenderAgent(),
+          () => runSenderAgent(workspaceId),
           (result) => result,
         )
         console.log("[PIPELINE_STAGE] Sender complete", senderResult)
@@ -189,7 +193,7 @@ export const dailyPipelineJob = schedules.task({
       console.log("[PIPELINE_STAGE] Follow-up starting")
       await withObservedStep(
         { stepName: 'followup', stepType: 'agent', sequence: 50, attempt: ctx.attempt.number },
-        () => runFollowUpAgent(),
+        () => runFollowUpAgent(workspaceId),
       )
       console.log("[PIPELINE_STAGE] Follow-up complete")
     } catch (error) {
@@ -206,7 +210,7 @@ export const dailyPipelineJob = schedules.task({
       console.log("[PIPELINE_STAGE] Reactivation starting")
       await withObservedStep(
         { stepName: 'reactivation', stepType: 'agent', sequence: 60, attempt: ctx.attempt.number },
-        () => runReactivationAgent(),
+        () => runReactivationAgent(workspaceId),
       )
       console.log("[PIPELINE_STAGE] Reactivation complete")
     } catch (error) {
@@ -224,10 +228,12 @@ export const dailyPipelineJob = schedules.task({
       await telemetry.failWorkflowRun(workflowRunId, error)
       throw error
     } finally {
-      await releaseLock(pipelineSupabase, DAILY_PIPELINE_LOCK_KEY, pipelineLockToken)
+      await releaseLock(pipelineSupabase, DAILY_PIPELINE_LOCK_KEY, pipelineLockToken, workspaceId)
     }
     }
 
-    return workflowRunId ? withWorkflowTrace({ workflowRunId }, executePipeline) : executePipeline()
+    workspaceResults.push(await (workflowRunId ? withWorkflowTrace({ workspaceId, workflowRunId }, executePipeline) : executePipeline()))
+    }
+    return { workspaces: workspaceResults }
   }
 })

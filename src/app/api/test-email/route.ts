@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { writeOutreachEmail } from '@/ai/workflows'
 import { emailBodyToHtml } from '@/lib/utils'
-import { createServiceClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin } from '@/lib/api-workspace'
 import { resolveContentType } from '@/lib/content-type'
 import { Resend } from 'resend'
 import { assertOutreachSendEnabled } from '@/lib/side-effect-safety'
@@ -38,6 +38,8 @@ function wrapInTemplate(innerHtml: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    const access = await requireApiWorkspaceAdmin()
+    if (isApiWorkspaceError(access)) return access
     const body = await req.json()
     const { action } = body
 
@@ -48,13 +50,19 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
       }
 
-      const supabase = createServiceClient()
+      const { supabase } = access
       const { data: categoryRow } = await supabase
         .from('categories')
         .select('name, content_type, city_content_types')
         .eq('name', category)
         .maybeSingle()
-      const contentType = resolveContentType(categoryRow ?? { name: category }, city)
+      const contentType = resolveContentType(categoryRow ? {
+        name: categoryRow.name,
+        content_type: categoryRow.content_type,
+        city_content_types: categoryRow.city_content_types && typeof categoryRow.city_content_types === 'object' && !Array.isArray(categoryRow.city_content_types)
+          ? categoryRow.city_content_types as Record<string, string>
+          : null,
+      } : { name: category }, city)
 
       const result = await writeOutreachEmail({
         business_name,

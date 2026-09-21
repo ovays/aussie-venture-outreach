@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { isAuthErrorResponse, requireApiAdmin, requireApiUser } from '@/lib/auth'
 import { clampSuburbPriority, groupEffectiveSuburbPriorities } from '@/lib/suburb-priorities'
+import { requireWorkspaceContext } from '@/lib/workspace-context'
 
 const uuidSchema = z.string().uuid()
 const createSchema = z.object({
@@ -72,6 +73,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireApiAdmin()
   if (isAuthErrorResponse(auth)) return auth
+  const workspace = await requireWorkspaceContext(auth)
   const parsed = createSchema.safeParse(await req.json())
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid suburb data', issues: parsed.error.issues }, { status: 400 })
@@ -82,7 +84,7 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await supabase
     .from('city_suburbs')
-    .insert({ city, suburb, active: true })
+    .insert({ workspace_id: workspace.workspaceId, city, suburb, active: true })
     .select('id, city, suburb, active, priority')
     .single()
 
@@ -93,6 +95,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const auth = await requireApiAdmin()
   if (isAuthErrorResponse(auth)) return auth
+  const workspace = await requireWorkspaceContext(auth)
   const parsed = patchSchema.safeParse(await req.json())
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid suburb update', issues: parsed.error.issues }, { status: 400 })
@@ -109,10 +112,11 @@ export async function PATCH(req: NextRequest) {
     const { error } = await supabase
       .from('category_suburb_priorities')
       .upsert({
+        workspace_id: workspace.workspaceId,
         category_id: body.categoryId,
         city_suburb_id: body.id,
         priority,
-      }, { onConflict: 'category_id,city_suburb_id' })
+      }, { onConflict: 'workspace_id,category_id,city_suburb_id' })
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ ok: true, priority, customized: true })

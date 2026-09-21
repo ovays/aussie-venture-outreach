@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { searchBusinesses, type OutscraperResult } from '@/lib/searchBusinesses'
 import { logger } from '@/lib/logger'
 import {
@@ -1263,11 +1264,13 @@ interface FinderCandidateMatch {
 
 async function findExistingCandidates(
   supabase: ReturnType<typeof createServiceClient>,
+  workspaceId: string,
   candidates: readonly OutscraperResult[],
   city: string,
 ): Promise<Map<number, FinderCandidateMatch>> {
   if (candidates.length === 0) return new Map()
   const { data, error } = await supabase.rpc('lookup_finder_candidates', {
+    p_workspace_id: workspaceId,
     p_candidates: candidates.map((candidate, candidateIndex) => ({
       candidate_index: candidateIndex,
       business_name: candidate.name,
@@ -1320,7 +1323,7 @@ async function getDailyOutscraperSpend(supabase: ReturnType<typeof createService
 // ── Main agent ───────────────────────────────────────────────────────────────
 
 export async function runFinderAgent(workspaceId: string): Promise<{ leadsFound: number; runtimeLimitHit: boolean }> {
-  const supabase = createServiceClient()
+  const supabase = createWorkspaceServiceClient(workspaceId)
 
   try {
   const { data: systemSetting } = await supabase
@@ -1545,14 +1548,14 @@ export async function runFinderAgent(workspaceId: string): Promise<{ leadsFound:
   })
 
   async function persistCategorySuburbState(
-    payload: Record<string, string | null>,
+    payload: { category_id: string; city_suburb_id: string; [key: string]: string | null },
     operation: 'last_searched' | 'exhausted'
   ): Promise<boolean> {
     if (!categorySuburbStatePersistenceAvailable) return false
 
     const { error } = await supabase
       .from('category_suburb_search_state')
-      .upsert(payload, { onConflict: 'category_id,city_suburb_id' })
+      .upsert({ ...payload, workspace_id: workspaceId }, { onConflict: 'workspace_id,category_id,city_suburb_id' })
 
     if (!error) return true
 
@@ -1847,6 +1850,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           if (spentToday + currentRunEstimate >= DAILY_OUTSCRAPER_LIMIT) {
             logger.warn('finder', 'Cost guard triggered', { limit: DAILY_OUTSCRAPER_LIMIT, spentToday, estimate: currentRunEstimate })
             await supabase.from('activity_log').insert({
+              workspace_id: workspaceId,
               event_type:  'cost_guard_triggered',
               description: `Daily Outscraper limit $${DAILY_OUTSCRAPER_LIMIT} reached`,
               metadata:    { spent_today: spentToday, current_run_estimate: currentRunEstimate, limit: DAILY_OUTSCRAPER_LIMIT },
@@ -1880,11 +1884,13 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
             if (msg.includes('402')) throw error  // balance exhausted — abort pipeline
             logger.error('finder', `Search error: ${query}`, { error: msg })
             await supabase.from('dead_letter_queue').insert({
+              workspace_id: workspaceId,
               operation: 'outscraper_search',
               payload: { query, skip },
               error: msg,
             })
             await supabase.from('activity_log').insert({
+              workspace_id: workspaceId,
               event_type: 'agent_error',
               description: `Search error for query "${query}": ${msg}`,
               metadata: { query, skip, error: msg },
@@ -1899,7 +1905,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
 
           // One set-based lookup for the whole provider page replaces the
           // former per-candidate leads query.
-          const existingCandidates = await findExistingCandidates(supabase, results, city)
+          const existingCandidates = await findExistingCandidates(supabase, workspaceId, results, city)
 
           let newLeadsThisBatch = 0
 
@@ -2296,6 +2302,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
               }
 
               await supabase.from('activity_log').insert({
+                workspace_id: workspaceId,
                 event_type:  'lead_found',
                 description: `Email lead: ${name} — ${foundEmail}`,
                 metadata:    { category: category.name, city, email: foundEmail, source: emailSource, type: 'email' },
@@ -2371,12 +2378,13 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
 
         if (exhaustedThisQuery) {
           await supabase.from('exhausted_queries').upsert({
+            workspace_id: workspaceId,
             query,
             city,
             category: category.name,
             exhausted_at: new Date().toISOString(),
             expires_at:   new Date(Date.now() + 3 * 86_400_000).toISOString(),
-          })
+          }, { onConflict: 'workspace_id,query' })
           exhaustedSet.add(query)
         }
 
@@ -2512,6 +2520,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
   if (costGuardHit) logger.warn('finder', `Run stopped by cost guard ($${DAILY_OUTSCRAPER_LIMIT} daily limit)`)
 
   await supabase.from('activity_log').insert({
+    workspace_id: workspaceId,
     event_type:  'finder_complete',
     description: `Finder complete: ${emailCount} email leads, ${dmCount} DM leads queued (${callCount} Outscraper calls)`,
     metadata: {
@@ -2714,6 +2723,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
   })
 
   const { error: metricsInsertError } = await supabase.from('discovery_run_metrics').insert({
+    workspace_id: workspaceId,
     run_id:                     runId,
     run_at:                     new Date().toISOString(),
     email_target:               EMAIL_TARGET,
@@ -2765,6 +2775,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
     logger.error('finder', 'Fatal error', { error: message, stack: error instanceof Error ? error.stack : null })
     const isBalanceError = message.includes('402')
     await supabase.from('activity_log').insert({
+      workspace_id: workspaceId,
       event_type: 'agent_error',
       description: `Agent failed: ${message}`,
       metadata: {

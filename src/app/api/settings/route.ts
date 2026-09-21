@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createServiceClient } from '@/lib/supabase/server'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { SETTINGS_DEFAULTS, isInitialEmailMode, isSettingKey } from '@/lib/settingsDefaults'
 import { isAuthErrorResponse, requireApiAdmin, requireApiUser } from '@/lib/auth'
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
   const workspace = await requireWorkspaceContext(auth)
-  const supabase = createServiceClient()
+  const supabase = createWorkspaceServiceClient(workspace.workspaceId)
 
   const settingKeys = Object.keys(SETTINGS_DEFAULTS) as Array<keyof typeof SETTINGS_DEFAULTS>
   const [platform, tenant] = await Promise.all([
@@ -55,7 +55,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
   const workspace = await requireWorkspaceContext(auth)
-  const supabase = createServiceClient()
+  const supabase = createWorkspaceServiceClient(workspace.workspaceId)
   const raw = await request.json()
 
   const parsed = patchSettingSchema.safeParse(raw)

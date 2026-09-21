@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { sendEmail } from '@/lib/resend'
 import { emailBodyToHtml } from '@/lib/utils'
 import { handleEmailSyncFailure } from '@/lib/email-status'
@@ -19,8 +19,10 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
   const { id } = await params
-  const supabase = createServiceClient()
+  const { supabase, workspace } = access
 
   const { data: lead, error: leadErr } = await supabase
     .from('leads')
@@ -66,7 +68,7 @@ export async function POST(
     .select('id, type, subject, body_text, body_html, sent_at, status, message_id')
     .eq('lead_id', id)
 
-  const emails = leadEmails ?? []
+  const emails = (leadEmails ?? []).map((email) => ({ ...email, status: email.status ?? 'unknown' }))
   const decision = determineNextEmailType(emails)
 
   if (decision.kind === 'all_sent') {
@@ -225,6 +227,7 @@ export async function POST(
   } else {
     // No pre-existing draft — insert the single sent record.
     const { data: inserted, error: insertErr } = await supabase.from('emails').insert({
+      workspace_id: workspace.workspaceId,
       lead_id:    id,
       type:       emailType,
       subject,
@@ -241,6 +244,7 @@ export async function POST(
       // Email delivered but no row to update — insert a recovery row directly.
       console.error('[resend] DB error inserting email row:', insertErr.message, { lead_id: id, resend_id: result.id })
       await supabase.from('emails').insert({
+        workspace_id: workspace.workspaceId,
         lead_id:    id,
         type:       emailType,
         subject,
@@ -263,6 +267,7 @@ export async function POST(
 
   if (decision.kind === 'follow_up' && emailRowId) {
     await supabase.from('follow_ups').insert({
+      workspace_id:      workspace.workspaceId,
       lead_id:           id,
       follow_up_number:  FOLLOW_UP_NUMBER[decision.type],
       scheduled_at:      sentAt,
@@ -278,6 +283,7 @@ export async function POST(
       updated_at: sentAt,
     }).eq('id', id),
     supabase.from('activity_log').insert({
+      workspace_id: workspace.workspaceId,
       event_type:  decision.kind === 'initial' ? 'email_sent' : `${decision.type}_sent`,
       lead_id:     id,
       description: decision.kind === 'initial'

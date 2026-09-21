@@ -6,6 +6,7 @@ export const ORCHESTRATION_WORKFLOW_TYPES = ['lead_lifecycle', 'v2_initial_send_
 export type OrchestrationWorkflowType = (typeof ORCHESTRATION_WORKFLOW_TYPES)[number]
 
 export interface OrchestrationRequest {
+  workspaceId: string
   workflowType: OrchestrationWorkflowType
   leadId: string
   source: string

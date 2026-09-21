@@ -48,6 +48,14 @@ async function main() {
   }, { onConflict: 'id' })
   if (profileError) throw new Error(profileError.message)
 
+  const { error: membershipError } = await supabase.from('workspace_members').upsert({
+    workspace_id: '00000000-0000-0000-0000-000000000001',
+    user_id: user.id,
+    role: 'owner',
+    status: 'active',
+  }, { onConflict: 'workspace_id,user_id' })
+  if (membershipError) throw new Error(membershipError.message)
+
   console.log(`REACHAGENT_V2_ADMIN_BOOTSTRAP_PASS user_id=${user.id}`)
 }
 

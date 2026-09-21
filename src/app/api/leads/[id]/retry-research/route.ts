@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { researchOneLead, researchPurposeForInitialEmailMode } from '@/lib/research-lead'
 import { writeOneLead } from '@/lib/write-lead'
 import { readInitialEmailMode } from '@/lib/initial-email-router'
@@ -9,8 +9,10 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
   const { id } = await params
-  const supabase = createServiceClient()
+  const { supabase } = access
 
   const { data: lead, error: leadErr } = await supabase
     .from('leads')

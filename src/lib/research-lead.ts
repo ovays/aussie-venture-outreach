@@ -8,6 +8,7 @@ import {
 import type { HalalQualificationResult } from '@/lib/halalQualification'
 import type { InitialEmailMode } from '@/lib/settingsDefaults'
 import { fetchRawHtml, extractMailtoEmail } from '@/lib/email-extraction'
+import { workspaceRow } from '@/lib/supabase/workspace-service'
 
 export type ResearchableLeadRow = {
   id: string
@@ -206,7 +207,7 @@ export async function researchOneLead(
       logger.error('researcher', `Lead update failed for "${lead.business_name}"`, { error: updateErr.message })
     }
 
-    await supabase.from('activity_log').insert({
+      await supabase.from('activity_log').insert(workspaceRow(supabase, {
       event_type: 'lead_researched',
       lead_id: lead.id,
       description: `Researched: ${lead.business_name} | email: ${foundEmail ? 'found' : 'not found'} via ${emailMethod}`,
@@ -220,7 +221,7 @@ export async function researchOneLead(
         has_instagram: !!enriched.instagram_handle,
         has_website: !!lead.website,
       },
-    })
+      }))
 
     return {
       success: true,
@@ -243,12 +244,12 @@ export async function researchOneLead(
     const msg = error instanceof Error ? error.message : String(error)
     logger.error('researcher', `Exception for "${lead.business_name}": ${msg}`)
 
-    await supabase.from('activity_log').insert({
+    await supabase.from('activity_log').insert(workspaceRow(supabase, {
       event_type: 'agent_error',
       lead_id: lead.id,
       description: `Error researching: ${lead.business_name}: ${msg}`,
       metadata: { error: msg },
-    })
+    }))
 
     // Mark researched so the writer agent can still attempt this lead
     await supabase.from('leads').update({ status: 'researched' }).eq('id', lead.id)

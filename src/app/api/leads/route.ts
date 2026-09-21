@@ -5,6 +5,7 @@ import { checkRateLimit } from '@/lib/rateLimit'
 import { ALL_STATUSES, STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
 import { STAGE_VALUES } from '@/lib/stage-import'
 import { createLead } from '@/lib/create-lead'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { readInitialEmailMode } from '@/lib/initial-email-router'
 import { resolvePagination } from '@/lib/pagination'
 import { normalizeSearchTerm } from '@/lib/search'
@@ -60,7 +61,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { allowed } = checkRateLimit(`leads:${ip}`, 60)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
-  const supabase = await createClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase, workspace } = access
   const initialEmailMode = await readInitialEmailMode(supabase)
   const raw = await request.json()
 
@@ -74,7 +77,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     current_stage, stage_completed_date,
   } = parsed.data
 
-  const result = await createLead(supabase, {
+  const result = await createLead(supabase, workspace.workspaceId, {
     business_name, email, website, suburb, city, category_id, category_name, force,
     current_stage, stage_completed_date,
     initialEmail: { mode: initialEmailMode, action: 'generate_now' },

@@ -4,6 +4,7 @@ import { addLeadToDedupeIndex, checkLeadDedupe, type LeadDedupeIndex } from '@/l
 import { generateInitialContent } from '@/services/initial-content'
 import type { InitialEmailMode } from '@/lib/settingsDefaults'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
+import { workspaceRow } from '@/lib/supabase/workspace-service'
 
 export type WriteableLeadRow = {
   id: string
@@ -44,7 +45,7 @@ export async function writeOneLead(
       hasInstagram: !!lead.instagram_handle,
     })
     await supabase.from('leads').update({ status: 'dead' }).eq('id', lead.id)
-    await supabase.from('activity_log').insert({
+    await supabase.from('activity_log').insert(workspaceRow(supabase, {
       event_type: 'lead_dead',
       lead_id: lead.id,
       description: `No email — skipped outreach generation and marked dead: ${lead.business_name}`,
@@ -52,17 +53,17 @@ export async function writeOneLead(
         reason: 'no_email',
         has_instagram: !!lead.instagram_handle,
       },
-    })
+    }))
     return { success: true, channel: 'dead' }
   }
 
   if (isDeliverySuppressedForAddress(lead.email, lead.delivery_suppressed_emails)) {
-    await supabase.from('activity_log').insert({
+    await supabase.from('activity_log').insert(workspaceRow(supabase, {
       event_type: 'data_quality_email_suppressed',
       lead_id: lead.id,
       description: `Initial outreach not queued for ${lead.business_name}: terminal delivery suppression`,
       metadata: { issue_type: 'delivery_suppressed_email', normalized_email: lead.email.trim().toLowerCase() },
-    })
+    }))
     return { success: true, channel: 'duplicate' }
   }
 
@@ -98,12 +99,12 @@ export async function writeOneLead(
       } else {
         logger.info('writer', '[DEBUG_DEDUPLICATION] duplicate domain detected', duplicateMeta)
         logger.info('writer', '[DEBUG_DEDUPLICATION] lead skipped reason', duplicateMeta)
-        await supabase.from('activity_log').insert({
+        await supabase.from('activity_log').insert(workspaceRow(supabase, {
           event_type: dedupeDecision.reason,
           lead_id: lead.id,
           description: `Duplicate skipped before email queueing: ${lead.business_name}`,
           metadata: duplicateMeta,
-        })
+        }))
         return { success: true, channel: 'duplicate' }
       }
     }
@@ -139,22 +140,22 @@ export async function writeOneLead(
       email: lead.email,
       status: 'email_ready',
     })
-    await supabase.from('activity_log').insert({
+    await supabase.from('activity_log').insert(workspaceRow(supabase, {
       event_type: 'outreach_written',
       lead_id: lead.id,
       description: `Outreach written: ${lead.business_name} (email)`,
       metadata: { channel: 'email', initial_email_mode: mode, generation_source: emailResult.generationSource },
-    })
+    }))
     return { success: true, channel: 'email', outcome: 'created', generationSource: emailResult.generationSource }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     logger.error('writer', `Exception for "${lead.business_name}": ${msg}`)
-    await supabase.from('activity_log').insert({
+    await supabase.from('activity_log').insert(workspaceRow(supabase, {
       event_type: 'agent_error',
       lead_id: lead.id,
       description: `Error writing for: ${lead.business_name}: ${msg}`,
       metadata: { error: msg },
-    })
+    }))
     return { success: false, error: msg }
   }
 }

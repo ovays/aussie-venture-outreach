@@ -126,19 +126,16 @@ BEGIN
 END
 $$;
 
--- Insert without workspace_id uses the transitional seed default (SaaS 1A).
+-- Insert without workspace_id fails closed after SaaS 1B removes the default.
 DO $$
-DECLARE v_ws uuid;
 BEGIN
-  PERFORM pg_temp.set_auth('10000000-0000-0000-0000-000000000001');
-  SET LOCAL ROLE authenticated;
-  INSERT INTO public.leads (business_name, category_name, city, status)
-  VALUES ('Default Workspace Lead', 'Synthetic', 'Sydney', 'new')
-  RETURNING workspace_id INTO v_ws;
-  RESET ROLE;
-  IF v_ws IS DISTINCT FROM '00000000-0000-0000-0000-000000000001'::uuid THEN
-    RAISE EXCEPTION 'insert without workspace_id did not default to seed workspace';
-  END IF;
+  BEGIN
+    INSERT INTO public.leads (business_name, category_name, city, status)
+    VALUES ('Missing Workspace Lead', 'Synthetic', 'Sydney', 'new');
+    RAISE EXCEPTION 'insert without workspace_id unexpectedly succeeded';
+  EXCEPTION WHEN not_null_violation THEN
+    NULL;
+  END;
 END
 $$;
 

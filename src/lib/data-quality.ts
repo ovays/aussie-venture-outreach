@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { requireWorkspaceIdForServiceClient } from '@/lib/supabase/workspace-scope'
 
 export const DATA_QUALITY_ISSUE_TYPES = [
   'duplicate_lead',
@@ -205,6 +206,7 @@ export async function claimRecipientOutreach(
   phase: 'initial' | 'follow_up' | 'reactivation',
 ): Promise<RecipientOwnershipDecision> {
   const { data, error } = await supabase.rpc('claim_recipient_outreach', {
+    p_workspace_id: requireWorkspaceIdForServiceClient(supabase),
     p_lead_id: leadId,
     p_phase: phase,
   })
@@ -227,6 +229,7 @@ export async function releaseRecipientOutreachClaim(
 ): Promise<boolean> {
   if (!normalizedEmail || !claimToken) return false
   const { data, error } = await supabase.rpc('release_recipient_outreach_claim', {
+    p_workspace_id: requireWorkspaceIdForServiceClient(supabase),
     p_lead_id: leadId,
     p_normalized_email: normalizedEmail,
     p_claim_token: claimToken,
@@ -257,6 +260,8 @@ export async function removeLeadFromInitialOutreachQueue(
 }
 
 export async function refreshLeadDataQuality(supabase: SupabaseClient, leadId: string): Promise<void> {
-  const { error } = await supabase.rpc('refresh_lead_data_quality', { p_lead_id: leadId })
+  const { error } = await supabase.rpc('refresh_lead_data_quality', {
+    p_workspace_id: requireWorkspaceIdForServiceClient(supabase), p_lead_id: leadId,
+  })
   if (error) throw new Error(`Lead data-quality refresh failed: ${error.message}`)
 }

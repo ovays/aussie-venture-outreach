@@ -6,11 +6,13 @@ import { createHostingerInboundReceiptStore } from '@/lib/hostinger-inbound-rece
 import { handleHostingerWebhookRequest } from '@/lib/hostinger-webhook-handler'
 import { logger } from '@/lib/logger'
 import { assertTriggerJobsEnabled } from '@/lib/side-effect-safety'
+import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 
 export const runtime = 'nodejs'
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const store = createHostingerInboundReceiptStore()
+  const workspaceId = process.env.HOSTINGER_WORKSPACE_ID ?? ''
+  const store = createHostingerInboundReceiptStore(createWorkspaceServiceClient(workspaceId))
   const response = await handleHostingerWebhookRequest(request, {
     webhookSecret: process.env.HOSTINGER_WEBHOOK_SECRET,
     mailboxId: process.env.HOSTINGER_MAILBOX_ID,
@@ -22,7 +24,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { accessToken: secretKey },
         () => tasks.trigger<typeof hostingerInboundTask>(
           'hostinger-inbound-message',
-          { receiptId },
+          { receiptId, workspaceId },
           { idempotencyKey, idempotencyKeyTTL: '24h' },
         ),
       )
