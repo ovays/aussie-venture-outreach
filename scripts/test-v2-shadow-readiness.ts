@@ -149,7 +149,7 @@ function testStaticBoundariesAndCompatibility() {
   const daily = read('trigger/daily-pipeline.ts')
   assert.ok(daily.includes('orchestratorFlags.enabled && !orchestratorFlags.shadow'))
   assert.ok(!daily.includes('trigger.daily_pipeline.shadow'))
-  for (const legacyStage of ['runFinderAgent()', 'runResearcherAgent(initialEmailMode)', 'runWriterAgent(initialEmailMode)', 'runSenderAgent()', 'runFollowUpAgent()', 'runReactivationAgent()']) {
+  for (const legacyStage of ['runFinderAgent(workspaceId)', 'runResearcherAgent(initialEmailMode)', 'runWriterAgent(initialEmailMode)', 'runSenderAgent()', 'runFollowUpAgent()', 'runReactivationAgent()']) {
     assert.ok(daily.includes(legacyStage), `V1 legacy path remains independent: ${legacyStage}`)
   }
   const dedicated = read('trigger/v2-shadow-comparison.ts')
@@ -172,6 +172,7 @@ function testStaticBoundariesAndCompatibility() {
     '00000000000006_workspace_settings_seed.sql',
     '00000000000007_workspace_rls_policies.sql',
     '00000000000008_workspace_indexes_and_constraints.sql',
+    '00000000000009_workspace_scope_functions_and_keys.sql',
   ])
 }
 

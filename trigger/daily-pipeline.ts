@@ -36,6 +36,15 @@ export const dailyPipelineJob = schedules.task({
     assertTriggerJobsEnabled('scheduled daily pipeline')
     assertFinderScheduleEnabled('scheduled Finder run')
     const pipelineSupabase = createServiceClient()
+    const { data: activeWorkspaces, error: workspaceError } = await pipelineSupabase
+      .from('workspaces')
+      .select('id')
+      .eq('status', 'active')
+      .order('created_at', { ascending: true })
+      .limit(1)
+    if (workspaceError) throw new Error(`Workspace resolution failed: ${workspaceError.message}`)
+    const workspaceId = activeWorkspaces?.[0]?.id
+    if (!workspaceId) throw new Error('No active workspace available')
     const telemetry = observability()
     const workflowRunId = await telemetry.startWorkflowRun({
       workflowType: 'daily_pipeline', source: ctx.run.isTest ? 'trigger.manual_test' : 'trigger.schedule', triggerTaskId: 'daily-pipeline',
@@ -83,7 +92,7 @@ export const dailyPipelineJob = schedules.task({
       console.log("[PIPELINE_STAGE] Finder starting")
       const finderResult = await withObservedStep(
         { stepName: 'finder', stepType: 'agent', sequence: 10, attempt: ctx.attempt.number },
-        () => runFinderAgent(),
+        () => runFinderAgent(workspaceId),
         (result) => result,
       )
       leadsFound = finderResult.leadsFound

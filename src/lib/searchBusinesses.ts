@@ -25,6 +25,7 @@ export async function searchBusinesses(
   query: string,
   limit: number,
   supabase: SupabaseClient,
+  workspaceId: string,
   skip = 0
 ): Promise<SearchResult> {
   // Cache only applies to first page (skip=0)
@@ -32,6 +33,7 @@ export async function searchBusinesses(
     const { data: cached } = await supabase
       .from('search_cache')
       .select('results, api_used')
+      .eq('workspace_id', workspaceId)
       .eq('query', query)
       .gt('expires_at', new Date().toISOString())
       .maybeSingle()
@@ -100,12 +102,13 @@ export async function searchBusinesses(
   if (skip === 0 && results.length > 0) {
     await supabase.from('search_cache').upsert(
       {
+        workspace_id: workspaceId,
         query,
         results,
         api_used: apiUsed,
         expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       },
-      { onConflict: 'query' }
+      { onConflict: 'workspace_id,query' }
     )
   }
 

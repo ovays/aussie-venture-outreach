@@ -1,12 +1,15 @@
-import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/server'
 import TopBar from '@/components/layout/TopBar'
 import { SystemSettings } from '@/components/settings/SystemSettings'
 import { CategoriesTable } from '@/components/settings/CategoriesTable'
 import { CitySuburbs } from '@/components/settings/CitySuburbs'
 import { LeadFiltering } from '@/components/settings/LeadFiltering'
 import { Card } from '@/components/ui/Card'
-import { withDefaultSettings } from '@/lib/settingsDefaults'
+import { SETTINGS_DEFAULTS, withDefaultSettings } from '@/lib/settingsDefaults'
 import { getTemplateModeBlockers, hydrateCategoryTemplates } from '@/lib/category-email-templates'
+import { requireUser } from '@/lib/auth'
+import { requireWorkspaceContext } from '@/lib/workspace-context'
+import { getPlatformSettings, getWorkspaceSettings } from '@/lib/workspace-settings'
 
 export const revalidate = 0
 
@@ -32,37 +35,52 @@ export interface OutscraperUsageData {
 }
 
 export default async function SettingsPage() {
-  const supabase = await createClient()
+  const auth = await requireUser()
+  const workspace = await requireWorkspaceContext(auth)
+  const supabase = createServiceClient()
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
-
   const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
 
-  const [{ data: settings }, { data: categories }, { data: categoryTemplates }, { data: usageEvents }, { data: suburbRows }, { count: dlqCount }, { count: searchCacheCount }] = await Promise.all([
-    supabase.from('settings').select('*').order('key'),
-    supabase.from('categories').select('*').order('name'),
-    supabase.from('category_email_templates').select('category_id, template_type, subject_template, body_template'),
+  const [{ data: categories }, { data: categoryTemplates }, { data: usageEvents }, { data: suburbRows }, { count: dlqCount }, { count: searchCacheCount }] = await Promise.all([
+    supabase.from('categories').select('*').eq('workspace_id', workspace.workspaceId).order('name'),
+    supabase.from('category_email_templates').select('category_id, template_type, subject_template, body_template').eq('workspace_id', workspace.workspaceId),
     supabase
       .from('activity_log')
       .select('created_at, metadata')
+      .eq('workspace_id', workspace.workspaceId)
       .eq('event_type', 'finder_complete')
       .gte('created_at', thirtyDaysAgo)
       .order('created_at', { ascending: false }),
     supabase
       .from('city_suburbs')
       .select('id, city, suburb, active, priority')
+      .eq('workspace_id', workspace.workspaceId)
       .order('city')
       .order('suburb'),
     supabase
       .from('dead_letter_queue')
       .select('*', { count: 'exact', head: true })
+      .eq('workspace_id', workspace.workspaceId)
       .eq('resolved', false)
       .gte('created_at', since24h),
     supabase
       .from('search_cache')
       .select('*', { count: 'exact', head: true })
+      .eq('workspace_id', workspace.workspaceId)
       .gt('expires_at', new Date().toISOString()),
   ])
+
+  const settingsKeys = Object.keys(SETTINGS_DEFAULTS) as Array<keyof typeof SETTINGS_DEFAULTS>
+  const [platform, tenant] = await Promise.all([
+    getPlatformSettings(settingsKeys),
+    getWorkspaceSettings(workspace.workspaceId, settingsKeys),
+  ])
+  const settings = settingsKeys.map((key) => ({
+    key,
+    value: platform.get(key) ?? tenant.get(key) ?? SETTINGS_DEFAULTS[key].value,
+    description: SETTINGS_DEFAULTS[key].description,
+  }))
 
   // Group suburbs by city
   const suburbsByCity: Record<string, { id: string; suburb: string; active: boolean; priority: number }[]> = {}

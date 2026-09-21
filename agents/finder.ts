@@ -1319,7 +1319,7 @@ async function getDailyOutscraperSpend(supabase: ReturnType<typeof createService
 
 // ── Main agent ───────────────────────────────────────────────────────────────
 
-export async function runFinderAgent(): Promise<{ leadsFound: number; runtimeLimitHit: boolean }> {
+export async function runFinderAgent(workspaceId: string): Promise<{ leadsFound: number; runtimeLimitHit: boolean }> {
   const supabase = createServiceClient()
 
   try {
@@ -1859,7 +1859,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
           let apiUsed: string
           try {
             callCount++
-            const searchResult = await searchBusinesses(query, category.batchSize, supabase, skip)
+            const searchResult = await searchBusinesses(query, category.batchSize, supabase, workspaceId, skip)
             const searchedAt = new Date().toISOString()
             await supabase
               .from('city_suburbs')
@@ -2208,7 +2208,7 @@ const MAX_RUNTIME_MS = 45 * 60 * 1000
                 reason: 'candidate_accepted',
               })
               qualifiedCandidates++
-              const { data: insertionResult, error } = await supabase.rpc('insert_finder_lead_if_new', { p_lead: {
+              const { data: insertionResult, error } = await supabase.rpc('insert_finder_lead_if_new', { p_workspace_id: workspaceId, p_lead: {
                 business_name:        name,
                 category_id:          category.id,
                 category_name:        category.name,

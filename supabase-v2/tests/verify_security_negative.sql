@@ -44,7 +44,7 @@ SELECT pg_temp.expect_denied(
 SELECT pg_temp.expect_denied(
   'member config mutation','authenticated','authenticated',
   '10000000-0000-0000-0000-000000000001',
-  $sql$INSERT INTO public.categories(name) VALUES ('Member Must Not Manage Config')$sql$);
+  $sql$INSERT INTO public.categories(workspace_id,name) VALUES ('00000000-0000-0000-0000-000000000001','Member Must Not Manage Config')$sql$);
 SELECT pg_temp.expect_denied(
   'member workflow mutation','authenticated','authenticated',
   '10000000-0000-0000-0000-000000000001',

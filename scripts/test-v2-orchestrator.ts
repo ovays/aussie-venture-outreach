@@ -199,7 +199,7 @@ function testStaticBoundaries() {
   const mapping = readFileSync(resolve(root, 'src/domain/orchestrator/executor-map.ts'), 'utf8')
   const observation = readFileSync(resolve(root, 'src/lib/observability/service.ts'), 'utf8')
   assert.ok(daily.includes('queue:') && daily.includes('concurrencyLimit: 1'), 'Trigger concurrency remains in Trigger.dev')
-  assert.ok(daily.indexOf('runFinderAgent()') < daily.indexOf('const leadIds = await selectOrchestrationCandidateIds'), 'Finder remains before lead orchestration')
+  assert.ok(daily.indexOf('runFinderAgent(workspaceId)') < daily.indexOf('const leadIds = await selectOrchestrationCandidateIds'), 'Finder remains before lead orchestration')
   assert.ok(daily.includes('orchestratorFlags.enabled && !orchestratorFlags.shadow'), 'shadow takes precedence over enabled execution')
   assert.match(envExample, /ORCHESTRATOR_ENABLED=false/)
   assert.match(envExample, /ORCHESTRATOR_SHADOW=false/)
@@ -215,7 +215,8 @@ function testStaticBoundaries() {
     '00000000000006_workspace_settings_seed.sql',
     '00000000000007_workspace_rls_policies.sql',
     '00000000000008_workspace_indexes_and_constraints.sql',
-  ], 'SaaS 1A migration set matches the approved tenancy foundation only')
+    '00000000000009_workspace_scope_functions_and_keys.sql',
+  ], 'SaaS 1A + partial 1B migration set matches the approved foundation only')
 }
 
 async function main() {

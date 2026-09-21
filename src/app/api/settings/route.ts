@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { SETTINGS_DEFAULTS, isInitialEmailMode, isSettingKey } from '@/lib/settingsDefaults'
 import { isAuthErrorResponse, requireApiAdmin, requireApiUser } from '@/lib/auth'
+import { requireWorkspaceContext } from '@/lib/workspace-context'
+import { isPlatformSettingKey, getPlatformSettings, getWorkspaceSettings, upsertPlatformSetting, upsertWorkspaceSetting } from '@/lib/workspace-settings'
 import { getTemplateModeBlockers } from '@/lib/category-email-templates'
 import type { CategoryEmailTemplateDraft } from '@/lib/email-template-types'
 
@@ -27,20 +29,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { allowed } = checkRateLimit(`settings:${ip}`, 30)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
-  const supabase = await createClient()
+  const workspace = await requireWorkspaceContext(auth)
+  const supabase = createServiceClient()
 
-  const { data, error } = await supabase.from('settings').select('*').order('key')
+  const settingKeys = Object.keys(SETTINGS_DEFAULTS) as Array<keyof typeof SETTINGS_DEFAULTS>
+  const [platform, tenant] = await Promise.all([
+    getPlatformSettings(settingKeys),
+    getWorkspaceSettings(workspace.workspaceId, settingKeys),
+  ])
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  const rows = Object.entries(SETTINGS_DEFAULTS).map(([key, defaults]) => ({
+    key,
+    value: platform.get(key) ?? tenant.get(key) ?? defaults.value,
+    description: defaults.description,
+  })).sort((a, b) => a.key.localeCompare(b.key))
 
-  console.log('[SETTINGS_FETCH]', {
-    keys: (data ?? []).map((setting) => setting.key),
-    values: Object.fromEntries((data ?? []).map((setting) => [setting.key, setting.value])),
-  })
-
-  return NextResponse.json({ data })
+  return NextResponse.json({ data: rows })
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
@@ -50,7 +54,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { allowed } = checkRateLimit(`settings:${ip}`, 30)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
-  const supabase = await createClient()
+  const workspace = await requireWorkspaceContext(auth)
+  const supabase = createServiceClient()
   const raw = await request.json()
 
   const parsed = patchSettingSchema.safeParse(raw)
@@ -63,8 +68,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   if (key === 'initial_email_mode' && value === 'template') {
     const [{ data: categories, error: categoryError }, { data: templates, error: templateError }] = await Promise.all([
-      supabase.from('categories').select('id, name, status').eq('status', 'active').order('name'),
-      supabase.from('category_email_templates').select('category_id, template_type, subject_template, body_template').eq('template_type', 'initial_pitch'),
+      supabase.from('categories').select('id, name, status').eq('workspace_id', workspace.workspaceId).eq('status', 'active').order('name'),
+      supabase.from('category_email_templates').select('category_id, template_type, subject_template, body_template').eq('workspace_id', workspace.workspaceId).eq('template_type', 'initial_pitch'),
     ])
     const loadError = categoryError ?? templateError
     if (loadError) return NextResponse.json({ error: loadError.message }, { status: 500 })
@@ -86,25 +91,11 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  console.log('[SETTINGS_SAVE]', {
-    keys: [key],
-    values: { [key]: value },
-  })
-
-  const { data, error } = await supabase
-    .from('settings')
-    .upsert({
-      key,
-      value,
-      description: defaults.description,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'key' })
-    .select()
-    .single()
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  if (isPlatformSettingKey(key)) {
+    await upsertPlatformSetting(key, value, defaults.description)
+  } else {
+    await upsertWorkspaceSetting(workspace.workspaceId, key, value, defaults.description)
   }
 
-  return NextResponse.json({ data })
+  return NextResponse.json({ data: { key, value } })
 }

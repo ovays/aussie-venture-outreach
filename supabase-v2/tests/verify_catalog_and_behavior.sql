@@ -139,16 +139,16 @@ INSERT INTO public.workspace_members (workspace_id, user_id, role, status) VALUE
   ('00000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000003', 'member', 'suspended');
 
 -- Synthetic roots.
-INSERT INTO public.categories(id,name,status) VALUES
-  ('20000000-0000-0000-0000-000000000001','Synthetic Category','active');
-INSERT INTO public.city_suburbs(id,city,suburb,active) VALUES
-  ('30000000-0000-0000-0000-000000000001','Sydney','Testville',true);
+INSERT INTO public.categories(id,workspace_id,name,status) VALUES
+  ('20000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','Synthetic Category','active');
+INSERT INTO public.city_suburbs(id,workspace_id,city,suburb,active) VALUES
+  ('30000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','Sydney','Testville',true);
 
 -- Normalization and accepted status.
 INSERT INTO public.leads(
-  id,business_name,category_id,category_name,city,email,status
+  id,workspace_id,business_name,category_id,category_name,city,email,status
 ) VALUES (
-  '40000000-0000-0000-0000-000000000001','  Test Business  ',
+  '40000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','  Test Business  ',
   '20000000-0000-0000-0000-000000000001','Synthetic Category','Sydney',
   ' test@example.com ','interested'
 );
@@ -157,8 +157,8 @@ SELECT pg_temp.assert_true(
    FROM public.leads WHERE id='40000000-0000-0000-0000-000000000001'),
   'lead trimming and normalized_email ordering');
 
-INSERT INTO public.leads(id,business_name,category_name,city,email,status)
-VALUES ('40000000-0000-0000-0000-000000000002','Whitespace Email','Synthetic Category','Sydney','   ','new');
+INSERT INTO public.leads(id,workspace_id,business_name,category_name,city,email,status)
+VALUES ('40000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001','Whitespace Email','Synthetic Category','Sydney','   ','new');
 SELECT pg_temp.assert_true(
   (SELECT email IS NULL AND normalized_email IS NULL FROM public.leads WHERE id='40000000-0000-0000-0000-000000000002'),
   'whitespace email becomes NULL before normalized_email');
@@ -166,11 +166,11 @@ SELECT pg_temp.assert_true(
 -- Expected constraint failures.
 DO $$
 BEGIN
-  BEGIN INSERT INTO public.city_suburbs(city,suburb,priority) VALUES ('Sydney','Bad Low',0); RAISE EXCEPTION 'priority 0 unexpectedly accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
-  BEGIN INSERT INTO public.city_suburbs(city,suburb,priority) VALUES ('Sydney','Bad High',11); RAISE EXCEPTION 'priority 11 unexpectedly accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
-  BEGIN INSERT INTO public.leads(business_name,category_name,city,status) VALUES ('Bad Status','Synthetic Category','Sydney','dm_queued'); RAISE EXCEPTION 'dm_queued unexpectedly accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
-  BEGIN INSERT INTO public.leads(business_name,category_name,city,status) VALUES ('Bad Status 2','Synthetic Category','Sydney','closed_won'); RAISE EXCEPTION 'closed_won unexpectedly accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
-  BEGIN INSERT INTO public.leads(business_name,category_id,category_name,city) VALUES ('Bad FK','ffffffff-ffff-ffff-ffff-ffffffffffff','Synthetic Category','Sydney'); RAISE EXCEPTION 'invalid category FK unexpectedly accepted'; EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+  BEGIN INSERT INTO public.city_suburbs(workspace_id,city,suburb,priority) VALUES ('00000000-0000-0000-0000-000000000001','Sydney','Bad Low',0); RAISE EXCEPTION 'priority 0 unexpectedly accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
+  BEGIN INSERT INTO public.city_suburbs(workspace_id,city,suburb,priority) VALUES ('00000000-0000-0000-0000-000000000001','Sydney','Bad High',11); RAISE EXCEPTION 'priority 11 unexpectedly accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
+  BEGIN INSERT INTO public.leads(workspace_id,business_name,category_name,city,status) VALUES ('00000000-0000-0000-0000-000000000001','Bad Status','Synthetic Category','Sydney','dm_queued'); RAISE EXCEPTION 'dm_queued unexpectedly accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
+  BEGIN INSERT INTO public.leads(workspace_id,business_name,category_name,city,status) VALUES ('00000000-0000-0000-0000-000000000001','Bad Status 2','Synthetic Category','Sydney','closed_won'); RAISE EXCEPTION 'closed_won unexpectedly accepted'; EXCEPTION WHEN check_violation THEN NULL; END;
+  BEGIN INSERT INTO public.leads(workspace_id,business_name,category_id,category_name,city) VALUES ('00000000-0000-0000-0000-000000000001','Bad FK','ffffffff-ffff-ffff-ffff-ffffffffffff','Synthetic Category','Sydney'); RAISE EXCEPTION 'invalid category FK unexpectedly accepted'; EXCEPTION WHEN foreign_key_violation THEN NULL; END;
 END
 $$;
 
@@ -184,8 +184,8 @@ SELECT pg_temp.assert_true(
   'email change recomputes/clears suppression');
 
 -- Data-quality trigger representative.
-INSERT INTO public.leads(id,business_name,category_name,city,email,status)
-VALUES ('40000000-0000-0000-0000-000000000003','Invalid Email','Synthetic Category','Sydney','not-an-email','new');
+INSERT INTO public.leads(id,workspace_id,business_name,category_name,city,email,status)
+VALUES ('40000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000001','Invalid Email','Synthetic Category','Sydney','not-an-email','new');
 SELECT pg_temp.assert_true(
   EXISTS (SELECT 1 FROM public.lead_data_quality_flags WHERE lead_id='40000000-0000-0000-0000-000000000003' AND status='open'),
   'data-quality trigger creates an open flag');
@@ -195,8 +195,8 @@ BEGIN;
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role','authenticated',true);
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
-INSERT INTO public.leads(id,business_name,category_name,city,status)
-VALUES ('40000000-0000-0000-0000-000000000004','Member Insert','Synthetic Category','Sydney','new');
+INSERT INTO public.leads(id,workspace_id,business_name,category_name,city,status)
+VALUES ('40000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000001','Member Insert','Synthetic Category','Sydney','new');
 UPDATE public.leads SET status='researched' WHERE id='40000000-0000-0000-0000-000000000004';
 DELETE FROM public.leads WHERE id='40000000-0000-0000-0000-000000000004';
 SELECT pg_temp.assert_true(EXISTS(SELECT 1 FROM public.leads WHERE id='40000000-0000-0000-0000-000000000004'),'member delete is blocked by RLS');
@@ -211,7 +211,7 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000003',true);
   SET LOCAL ROLE authenticated;
   BEGIN
-    INSERT INTO public.leads(business_name,category_name,city) VALUES ('Inactive Insert','Synthetic Category','Sydney');
+    INSERT INTO public.leads(workspace_id,business_name,category_name,city) VALUES ('00000000-0000-0000-0000-000000000001','Inactive Insert','Synthetic Category','Sydney');
     RAISE EXCEPTION 'inactive member insert unexpectedly accepted';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
@@ -223,8 +223,8 @@ BEGIN;
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role','authenticated',true);
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000002',true);
-INSERT INTO public.category_suburb_priorities(category_id,city_suburb_id,priority)
-VALUES ('20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',7);
+INSERT INTO public.category_suburb_priorities(workspace_id,category_id,city_suburb_id,priority)
+VALUES ('00000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',7);
 SELECT pg_temp.assert_true(public.get_data_quality_summary() IS NOT NULL,'admin guarded report works');
 SELECT public.set_data_quality_flag_status(
   'invalid_email',NULL,ARRAY['40000000-0000-0000-0000-000000000003'::uuid],
@@ -241,8 +241,8 @@ SET LOCAL ROLE service_role;
 SELECT set_config('request.jwt.claim.role','service_role',true);
 SELECT set_config('request.jwt.claim.sub','',true);
 SELECT pg_temp.assert_true(public.claim_recipient_outreach('40000000-0000-0000-0000-000000000001','initial')->>'allowed'='true','service recipient claim works');
-INSERT INTO public.inbound_receipts(id,provider,receipt_key,status,payload)
-VALUES ('50000000-0000-0000-0000-000000000001','hostinger','synthetic-receipt','pending','{}');
+INSERT INTO public.inbound_receipts(id,workspace_id,provider,receipt_key,status,payload)
+VALUES ('50000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','hostinger','synthetic-receipt','pending','{}');
 SELECT pg_temp.assert_true(
   EXISTS (SELECT 1 FROM public.claim_hostinger_inbound_receipt('50000000-0000-0000-0000-000000000001','synthetic-run',now()-interval '1 minute')),
   'service inbound receipt claim works');

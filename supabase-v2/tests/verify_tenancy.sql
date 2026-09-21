@@ -126,7 +126,7 @@ BEGIN
 END
 $$;
 
--- Insert without workspace_id uses the seed default (transitional behavior).
+-- Insert without workspace_id uses the transitional seed default (SaaS 1A).
 DO $$
 DECLARE v_ws uuid;
 BEGIN
