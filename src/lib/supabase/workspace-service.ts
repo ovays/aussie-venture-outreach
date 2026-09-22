@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
+import { isCanonicalUuid } from '@/lib/uuid'
 import { createServiceClient } from './server'
 import { registerWorkspaceServiceClient } from './workspace-scope'
 export { workspaceIdForServiceClient, requireWorkspaceIdForServiceClient, workspaceRow, workspaceRows } from './workspace-scope'
@@ -31,7 +32,6 @@ export const WORKSPACE_TENANT_TABLES = [
 ] as const
 
 const tenantTables = new Set<string>(WORKSPACE_TENANT_TABLES)
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 type Row = Record<string, unknown>
 
 function withWorkspace(values: Row | readonly Row[], workspaceId: string): Row | Row[] {
@@ -54,7 +54,7 @@ function withWorkspace(values: Row | readonly Row[], workspaceId: string): Row |
  * settings table so one scoped client can be passed through existing services.
  */
 export function createWorkspaceServiceClient(workspaceId: string): SupabaseClient<Database> {
-  if (!UUID.test(workspaceId)) throw new Error('A valid workspaceId is required for operational database access')
+  if (!isCanonicalUuid(workspaceId)) throw new Error('A valid workspaceId is required for operational database access')
   const client = createServiceClient() as SupabaseClient<Database>
 
   const scopedClient = new Proxy(client, {

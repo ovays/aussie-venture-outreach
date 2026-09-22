@@ -34,6 +34,7 @@
     "test:observability:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-observability.ts",
     "audit:tenancy:v2": "tsx scripts/audit-v2-operational-tenancy.ts",
     "test:orchestrator:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-orchestrator.ts",
+    "test:workspace-tenancy:v2": "dotenv -e .env.v2.local -- tsx scripts/test-workspace-uuid-validation.ts",
     "test:agent-consolidation:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-agent-consolidation.ts",
     "shadow:v2": "dotenv -e .env.v2.local -- tsx scripts/shadow-v2.ts",
     "shadow-report:v2": "dotenv -e .env.v2.local -- tsx scripts/shadow-v2.ts",
