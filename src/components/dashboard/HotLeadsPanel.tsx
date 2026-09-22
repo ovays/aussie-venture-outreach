@@ -87,7 +87,7 @@ export function HotLeadsPanel({ leads }: HotLeadsPanelProps) {
   }
 
   return (
-    <div className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+    <div className="divide-y divide-[var(--border-subtle)]">
       {sorted.map((lead) => {
         const meta = STATUS_META[lead.status] ?? STATUS_META.contacted
         const interaction = getInteraction(lead.emails)
@@ -97,7 +97,7 @@ export function HotLeadsPanel({ leads }: HotLeadsPanelProps) {
           <div
             key={lead.id}
             onClick={() => openDrawer(lead.id)}
-            className="group flex items-center gap-3.5 py-3.5 px-3 transition-colors duration-150 hover:bg-white/[0.025] rounded-xl cursor-pointer"
+            className="group flex items-center gap-3.5 py-3.5 px-3 transition-colors duration-150 hover:bg-[var(--surface-hover)] rounded-xl cursor-pointer"
           >
             {/* Status accent bar */}
             <div
@@ -114,7 +114,7 @@ export function HotLeadsPanel({ leads }: HotLeadsPanelProps) {
             {/* Content */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-semibold leading-none truncate" style={{ color: '#f1f5f9' }}>
+                <span className="text-sm font-semibold leading-none truncate text-[var(--text-primary)]">
                   {lead.business_name}
                 </span>
                 <span

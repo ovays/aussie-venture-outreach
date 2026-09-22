@@ -16,7 +16,7 @@ export function DailyActivity({ rows }: DailyActivityProps) {
     <div className="overflow-x-auto -mx-4 md:-mx-5">
       <table className="w-full text-sm min-w-[480px]">
         <thead>
-          <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
+          <tr className="border-b border-[var(--border-subtle)] bg-[var(--background-subtle)]">
             {['Date', 'Leads', 'Emails', 'DMs', 'Follow-ups'].map((h) => (
               <th
                 key={h}
@@ -30,12 +30,8 @@ export function DailyActivity({ rows }: DailyActivityProps) {
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr
-              key={row.date}
-              className={i % 2 === 0 ? '' : ''}
-              style={{ borderBottom: '1px solid #1a1d27' }}
-            >
-              <td className="px-4 md:px-5 py-2.5 font-medium text-white whitespace-nowrap">{row.label}</td>
+            <tr key={row.date} className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--surface-hover)]">
+              <td className="px-4 md:px-5 py-2.5 font-medium text-[var(--text-primary)] whitespace-nowrap">{row.label}</td>
               <td className="px-4 md:px-5 py-2.5 tabular-nums" style={{ color: row.leadsFound  > 0 ? '#4ade80' : '#475569' }}>{row.leadsFound}</td>
               <td className="px-4 md:px-5 py-2.5 tabular-nums" style={{ color: row.emailsSent  > 0 ? '#38bdf8' : '#475569' }}>{row.emailsSent}</td>
               <td className="px-4 md:px-5 py-2.5 tabular-nums" style={{ color: row.dmsQueued   > 0 ? '#f472b6' : '#475569' }}>{row.dmsQueued}</td>

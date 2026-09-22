@@ -63,19 +63,16 @@ export function HealthBanner() {
           <div
             key={issue.type}
             className="flex items-start gap-3 px-4 py-2.5"
-            style={{
-              background: critical ? '#450a0a' : '#431407',
-              borderBottom: `1px solid ${critical ? '#7f1d1d' : '#9a3412'}`,
-            }}
+            style={{ background: critical ? 'var(--error-muted)' : 'var(--warning-muted)', borderBottom: `1px solid ${critical ? 'var(--error-border)' : 'var(--warning-border)'}` }}
           >
             {critical ? (
-              <AlertCircle size={14} className="shrink-0 mt-0.5" style={{ color: '#f87171' }} />
+              <AlertCircle size={14} className="shrink-0 mt-0.5 text-[var(--error)]" />
             ) : isSystemInactive ? (
-              <PauseCircle size={14} className="shrink-0 mt-0.5" style={{ color: '#fb923c' }} />
+              <PauseCircle size={14} className="shrink-0 mt-0.5 text-[var(--warning)]" />
             ) : (
-              <AlertTriangle size={14} className="shrink-0 mt-0.5" style={{ color: '#fb923c' }} />
+              <AlertTriangle size={14} className="shrink-0 mt-0.5 text-[var(--warning)]" />
             )}
-            <span className="flex-1 text-sm" style={{ color: critical ? '#fca5a5' : '#fdba74' }}>
+            <span className="flex-1 text-sm" style={{ color: critical ? 'var(--error)' : 'var(--warning)' }}>
               <span className="font-semibold">
                 {critical ? (isCostGuard ? 'Cost Guard' : 'Pipeline Error') : isSystemInactive ? 'System Paused' : 'Warning'}
                 {issue.time ? ` · ${issue.time}` : ''}:{' '}

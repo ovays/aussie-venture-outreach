@@ -19,14 +19,14 @@ export function Table<T extends { id: string }>({
   emptyMessage = 'No records found',
 }: TableProps<T>) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+    <div className="data-table-shell">
+      <table className="data-table">
         <thead>
-          <tr className="border-b border-[var(--border)] bg-[var(--background-subtle)]">
+          <tr>
             {columns.map((col) => (
               <th
                 key={col.key}
-                className={`px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)] ${col.className ?? ''}`}
+                className={col.className ?? ''}
               >
                 {col.header}
               </th>
@@ -45,10 +45,10 @@ export function Table<T extends { id: string }>({
               <tr
                 key={row.id}
                 onClick={() => onRowClick?.(row)}
-                className={`border-b border-[var(--border-subtle)] transition-colors ${onRowClick ? 'cursor-pointer hover:bg-[var(--surface-hover)]' : ''}`}
+                className={onRowClick ? 'cursor-pointer' : ''}
               >
                 {columns.map((col) => (
-                  <td key={col.key} className={`px-4 py-3 text-[var(--text-primary)] ${col.className ?? ''}`}>
+                  <td key={col.key} className={col.className ?? ''}>
                     {col.render ? col.render(row) : String((row as Record<string, unknown>)[col.key] ?? '')}
                   </td>
                 ))}

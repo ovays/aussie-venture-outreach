@@ -21,8 +21,8 @@ interface PlatformBadgeProps {
 
 export function PlatformBadge({ platform }: PlatformBadgeProps) {
   const styles = {
-    instagram: 'bg-pink-500/10 text-pink-300',
-    facebook: 'bg-blue-500/10 text-blue-300',
+    instagram: 'bg-pink-500/10 text-pink-700',
+    facebook: 'bg-blue-500/10 text-blue-700',
   }
   return (
     <span className={`inline-flex min-h-6 items-center rounded-full border border-current/15 px-2.5 py-0.5 text-[11px] font-medium ${styles[platform]}`}>

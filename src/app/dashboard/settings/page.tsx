@@ -10,6 +10,7 @@ import { getTemplateModeBlockers, hydrateCategoryTemplates } from '@/lib/categor
 import { requireUser } from '@/lib/auth'
 import { requireWorkspaceContext } from '@/lib/workspace-context'
 import { getPlatformSettings, getWorkspaceSettings } from '@/lib/workspace-settings'
+import { Tabs } from '@/components/ui/Tabs'
 
 export const revalidate = 0
 
@@ -166,6 +167,13 @@ export default async function SettingsPage() {
     <div>
       <TopBar title="Settings" />
       <div className="page-content page-stack max-w-4xl">
+        <Tabs label="Settings sections" items={[
+          { label: 'Workspace', href: '/dashboard/settings' },
+          { label: 'Sequences', href: '#sequences' },
+          { label: 'Suburbs', href: '#suburbs' },
+          { label: 'Targeting', href: '#targeting' },
+          { label: 'Categories & templates', href: '#categories' },
+        ]} />
         {(dlqCount ?? 0) > 0 && (
           <Card>
             <div style={{ color: '#fbbf24', fontSize: '14px' }}>
@@ -174,29 +182,30 @@ export default async function SettingsPage() {
           </Card>
         )}
         <Card>
-          <SystemSettings initialSettings={settingsWithDefaults} initialTemplateModeBlockers={templateModeBlockers} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} cities={Object.keys(suburbsByCity).sort()} />
+          <div id="sequences" className="scroll-mt-28"><SystemSettings initialSettings={settingsWithDefaults} initialTemplateModeBlockers={templateModeBlockers} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} cities={Object.keys(suburbsByCity).sort()} /></div>
         </Card>
 
         <Card>
-          <CitySuburbs
+          <div id="suburbs" className="scroll-mt-28"><CitySuburbs
             initialData={suburbsByCity}
             initialCategories={(categories ?? []).map((category) => ({
               id: category.id,
               name: category.name,
               status: category.status,
             }))}
-          />
+          /></div>
         </Card>
 
         <Card>
-          <LeadFiltering
+          <div id="targeting" className="scroll-mt-28"><LeadFiltering
             initialEnabled={filterEnabled}
             initialKeywords={filterKeywords}
-          />
+          /></div>
         </Card>
 
         <Card>
-          <div id="categories">
+          <div id="categories" className="scroll-mt-28">
+            <span id="email-templates" className="scroll-mt-28" />
             <CategoriesTable initialCategories={categoriesWithTemplates} />
           </div>
         </Card>

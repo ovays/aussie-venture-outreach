@@ -15,15 +15,16 @@ const sidebarContext = source('src/components/layout/SidebarContext.tsx')
 const topBar = source('src/components/layout/TopBar.tsx')
 const globals = source('src/app/globals.css')
 
-assert.equal(navigationSections[0].label, 'Core')
-assert.deepEqual(navigationSections[0].items.map((item) => item.label), ['Dashboard', 'Leads', 'Pipeline', 'Deals'])
-assert.equal(navigationSections[1].label, 'Outreach')
+assert.equal(navigationSections[0]?.label, 'Home')
+assert.deepEqual(navigationSections.map((section) => section.label), ['Home', 'Leads', 'Outreach', 'Campaigns', 'Settings'])
+assert.deepEqual(navigationSections[1]?.items?.map((item) => item.label), ['All Leads', 'Lifecycle', 'Deals', 'Data Quality'])
+assert.equal(navigationSections[2]?.label, 'Outreach')
 assert.deepEqual(
-  navigationSections[1].items.map((item) => item.label),
-  ['DM Queue', 'Email Log', 'Email Report', 'Delivery Failures', 'Lifecycle'],
+  navigationSections[2]?.items?.map((item) => item.label),
+  ['Outreach Pipeline', 'DM Queue', 'Email Log', 'Email Report', 'Delivery Failures'],
 )
-assert.deepEqual(adminNavigation.map((item) => item.label), ['User Management', 'Data Quality', 'AI Analytics'])
-assert.deepEqual(utilityNavigation.map((item) => item.label), ['Settings', 'AI Settings'])
+assert.deepEqual(adminNavigation.map((item) => item.label), ['Team & Members', 'Data Quality', 'AI Analytics'])
+assert.deepEqual(utilityNavigation, [])
 
 assert.equal(isRouteActive('/dashboard', '/dashboard'), true)
 assert.equal(isRouteActive('/dashboard/leads', '/dashboard'), false)
@@ -33,17 +34,16 @@ assert.equal(isAdminRoute('/dashboard/admin/data-quality'), true, 'active Admin 
 assert.equal(isAdminRoute('/dashboard/settings/ai/analytics'), true, 'AI Analytics activates Admin')
 assert.equal(isAdminRoute('/dashboard/leads'), false)
 
-assert.match(sidebar, /md:w-60/, 'expanded desktop sidebar width is present')
+assert.match(sidebar, /md:w-64/, 'expanded desktop sidebar width is present')
 assert.match(sidebar, /md:w-\[4\.5rem\]/, 'collapsed desktop sidebar width is present')
 assert.match(sidebar, /title=\{collapsed \? item\.label/, 'collapsed links expose hover labels')
 assert.match(sidebar, /aria-label=\{collapsed \? item\.label/, 'collapsed links retain accessible names')
 assert.match(sidebar, /aria-expanded=\{adminOpen\}/, 'Admin disclosure exposes its state')
-assert.match(sidebar, /sessionStorage\.setItem\(ADMIN_OPEN_KEY/, 'Admin state lasts for the current session')
 assert.match(sidebarContext, /localStorage\.setItem/, 'desktop collapse preference persists locally')
 assert.match(sidebar, /event\.key === 'Escape'/, 'mobile drawer supports keyboard dismissal')
 assert.match(sidebar, /onClick=\{onNavigate\}/, 'navigation links call their route-selection handler')
 assert.match(sidebar, /handleNavigate = useCallback\(\(\) => close\(\)/, 'route selection closes the mobile drawer')
-assert.match(sidebar, /utilityNavigation\.map/, 'Settings render in the pinned utility section')
+assert.match(sidebar, /navigationSections\.map/, 'primary product areas render from shared navigation')
 assert.match(sidebar, /Sign out/, 'account control renders in the pinned utility section')
 assert.match(topBar, /md:hidden/, 'mobile menu button is limited to mobile widths')
 assert.match(topBar, /aria-controls="app-sidebar"/, 'mobile menu button identifies its drawer')

@@ -25,19 +25,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
   override render() {
     if (this.state.hasError) {
       return (
-        <div
-          style={{
-            padding: '16px',
-            borderRadius: '8px',
-            border: '1px solid #7f1d1d',
-            background: '#450a0a',
-            color: '#f87171',
-            fontSize: '14px',
-          }}
-        >
+        <div className="rounded-xl border border-[var(--error-border)] bg-[var(--error-muted)] p-4 text-sm text-[var(--error)]" role="alert">
           {this.props.label ? `${this.props.label} failed to load` : 'This section failed to load'}
           {this.state.message && (
-            <span style={{ display: 'block', fontSize: '12px', color: '#fca5a5', marginTop: '4px' }}>
+            <span className="mt-1 block text-xs text-[var(--text-secondary)]">
               {this.state.message}
             </span>
           )}

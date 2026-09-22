@@ -1,284 +1,71 @@
 import Link from 'next/link'
+import { AlertTriangle, ArrowRight, CircleDollarSign, Mail, MessageSquare, RefreshCcw, Send, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import TopBar from '@/components/layout/TopBar'
-import { ActionQueueCard } from '@/components/dashboard/ActionQueueCard'
-import { WorkflowQueue } from '@/components/dashboard/WorkflowQueue'
 import { HotLeadsPanel } from '@/components/dashboard/HotLeadsPanel'
-import { LiveActivityFeed } from '@/components/dashboard/LiveActivityFeed'
-import { PipelineSummary } from '@/components/dashboard/PipelineSummary'
-import { RevenueChart } from '@/components/dashboard/RevenueChart'
+import { StatsCard } from '@/components/dashboard/StatsCard'
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed'
 import { DailyActivity } from '@/components/dashboard/DailyActivity'
 import { Card } from '@/components/ui/Card'
-import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { logAnalyticsMetrics } from '@/lib/analytics'
 import { getDashboardSummary } from '@/lib/dashboard-summary'
 import { buildStageCounts } from '@/lib/lead-status'
-import { Send, MessageSquare, TrendingUp, RotateCcw, AlertTriangle, Flame, Zap } from 'lucide-react'
 
 export const revalidate = 60
 
 export default async function DashboardPage() {
   const supabase = await createClient()
-  const {
-    analytics,
-    statusMap,
-    recentActivity,
-    pendingDMCount,
-    dealsRolling30DayCount,
-    weeklyRevenue,
-    hotLeads,
-  } = await getDashboardSummary(supabase)
-
-  logAnalyticsMetrics('[DASHBOARD_METRICS]', {
-    range: analytics.todayEmailStats.range,
-    totalEmails: analytics.todayEmailStats.totalSent,
-    followups: analytics.followupStats.sentToday,
-    replies: analytics.replyStats.repliesToday,
-  })
-
-  const pipelineCounts = Object.entries(statusMap).map(([status, count]) => ({ status, count }))
-
-  // Use canonical stage groupings — matches Pipeline Kanban column counts exactly
+  const { analytics, statusMap, recentActivity, pendingDMCount, dealsRolling30DayCount, hotLeads } = await getDashboardSummary(supabase)
+  logAnalyticsMetrics('[DASHBOARD_METRICS]', { range: analytics.todayEmailStats.range, totalEmails: analytics.todayEmailStats.totalSent, followups: analytics.followupStats.sentToday, replies: analytics.replyStats.repliesToday })
   const stageCounts = buildStageCounts(statusMap)
-  const negotiationsActive = stageCounts.negotiating  // negotiating + interested
+  const totalLeads = Object.values(statusMap).reduce((sum, count) => sum + count, 0)
+  const actionItems = [
+    { label: 'Follow-ups due', value: analytics.followupStats.fuDue, detail: `${analytics.followupStats.overdueTotal} overdue`, href: '/dashboard/lifecycle?filter=fu_due', icon: Send, tone: 'var(--primary)' },
+    { label: 'Replies to review', value: statusMap.replied ?? 0, detail: `${analytics.replyStats.repliesToday} received today`, href: '/dashboard/leads?status=replied', icon: MessageSquare, tone: 'var(--accent)' },
+    { label: 'Reactivation queue', value: analytics.followupStats.reactivationTotal, detail: 'Ready for re-engagement', href: '/dashboard/lifecycle?filter=reactivation', icon: RefreshCcw, tone: 'var(--warning)' },
+    { label: 'Delivery attention', value: analytics.followupStats.overdueTotal, detail: 'Past due date', href: '/dashboard/lifecycle?filter=overdue', icon: AlertTriangle, tone: 'var(--error)' },
+  ]
 
-  console.log('[STAGE_COUNTS_DASHBOARD]', {
-    source: 'leads.status (no limit)',
-    raw_status_map: statusMap,
-    stage_counts: stageCounts,
-    note: 'negotiating = negotiating+interested, closed = closed+closed_manual',
-  })
-
-  return (
-    <div>
-      <TopBar title="Dashboard" />
-      <div className="page-content space-y-4 md:space-y-5">
-        {/* ── Today's Action Queue ── */}
-        <div>
-          <div className="flex items-end justify-between mb-5">
-            <div>
-              <h2 className="text-xl font-bold leading-none tracking-tight text-[var(--text-primary)]">
-                Today&apos;s Action Queue
-              </h2>
-              <p className="mt-1.5 text-sm text-[var(--text-muted)]">
-                What needs your attention right now
-              </p>
-            </div>
-            <div className="hidden sm:flex items-center gap-2 pb-0.5">
-              <span
-                className="w-1.5 h-1.5 rounded-full animate-pulse"
-                style={{ background: '#34d399' }}
-              />
-              <span className="text-xs font-mono" style={{ color: '#334155' }}>
-                Live · Sydney
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-3.5">
-            <ActionQueueCard
-              icon={<Send size={18} strokeWidth={1.8} />}
-              count={analytics.followupStats.fuDue}
-              title="Follow-ups Due"
-              subtitle="Overdue & ready to send"
-              detail={`FU1 ${analytics.followupStats.fu1Due} · FU2 ${analytics.followupStats.fu2Due} · FU3 ${analytics.followupStats.fu3Due}`}
-              ctaLabel="Send Follow-ups"
-              ctaHref="/dashboard/lifecycle?filter=fu_due"
-              accent="#8b5cf6"
-              urgency="medium"
-            />
-            <ActionQueueCard
-              icon={<MessageSquare size={18} strokeWidth={1.8} />}
-              count={statusMap['replied'] ?? 0}
-              title="Replies To Review"
-              subtitle="Awaiting your response"
-              detail={`Today: ${analytics.replyStats.repliesToday} · Rate: ${analytics.replyStats.replyRate}%`}
-              ctaLabel="Review Replies"
-              ctaHref="/dashboard/leads?status=replied"
-              accent="#38bdf8"
-              urgency="high"
-            />
-            <ActionQueueCard
-              icon={<TrendingUp size={18} strokeWidth={1.8} />}
-              count={negotiationsActive}
-              title="Negotiations Active"
-              subtitle="In active discussion"
-              detail={`Negotiating: ${statusMap['negotiating'] ?? 0} · Interested: ${statusMap['interested'] ?? 0}`}
-              ctaLabel="View Deals"
-              ctaHref="/dashboard/leads?stage=negotiating"
-              accent="#34d399"
-              urgency="normal"
-            />
-            <ActionQueueCard
-              icon={<RotateCcw size={18} strokeWidth={1.8} />}
-              count={analytics.followupStats.reactivationTotal}
-              title="Reactivation Queue"
-              subtitle="Cold leads to re-engage"
-              detail="DM outreach recommended"
-              ctaLabel="Open DM Queue"
-              ctaHref="/dashboard/lifecycle?filter=reactivation"
-              accent="#fb923c"
-              urgency="medium"
-            />
-            <ActionQueueCard
-              icon={<AlertTriangle size={18} strokeWidth={1.8} />}
-              count={analytics.followupStats.overdueTotal}
-              title="Overdue Leads"
-              subtitle="Past their due date"
-              detail="Needs immediate action"
-              ctaLabel="Review Overdue"
-              ctaHref="/dashboard/lifecycle?filter=overdue"
-              accent="#f87171"
-              urgency="critical"
-            />
-          </div>
+  return <div>
+    <TopBar title="Dashboard" />
+    <div className="page-content page-stack">
+      <section aria-labelledby="overview-heading">
+        <div className="mb-3 flex items-end justify-between"><div><h2 id="overview-heading" className="text-base font-semibold text-[var(--text-primary)]">Workspace overview</h2><p className="mt-0.5 text-sm text-[var(--text-muted)]">Today&apos;s performance at a glance</p></div><span className="hidden items-center gap-2 text-xs text-[var(--text-muted)] sm:flex"><span className="h-2 w-2 rounded-full bg-[var(--success)]" />Live · Sydney</span></div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatsCard label="Total leads" value={totalLeads} sub={`${stageCounts.contacted} contacted`} icon={<Users size={19} />} />
+          <StatsCard label="Emails sent today" value={analytics.todayEmailStats.totalSent} sub={`${analytics.followupStats.sentToday} follow-ups`} icon={<Mail size={19} />} tone="accent" />
+          <StatsCard label="Replies today" value={analytics.replyStats.repliesToday} sub={`${analytics.replyStats.replyRate}% reply rate`} icon={<MessageSquare size={19} />} tone="success" />
+          <StatsCard label="Deals this month" value={dealsRolling30DayCount} sub={`${stageCounts.negotiating} active negotiations`} icon={<CircleDollarSign size={19} />} tone="warning" />
         </div>
+      </section>
 
-        {/* ── Today's Tasks / Workflow Queue ── */}
-        <WorkflowQueue
-          fu1Due={analytics.followupStats.fu1Due}
-          fu2Due={analytics.followupStats.fu2Due}
-          fu3Overdue={analytics.followupStats.overdueTotal}
-          repliesToReview={statusMap['replied'] ?? 0}
-          negotiationsActive={negotiationsActive}
-          reactivationQueue={analytics.followupStats.reactivationTotal}
-          initialSentToday={analytics.todayEmailStats.initialSent}
-          fu1SentToday={analytics.followupStats.followUp1SentToday}
-          fu2SentToday={analytics.followupStats.followUp2SentToday}
-          fu3SentToday={analytics.followupStats.followUp3SentToday}
-          dmsToday={analytics.todayDmStats.sentToday}
-          repliesToday={analytics.replyStats.repliesToday}
-        />
-
-        {/* ── Hot Leads & Recent Replies ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4">
-          {/* Hot Leads — 2 cols */}
-          <div className="lg:col-span-2 flex flex-col">
-            <div
-                className="surface flex flex-1 flex-col overflow-hidden"
-            >
-              {/* Header */}
-              <div
-                className="flex items-center justify-between px-5 py-4 flex-shrink-0"
-                style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className="p-1.5 rounded-lg"
-                    style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}
-                  >
-                    <Flame size={14} strokeWidth={2} />
-                  </div>
-                  <span className="text-sm font-semibold" style={{ color: '#f1f5f9' }}>
-                    Hot Leads
-                  </span>
-                  {hotLeads.length > 0 && (
-                    <span
-                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-bold"
-                      style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}
-                    >
-                      {hotLeads.length}
-                    </span>
-                  )}
-                </div>
-                <Link
-                  href="/dashboard/leads"
-                  className="text-xs font-medium transition-colors duration-150 hover:opacity-80"
-                  style={{ color: '#475569' }}
-                >
-                  View all →
-                </Link>
-              </div>
-
-              {/* Rows */}
-              <div className="px-4 py-2 flex-1">
-                <HotLeadsPanel leads={hotLeads} />
-              </div>
-            </div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,.65fr)]">
+        <Card noPadding>
+          <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4"><div><h2 className="text-sm font-semibold text-[var(--text-primary)]">Needs attention</h2><p className="mt-0.5 text-xs text-[var(--text-muted)]">Prioritised outreach work</p></div><Link href="/dashboard/lifecycle" className="text-xs font-medium text-[var(--primary)] hover:underline">View lifecycle</Link></div>
+          <div className="divide-y divide-[var(--border-subtle)]">
+            {actionItems.map(({ label, value, detail, href, icon: Icon, tone }) => <Link key={label} href={href} className="group flex items-center gap-3 px-5 py-3.5 hover:bg-[var(--surface-hover)]"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ color: tone, background: `color-mix(in srgb, ${tone} 10%, transparent)` }}><Icon size={17} /></span><span className="min-w-0 flex-1"><span className="block text-sm font-medium text-[var(--text-primary)]">{label}</span><span className="block truncate text-xs text-[var(--text-muted)]">{detail}</span></span><span className="text-lg font-semibold tabular-nums text-[var(--text-primary)]">{value.toLocaleString()}</span><ArrowRight size={15} className="text-[var(--text-muted)] group-hover:translate-x-0.5 group-hover:text-[var(--primary)]" /></Link>)}
           </div>
-
-          {/* Live Activity — 1 col */}
-          <div className="flex flex-col">
-            <div
-                className="surface flex flex-1 flex-col overflow-hidden"
-            >
-              {/* Header */}
-              <div
-                className="flex items-center gap-2.5 px-5 py-4 flex-shrink-0"
-                style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-              >
-                <div
-                  className="p-1.5 rounded-lg"
-                  style={{ background: 'rgba(52,211,153,0.1)', color: '#34d399' }}
-                >
-                  <Zap size={14} strokeWidth={2} />
-                </div>
-                <span className="text-sm font-semibold" style={{ color: '#f1f5f9' }}>
-                  Live Activity
-                </span>
-                <span
-                  className="w-1.5 h-1.5 rounded-full ml-auto animate-pulse"
-                  style={{ background: '#34d399' }}
-                />
-              </div>
-
-              {/* Feed */}
-              <div className="px-5 py-4 overflow-y-auto flex-1">
-                <LiveActivityFeed
-                  events={recentActivity}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Pipeline */}
-        <PipelineSummary counts={pipelineCounts} />
-
-        {/* Revenue chart */}
-        <Card title="Weekly Revenue — Last 12 Weeks">
-          <ErrorBoundary label="RevenueChart">
-            <RevenueChart data={weeklyRevenue} />
-          </ErrorBoundary>
         </Card>
-
-        {/* Daily activity */}
-        <Card title="Daily Activity — Last 7 Days">
-          <DailyActivity rows={analytics.dailyRows} />
+        <Card noPadding>
+          <div className="border-b border-[var(--border-subtle)] px-5 py-4"><h2 className="text-sm font-semibold text-[var(--text-primary)]">Lead summary</h2><p className="mt-0.5 text-xs text-[var(--text-muted)]">Current lifecycle distribution</p></div>
+          <div className="space-y-4 p-5">{[
+            ['New & researching', (statusMap.new ?? 0) + (statusMap.researched ?? 0) + (statusMap.email_ready ?? 0), 'var(--primary)'],
+            ['Contacted', stageCounts.contacted, 'var(--accent)'],
+            ['Replied', stageCounts.replied, 'var(--success)'],
+            ['Negotiating', stageCounts.negotiating, 'var(--warning)'],
+            ['Closed', stageCounts.closed, 'var(--success)'],
+          ].map(([label, value, color]) => { const numeric = Number(value); const pct = Math.max(totalLeads ? (numeric / totalLeads) * 100 : 0, numeric ? 3 : 0); return <div key={String(label)}><div className="mb-1.5 flex justify-between text-xs"><span className="text-[var(--text-secondary)]">{label}</span><span className="font-semibold text-[var(--text-primary)]">{numeric.toLocaleString()}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[var(--background-subtle)]"><div className="h-full rounded-full" style={{ width: `${pct}%`, background: String(color) }} /></div></div> })}</div>
+          <div className="border-t border-[var(--border-subtle)] px-5 py-3"><Link href="/dashboard/leads" className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--primary)]">Explore all leads <ArrowRight size={13} /></Link></div>
         </Card>
-
-        {/* Activity feed + quick stats */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <Card title="Recent Activity">
-              <ActivityFeed events={recentActivity} />
-            </Card>
-          </div>
-
-          <Card title="Quick Stats">
-            <div className="space-y-3">
-              {[
-                { label: 'New outreach emails today',  value: analytics.todayEmailStats.initialSent },
-                { label: 'New DMs sent today',         value: analytics.todayDmStats.sentToday },
-                { label: 'Follow-ups sent today',      value: analytics.followupStats.sentToday },
-                { label: 'FU1 / FU2 / FU3 today',     value: `${analytics.followupStats.followUp1SentToday} / ${analytics.followupStats.followUp2SentToday} / ${analytics.followupStats.followUp3SentToday}` },
-                { label: 'Total follow-ups sent',      value: analytics.followupStats.totalSent },
-                { label: 'Pending follow-ups',         value: analytics.followupStats.pending },
-                { label: 'Pending FU1 / FU2 / FU3',   value: `${analytics.followupStats.pendingFollowUp1} / ${analytics.followupStats.pendingFollowUp2} / ${analytics.followupStats.pendingFollowUp3}` },
-                { label: 'Replies today',              value: analytics.replyStats.repliesToday },
-                { label: 'DMs in queue',               value: pendingDMCount },
-                { label: 'Deals this month',           value: dealsRolling30DayCount },
-              ].map(({ label, value }) => (
-                <div key={label} className="flex items-center justify-between gap-2">
-                  <span className="text-sm min-w-0 truncate" style={{ color: '#94a3b8' }}>{label}</span>
-                  <span className="text-sm font-semibold text-white shrink-0">{value}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </div>
       </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2"><Card noPadding><div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4"><div><h2 className="text-sm font-semibold text-[var(--text-primary)]">Priority leads</h2><p className="mt-0.5 text-xs text-[var(--text-muted)]">Replies, interest, and active negotiations</p></div><Link href="/dashboard/leads" className="text-xs font-medium text-[var(--primary)]">View all</Link></div><div className="px-3 py-2"><HotLeadsPanel leads={hotLeads} /></div></Card></div>
+        <Card title="Recent activity"><ActivityFeed events={recentActivity.slice(0, 8)} /></Card>
+      </div>
+
+      <Card title="Last 7 days"><DailyActivity rows={analytics.dailyRows} /></Card>
+      {pendingDMCount > 0 && <div className="flex flex-col gap-3 rounded-xl border border-[var(--info-border)] bg-[var(--info-muted)] p-4 sm:flex-row sm:items-center"><MessageSquare size={19} className="shrink-0 text-[var(--info)]" /><div className="flex-1"><p className="text-sm font-medium text-[var(--text-primary)]">{pendingDMCount.toLocaleString()} direct messages are queued</p><p className="text-xs text-[var(--text-muted)]">Review the queue before taking action.</p></div><Link href="/dashboard/dm-queue" className="text-sm font-semibold text-[var(--info)]">Open DM Queue</Link></div>}
     </div>
-  )
+  </div>
 }

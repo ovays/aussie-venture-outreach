@@ -25,8 +25,8 @@ export default async function AdminPage() {
       <TopBar title="Admin" />
       <div className="page-content page-stack">
         <div>
-          <h1 className="text-xl font-semibold text-white">User Management</h1>
-          <p className="text-sm mt-1" style={{ color: '#94a3b8' }}>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Team &amp; member access</h1>
+          <p className="text-sm mt-1 text-[var(--text-muted)]">
             Admin-created accounts, role assignment, account status, password resets, and deletions.
           </p>
         </div>
@@ -35,8 +35,7 @@ export default async function AdminPage() {
           {['Users', 'Roles', 'Create User', 'Disable User', 'Delete User', 'Reset Password'].map((label) => (
             <span
               key={label}
-              className="rounded-full border px-3 py-1 text-xs font-medium"
-              style={{ borderColor: '#2a2d3e', color: '#94a3b8', background: '#11141d' }}
+              className="rounded-full border border-[var(--border)] bg-[var(--background-subtle)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]"
             >
               {label}
             </span>

@@ -50,7 +50,7 @@ export function ActivityFeed({ events }: ActivityFeedProps) {
         return (
           <div
             key={event.id}
-            className="flex items-start gap-3 px-1 py-2.5 rounded-lg hover:bg-white/3 transition-colors"
+              className="flex items-start gap-3 px-1 py-2.5 rounded-lg hover:bg-[var(--surface-hover)] transition-colors"
           >
             <div
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm mt-0.5"
@@ -59,7 +59,7 @@ export function ActivityFeed({ events }: ActivityFeedProps) {
               {meta.icon}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm leading-snug" style={{ color: '#cbd5e1' }}>{event.description}</p>
+              <p className="text-sm leading-snug text-[var(--text-secondary)]">{event.description}</p>
             </div>
             <span className="text-xs shrink-0 mt-0.5" style={{ color: '#475569' }}>
               {timeAgo(event.created_at)}

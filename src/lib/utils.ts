@@ -79,7 +79,7 @@ export function statusColor(status: string): string {
     suppressed: 'bg-[var(--error-muted)] text-[var(--error)]',
     dead: 'bg-[var(--error-muted)] text-[var(--error)]',
   }
-  return colors[status] ?? 'bg-white/5 text-[var(--text-secondary)]'
+  return colors[status] ?? 'bg-[var(--background-subtle)] text-[var(--text-secondary)]'
 }
 
 export function statusLabel(status: string): string {
