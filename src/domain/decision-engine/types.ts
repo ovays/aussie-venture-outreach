@@ -1,5 +1,7 @@
 import type { LeadStatus } from '@/lib/lead-status'
 import type { InitialEmailMode } from '@/lib/settingsDefaults'
+import { CATEGORY_POLICY_REASON_CODES } from '@/domain/category-policy'
+import type { CategoryPolicy, CategoryPolicyFacts, CategoryPolicyReason } from '@/domain/category-policy'
 
 export const DECISION_ACTIONS = [
   'STOP',
@@ -66,6 +68,7 @@ export const DECISION_REASON_CODES = [
   'MANUAL_SOURCE',
   'RECIPIENT_OWNED_BY_OTHER',
   'CATEGORY_CONTEXT_REQUIRED',
+  ...CATEGORY_POLICY_REASON_CODES,
 ] as const
 
 export type DecisionReasonCode = (typeof DECISION_REASON_CODES)[number]
@@ -120,6 +123,11 @@ export interface LeadDecisionContext {
   manualOverride: {
     requestedStatus: LeadStatus | null
   } | null
+  categoryPolicy?: {
+    categoryId: string
+    policy: CategoryPolicy
+    facts: CategoryPolicyFacts
+  } | null
   operationalFacts?: {
     categoryIdPresent: boolean
     hasUsableCategoryContext: boolean
@@ -139,6 +147,7 @@ export type DecisionInputKey =
   | `reactivation.${keyof LeadDecisionContext['reactivation']}`
   | `schedule.${keyof LeadDecisionContext['schedule']}`
   | `manualOverride.${keyof NonNullable<LeadDecisionContext['manualOverride']>}`
+  | 'categoryPolicy'
   | `operationalFacts.${keyof NonNullable<LeadDecisionContext['operationalFacts']>}`
 
 export type DecisionMetadataValue = string | number | boolean | null
@@ -148,6 +157,7 @@ export interface LeadDecisionResult {
   reasonCode: DecisionReasonCode
   leadId: string
   inputsUsed: readonly DecisionInputKey[]
+  reasons?: readonly CategoryPolicyReason[]
   metadata?: Readonly<Record<string, DecisionMetadataValue>>
 }
 

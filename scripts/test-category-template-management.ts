@@ -102,6 +102,12 @@ const enrichedCategory: ManagedCategory & { created_at: string; updated_at: stri
   id: '11111111-1111-4111-8111-111111111111',
   name: 'Mini Golf',
   halal_filter: false,
+  exclude_alcohol_focused: false,
+  exclude_pork: false,
+  exclude_gambling: false,
+  exclude_religious_institutions: false,
+  exclude_shisha: false,
+  custom_policy_instructions: null,
   cities: 'all',
   custom_cities: [],
   content_type: 'both',
@@ -121,7 +127,9 @@ const enrichedCategory: ManagedCategory & { created_at: string; updated_at: stri
 const categorySavePayload = buildCategorySavePayload(enrichedCategory, { ...enrichedCategory, name: 'Mini Golf Sydney' })
 assert.equal(updateCategorySchema.safeParse(categorySavePayload).success, true, 'An edited enriched GET category produces a valid PATCH payload')
 assert.deepEqual(Object.keys(categorySavePayload).sort(), [
-  'cities', 'city_content_types', 'content_type', 'custom_cities', 'dm_template', 'halal_filter', 'id', 'name',
+  'cities', 'city_content_types', 'content_type', 'custom_cities', 'custom_policy_instructions', 'dm_template',
+  'exclude_alcohol_focused', 'exclude_gambling', 'exclude_pork', 'exclude_religious_institutions', 'exclude_shisha',
+  'halal_filter', 'id', 'name',
   'pitch_template', 'search_keywords', 'status', 'templates', 'use_priority_suburbs',
 ].sort(), 'PATCH contains only fields accepted by the category update schema')
 assert.deepEqual(categorySavePayload.templates.initial_pitch, { subject_template: null, body_template: null }, 'Template persistence strips hydrated template metadata')
@@ -141,11 +149,13 @@ const systemSettingsSource = readFileSync(resolve(root, 'src/components/settings
 assert.doesNotMatch(settingsRoute, /from\(['"]emails['"]\)/, 'Changing mode must not read or alter emails')
 assert.doesNotMatch(categoriesRoute, /from\(['"]emails['"]\)/, 'Category template management must not alter emails')
 assert.doesNotMatch(utilitySource, /openai|anthropic|gemini|AIProvider|writeOutreachEmail/i, 'Template validation and rendering have no AI dependency')
-assert.match(categoriesRoute, /requireApiAdmin/)
+assert.match(categoriesRoute, /requireApiUser/)
+assert.match(categoriesRoute, /canManageCategories/)
+assert.match(categoriesRoute, /eq\(['"]workspace_id['"], workspace\.workspaceId\)/, 'Category reads and writes verify the active workspace')
 assert.match(settingsRoute, /requireApiAdmin/)
 assert.doesNotMatch(categoriesRoute, /status:\s*['"]paused['"]/, 'Existing active categories are never automatically paused')
 assert.match(categoriesRoute, /const mode = await currentInitialMode\(supabase\)[\s\S]*shouldBlockCategorySave/, 'New category activation checks the saved mode')
-assert.match(categoriesTableSource, /{modalOpen && \([\s\S]*<CategoryModal/, 'Closing the category modal unmounts and resets its local state')
+assert.match(categoriesTableSource, /{canEdit && modalOpen && \([\s\S]*<CategoryModal/, 'Closing the category modal unmounts and resets its local state')
 assert.match(categoriesTableSource, /category-readiness-changed/, 'Category saves and status changes publish a readiness refresh')
 assert.match(systemSettingsSource, /fetch\('\/api\/categories'\)[\s\S]*addEventListener\('category-readiness-changed'/, 'Settings refreshes blockers after category changes')
 assert.match(systemSettingsSource, /if \(key === 'initial_email_mode'\) setModeBlockers\(\[\]\)/, 'A successful authoritative mode save clears stale blockers')

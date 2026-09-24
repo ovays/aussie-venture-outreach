@@ -9,17 +9,17 @@ interface ToggleProps {
 
 export function Toggle({ checked, onChange, label, disabled }: ToggleProps) {
   return (
-    <label className="flex items-center gap-3 cursor-pointer">
+    <label className={`flex items-center gap-3 ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
       <div className="relative">
         <input
           type="checkbox"
-          className="sr-only"
+          className="peer sr-only"
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
           disabled={disabled}
         />
         <div
-          className={`w-10 h-6 rounded-full transition-colors ${checked ? 'bg-[var(--primary)]' : 'bg-slate-300'} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`w-10 h-6 rounded-full transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-sky-400 ${checked ? 'bg-[var(--primary)]' : 'bg-slate-300'} ${disabled ? 'opacity-50' : ''}`}
         />
         <div
           className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-4' : ''}`}

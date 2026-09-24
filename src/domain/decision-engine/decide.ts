@@ -6,6 +6,7 @@ import type {
   LeadDecisionContext,
   LeadDecisionResult,
 } from './types'
+import { evaluateCategoryPolicy } from '@/domain/category-policy'
 
 const DAY_MS = 86_400_000
 
@@ -209,6 +210,21 @@ export function decideNextAction(context: LeadDecisionContext): LeadDecisionResu
   }
   if (context.operationalFacts?.recipientOwnership === 'owned_by_other') {
     return result(context, 'STOP', 'RECIPIENT_OWNED_BY_OTHER', ['email'])
+  }
+
+  if (context.categoryPolicy) {
+    const evaluation = evaluateCategoryPolicy(context.categoryPolicy)
+    if (evaluation.outcome !== 'CONTINUE') {
+      const primary = evaluation.reasons[0]
+      return {
+        ...result(context, evaluation.outcome, primary.code, ['categoryPolicy'], {
+          categoryId: context.categoryPolicy.categoryId,
+          policyOutcome: evaluation.outcome,
+          policyReasonCount: evaluation.reasons.length,
+        }),
+        reasons: evaluation.reasons,
+      }
+    }
   }
 
   if (context.status === 'contacted') return decideContacted(context)

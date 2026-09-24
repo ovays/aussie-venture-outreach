@@ -10,9 +10,10 @@ import type { ManagedCategory } from '@/lib/email-template-types'
 
 interface CategoriesTableProps {
   initialCategories: ManagedCategory[]
+  canEdit: boolean
 }
 
-export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
+export function CategoriesTable({ initialCategories, canEdit }: CategoriesTableProps) {
   const [categories, setCategories] = useState(initialCategories)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<ManagedCategory | null>(null)
@@ -51,11 +52,13 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
   }
 
   function openNew() {
+    if (!canEdit) return
     setEditingCategory(null)
     setModalOpen(true)
   }
 
   function openEdit(cat: ManagedCategory) {
+    if (!canEdit) return
     setEditingCategory(cat)
     setModalOpen(true)
   }
@@ -86,14 +89,14 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
           <h3 className="text-base font-semibold text-white">Categories</h3>
           <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Manage which business types to target</p>
         </div>
-        <Button onClick={openNew}>
+        <Button onClick={openNew} disabled={!canEdit}>
           <Plus size={14} />
           Add Category
         </Button>
       </div>
 
-      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #2a2d3e' }}>
-        <table className="w-full text-sm">
+      <div className="rounded-xl overflow-x-auto" style={{ border: '1px solid #2a2d3e' }}>
+        <table className="w-full min-w-[860px] text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid #2a2d3e', background: '#0f1117' }}>
               {['Name', 'Cities', 'Effective Content Type', 'Initial Template', 'Sequence', 'Status', 'Actions'].map((h) => (
@@ -110,7 +113,12 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-white">{cat.name}</span>
                     {cat.halal_filter && (
-                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#16a34a20', color: '#4ade80' }}>Halal</span>
+                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#16a34a20', color: '#4ade80' }}>Halal required</span>
+                    )}
+                    {[cat.exclude_alcohol_focused, cat.exclude_pork, cat.exclude_gambling, cat.exclude_religious_institutions, cat.exclude_shisha].filter(Boolean).length > 0 && (
+                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#f59e0b20', color: '#fbbf24' }}>
+                        {[cat.exclude_alcohol_focused, cat.exclude_pork, cat.exclude_gambling, cat.exclude_religious_institutions, cat.exclude_shisha].filter(Boolean).length} exclusions
+                      </span>
                     )}
                     {cat.use_priority_suburbs && (
                       <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#0284c720', color: '#38bdf8' }}>Priority</span>
@@ -133,10 +141,11 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
                   <div className="flex items-center gap-2"><Toggle
                     checked={cat.status === 'active'}
                     onChange={() => toggleStatus(cat.id, cat.status)}
+                    disabled={!canEdit}
                   /><span className="text-xs" style={{ color: '#94a3b8' }}>{cat.status === 'active' ? 'Active' : 'Inactive'}</span></div>
                 </td>
                 <td className="px-4 py-3">
-                  <Button size="sm" variant="ghost" onClick={() => openEdit(cat)}>
+                  <Button size="sm" variant="ghost" onClick={() => openEdit(cat)} disabled={!canEdit}>
                     <Edit2 size={12} />
                     Edit
                   </Button>
@@ -149,7 +158,7 @@ export function CategoriesTable({ initialCategories }: CategoriesTableProps) {
 
       {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
 
-      {modalOpen && (
+      {canEdit && modalOpen && (
         <CategoryModal
           key={editingCategory?.id ?? 'new'}
           open

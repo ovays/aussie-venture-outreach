@@ -17,5 +17,6 @@ export function decisionStateFingerprint(context: LeadDecisionContext): string {
     reply: context.reply,
     reactivation: context.reactivation,
     manualOverride: context.manualOverride,
+    categoryPolicy: context.categoryPolicy,
   })
 }

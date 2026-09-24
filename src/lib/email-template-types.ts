@@ -45,6 +45,12 @@ export interface ManagedCategory {
   id: string
   name: string
   halal_filter: boolean
+  exclude_alcohol_focused: boolean
+  exclude_pork: boolean
+  exclude_gambling: boolean
+  exclude_religious_institutions: boolean
+  exclude_shisha: boolean
+  custom_policy_instructions: string | null
   cities: 'sydney_only' | 'all' | 'custom'
   custom_cities: string[] | null
   content_type: 'visit' | 'remote' | 'both'

@@ -3,6 +3,12 @@ import { z } from 'zod'
 export const categoryFieldsSchema = z.object({
   name: z.string().trim().min(1, 'Category name is required').optional(),
   halal_filter: z.boolean().optional(),
+  exclude_alcohol_focused: z.boolean().optional(),
+  exclude_pork: z.boolean().optional(),
+  exclude_gambling: z.boolean().optional(),
+  exclude_religious_institutions: z.boolean().optional(),
+  exclude_shisha: z.boolean().optional(),
+  custom_policy_instructions: z.string().max(2000).nullable().optional(),
   cities: z.enum(['sydney_only', 'all', 'custom']).optional(),
   custom_cities: z.array(z.string()).nullable().optional(),
   content_type: z.enum(['visit', 'remote', 'both']).optional(),

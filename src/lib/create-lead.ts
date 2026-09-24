@@ -54,7 +54,7 @@ export type CreateLeadResult =
 
 export async function createLead(supabase: SupabaseClient, workspaceId: string, input: CreateLeadInput): Promise<CreateLeadResult> {
   const {
-    business_name, email, website, suburb, city, category_id, category_name, force,
+    business_name, email, website, suburb, city, category_id, force,
     current_stage, stage_completed_date, source, initialEmail,
   } = input
 
@@ -98,11 +98,14 @@ export async function createLead(supabase: SupabaseClient, workspaceId: string, 
     }
   }
 
-  const { data: category } = await supabase
+  const { data: category, error: categoryError } = await supabase
     .from('categories')
     .select('name, content_type, city_content_types')
     .eq('id', category_id)
     .maybeSingle()
+
+  if (categoryError) return { ok: false, status: 500, error: categoryError.message }
+  if (!category) return { ok: false, status: 400, error: 'Category not found in the current workspace' }
 
   const { data: lead, error: leadErr } = await supabase
     .from('leads')
@@ -114,7 +117,7 @@ export async function createLead(supabase: SupabaseClient, workspaceId: string, 
       suburb:        suburb || null,
       city,
       category_id,
-      category_name,
+      category_name: category.name,
       status:        'researched',
       source:        source ?? 'manual',
       content_type:  resolveContentType(category, city),
@@ -168,7 +171,7 @@ export async function createLead(supabase: SupabaseClient, workspaceId: string, 
         website,
         suburb,
         city,
-        categoryName: category_name,
+        categoryName: category.name,
         categoryId: category_id,
         contentType:  (lead.content_type as string | null) ?? 'remote',
         stage:        current_stage,
@@ -203,7 +206,7 @@ export async function createLead(supabase: SupabaseClient, workspaceId: string, 
   }
 
   const generated = await routeInitialEmail(supabase, {
-    id: lead.id, business_name, category_id, category_name, suburb: suburb ?? null, city,
+    id: lead.id, business_name, category_id, category_name: category.name, suburb: suburb ?? null, city,
     website: website ?? null, description: null, services: null, content_type: (lead.content_type as string | null) ?? 'remote',
   }, initialEmail.mode)
   return generated.ok

@@ -220,7 +220,12 @@ export class ObservabilityService {
           status: 'succeeded', sequence, attempt: 1, started_at: now, completed_at: now,
           decision_action: decision.action, decision_reason_code: decision.reasonCode,
           input_summary: sanitizeObservabilityMetadata({ inputs_used: decision.inputsUsed }),
-          output_summary: sanitizeObservabilityMetadata({ action: decision.action, reason_code: decision.reasonCode, ...decision.metadata }),
+          output_summary: sanitizeObservabilityMetadata({
+            action: decision.action,
+            reason_code: decision.reasonCode,
+            policy_reasons: decision.reasons ?? [],
+            ...decision.metadata,
+          }),
         })))
         return { data: true, error: result.error }
       })

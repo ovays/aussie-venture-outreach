@@ -3,6 +3,12 @@ import { EMAIL_TEMPLATE_TYPES, type CategoryEmailTemplateDraft, type ManagedCate
 export type CategorySaveDraft = Pick<ManagedCategory,
   | 'name'
   | 'halal_filter'
+  | 'exclude_alcohol_focused'
+  | 'exclude_pork'
+  | 'exclude_gambling'
+  | 'exclude_religious_institutions'
+  | 'exclude_shisha'
+  | 'custom_policy_instructions'
   | 'cities'
   | 'custom_cities'
   | 'content_type'
@@ -27,6 +33,12 @@ export function buildCategorySavePayload(category: ManagedCategory | null, draft
     ...(category ? { id: category.id } : {}),
     name: draft.name,
     halal_filter: draft.halal_filter,
+    exclude_alcohol_focused: draft.exclude_alcohol_focused,
+    exclude_pork: draft.exclude_pork,
+    exclude_gambling: draft.exclude_gambling,
+    exclude_religious_institutions: draft.exclude_religious_institutions,
+    exclude_shisha: draft.exclude_shisha,
+    custom_policy_instructions: draft.custom_policy_instructions?.trim() || null,
     cities: draft.cities,
     custom_cities: draft.custom_cities,
     content_type: draft.content_type,

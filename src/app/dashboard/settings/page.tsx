@@ -217,7 +217,10 @@ export default async function SettingsPage() {
         <Card>
           <div id="categories" className="scroll-mt-28">
             <span id="email-templates" className="scroll-mt-28" />
-            <CategoriesTable initialCategories={categoriesWithTemplates} />
+            <CategoriesTable
+              initialCategories={categoriesWithTemplates}
+              canEdit={workspace.isPlatformAdmin || workspace.role === 'owner' || workspace.role === 'admin'}
+            />
           </div>
         </Card>
       </div>

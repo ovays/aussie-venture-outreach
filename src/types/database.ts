@@ -280,7 +280,13 @@ export type Database = {
           content_type: string | null
           created_at: string | null
           custom_cities: string[] | null
+          custom_policy_instructions: string | null
           dm_template: string | null
+          exclude_alcohol_focused: boolean
+          exclude_gambling: boolean
+          exclude_pork: boolean
+          exclude_religious_institutions: boolean
+          exclude_shisha: boolean
           halal_filter: boolean | null
           id: string
           name: string
@@ -297,7 +303,13 @@ export type Database = {
           content_type?: string | null
           created_at?: string | null
           custom_cities?: string[] | null
+          custom_policy_instructions?: string | null
           dm_template?: string | null
+          exclude_alcohol_focused?: boolean
+          exclude_gambling?: boolean
+          exclude_pork?: boolean
+          exclude_religious_institutions?: boolean
+          exclude_shisha?: boolean
           halal_filter?: boolean | null
           id?: string
           name: string
@@ -314,7 +326,13 @@ export type Database = {
           content_type?: string | null
           created_at?: string | null
           custom_cities?: string[] | null
+          custom_policy_instructions?: string | null
           dm_template?: string | null
+          exclude_alcohol_focused?: boolean
+          exclude_gambling?: boolean
+          exclude_pork?: boolean
+          exclude_religious_institutions?: boolean
+          exclude_shisha?: boolean
           halal_filter?: boolean | null
           id?: string
           name?: string
@@ -1182,6 +1200,7 @@ export type Database = {
           business_name: string
           category_id: string | null
           category_name: string
+          category_policy_facts: Json
           city: string
           content_created: boolean | null
           content_type: string | null
@@ -1221,6 +1240,7 @@ export type Database = {
           business_name: string
           category_id?: string | null
           category_name: string
+          category_policy_facts?: Json
           city: string
           content_created?: boolean | null
           content_type?: string | null
@@ -1260,6 +1280,7 @@ export type Database = {
           business_name?: string
           category_id?: string | null
           category_name?: string
+          category_policy_facts?: Json
           city?: string
           content_created?: boolean | null
           content_type?: string | null
@@ -1308,6 +1329,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leads_workspace_category_fkey"
+            columns: ["workspace_id", "category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["workspace_id", "id"]
           },
         ]
       }

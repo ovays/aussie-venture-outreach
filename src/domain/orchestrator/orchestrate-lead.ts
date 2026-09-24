@@ -93,11 +93,15 @@ export async function orchestrateLead(
         sequence: iteration * 10,
         attempt: request.attempt ?? 1,
         decision,
-        inputSummary: { inputs_used: decision.inputsUsed },
+        inputSummary: {
+          inputs_used: decision.inputsUsed,
+          category_id: context.categoryPolicy?.categoryId ?? null,
+        },
       })
       await dependencies.telemetry.completeWorkflowStep(decisionStepId, {
         outputSummary: {
           action: decision.action, reason_code: decision.reasonCode, ...decision.metadata,
+          policy_reasons: decision.reasons ?? [],
           ...(legacyComparison ? {
             legacy_action: legacyComparison.legacyAction,
             legacy_classification: legacyComparison.classification,

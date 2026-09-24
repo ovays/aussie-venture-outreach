@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { isAuthErrorResponse, requireApiAdmin, requireApiUser } from '@/lib/auth'
+import { isAuthErrorResponse, requireApiUser, type AuthContext } from '@/lib/auth'
 import { createCategorySchema, updateCategorySchema } from '@/lib/category-api-schema'
 import {
   emptyTemplateDrafts,
@@ -12,22 +12,29 @@ import {
   templatesForCategory,
 } from '@/lib/category-email-templates'
 import { EMAIL_TEMPLATE_TYPES, type EmailTemplateType } from '@/lib/email-template-types'
-import { requireWorkspaceContext } from '@/lib/workspace-context'
-import { workspaceRows } from '@/lib/supabase/workspace-service'
+import { requireWorkspaceContext, type WorkspaceContext } from '@/lib/workspace-context'
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>
 type CategoryRow = Record<string, unknown> & { id: string; name: string; status: 'active' | 'paused' }
 
-async function fetchCategoriesAndTemplates(supabase: SupabaseClient) {
+async function fetchCategoriesAndTemplates(supabase: SupabaseClient, workspaceId: string) {
   const [{ data: categories, error: categoryError }, { data: templates, error: templateError }] = await Promise.all([
-    supabase.from('categories').select('*').order('name'),
-    supabase.from('category_email_templates').select('*'),
+    supabase.from('categories').select('*').eq('workspace_id', workspaceId).order('name'),
+    supabase.from('category_email_templates').select('*').eq('workspace_id', workspaceId),
   ])
   return {
     categories: (categories ?? []) as CategoryRow[],
     templates: (templates ?? []) as Array<Record<string, unknown>>,
     error: categoryError ?? templateError,
   }
+}
+
+function canManageCategories(auth: AuthContext, workspace: WorkspaceContext): boolean {
+  return auth.profile.role === 'admin' || workspace.role === 'owner' || workspace.role === 'admin'
+}
+
+function forbiddenResponse(): NextResponse {
+  return NextResponse.json({ error: 'Workspace admin access required' }, { status: 403 })
 }
 
 async function currentInitialMode(supabase: SupabaseClient): Promise<string> {
@@ -55,23 +62,25 @@ function activeReadinessResponse(name: string, readiness: ReturnType<typeof getI
 export async function GET(): Promise<NextResponse> {
   const auth = await requireApiUser()
   if (isAuthErrorResponse(auth)) return auth
+  const workspace = await requireWorkspaceContext(auth)
   const supabase = await createClient()
-  const result = await fetchCategoriesAndTemplates(supabase)
+  const result = await fetchCategoriesAndTemplates(supabase, workspace.workspaceId)
   if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 })
   return NextResponse.json({ data: hydrateCategoryTemplates(result.categories, result.templates as never[]) })
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const auth = await requireApiAdmin()
+  const auth = await requireApiUser()
   if (isAuthErrorResponse(auth)) return auth
   const workspace = await requireWorkspaceContext(auth)
+  if (!canManageCategories(auth, workspace)) return forbiddenResponse()
   const parsed = createCategorySchema.safeParse(await request.json())
   if (!parsed.success) return NextResponse.json({ error: 'Invalid category data', issues: parsed.error.issues }, { status: 400 })
 
   const supabase = await createClient()
   const { templates: templatePatches = {}, ...categoryInput } = parsed.data
   const name = categoryInput.name?.trim() ?? ''
-  const { data: names, error: namesError } = await supabase.from('categories').select('id, name')
+  const { data: names, error: namesError } = await supabase.from('categories').select('id, name').eq('workspace_id', workspace.workspaceId)
   if (namesError) return NextResponse.json({ error: namesError.message }, { status: 500 })
   if (isDuplicateCategoryName(names ?? [], name)) return duplicateResponse()
 
@@ -95,10 +104,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const changedTypes = EMAIL_TEMPLATE_TYPES.filter((type) => templatePatches[type] !== undefined)
   if (changedTypes.length > 0) {
-    const rows = workspaceRows(supabase, changedTypes.map((type) => ({ category_id: category.id, ...drafts[type] })))
-    const { error: templateError } = await supabase.from('category_email_templates').upsert(workspaceRows(supabase, rows), { onConflict: 'workspace_id,category_id,template_type' })
+    const { error: templateError } = await supabase.from('category_email_templates').upsert(
+      changedTypes.map((type) => ({ workspace_id: workspace.workspaceId, category_id: category.id, ...drafts[type] })),
+      { onConflict: 'workspace_id,category_id,template_type' },
+    )
     if (templateError) {
-      const { error: rollbackError } = await supabase.from('categories').delete().eq('id', category.id)
+      const { error: rollbackError } = await supabase.from('categories').delete().eq('workspace_id', workspace.workspaceId).eq('id', category.id)
       return NextResponse.json({
         error: rollbackError ? `Templates failed to save and category rollback failed: ${templateError.message}` : `Templates failed to save; the new category was rolled back: ${templateError.message}`,
       }, { status: 500 })
@@ -110,18 +121,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const auth = await requireApiAdmin()
+  const auth = await requireApiUser()
   if (isAuthErrorResponse(auth)) return auth
   const workspace = await requireWorkspaceContext(auth)
+  if (!canManageCategories(auth, workspace)) return forbiddenResponse()
   const parsed = updateCategorySchema.safeParse(await request.json())
   if (!parsed.success) return NextResponse.json({ error: 'Invalid category data', issues: parsed.error.issues }, { status: 400 })
 
   const supabase = await createClient()
   const { id, templates: templatePatches = {}, ...categoryUpdates } = parsed.data
   const [{ data: existing, error: existingError }, { data: existingRows, error: rowsError }, { data: names, error: namesError }] = await Promise.all([
-    supabase.from('categories').select('*').eq('id', id).maybeSingle(),
-    supabase.from('category_email_templates').select('*').eq('category_id', id),
-    supabase.from('categories').select('id, name'),
+    supabase.from('categories').select('*').eq('workspace_id', workspace.workspaceId).eq('id', id).maybeSingle(),
+    supabase.from('category_email_templates').select('*').eq('workspace_id', workspace.workspaceId).eq('category_id', id),
+    supabase.from('categories').select('id, name').eq('workspace_id', workspace.workspaceId),
   ])
   const loadError = existingError ?? rowsError ?? namesError
   if (loadError) return NextResponse.json({ error: loadError.message }, { status: 500 })
@@ -148,6 +160,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (categoryChanged) {
     const { data, error: categoryError } = await supabase.from('categories')
       .update({ ...requestedCategoryUpdates, updated_at: new Date().toISOString() })
+      .eq('workspace_id', workspace.workspaceId)
       .eq('id', id)
       .select()
       .single()
@@ -163,12 +176,14 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       || (Object.prototype.hasOwnProperty.call(patch, 'body_template') && (stored?.body_template ?? null) !== (patch.body_template ?? null))
   })
   if (changedTypes.length > 0) {
-    const rows = workspaceRows(supabase, changedTypes.map((type) => ({ category_id: id, ...drafts[type] })))
-    const { error: templateError } = await supabase.from('category_email_templates').upsert(workspaceRows(supabase, rows), { onConflict: 'workspace_id,category_id,template_type' })
+    const { error: templateError } = await supabase.from('category_email_templates').upsert(
+      changedTypes.map((type) => ({ workspace_id: workspace.workspaceId, category_id: id, ...drafts[type] })),
+      { onConflict: 'workspace_id,category_id,template_type' },
+    )
     if (templateError) {
       if (!categoryChanged) return NextResponse.json({ error: `Templates failed to save: ${templateError.message}` }, { status: 500 })
       const { id: _id, created_at: _createdAt, ...rollback } = existing
-      const { error: rollbackError } = await supabase.from('categories').update(rollback).eq('id', id)
+      const { error: rollbackError } = await supabase.from('categories').update(rollback).eq('workspace_id', workspace.workspaceId).eq('id', id)
       return NextResponse.json({
         error: rollbackError
           ? `Templates failed to save and category rollback failed: ${templateError.message}`

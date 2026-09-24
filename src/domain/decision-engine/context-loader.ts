@@ -3,6 +3,7 @@ import { getInitialTemplateReadiness } from '@/lib/category-email-templates'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 import { isInitialEmailMode, type InitialEmailMode } from '@/lib/settingsDefaults'
 import type { Database } from '@/types/database'
+import { normalizeCategoryPolicyFacts } from '@/domain/category-policy'
 import { isCanonicalLeadStatus } from './transitions'
 import { DEFAULT_DECISION_SCHEDULE, type DecisionEmailStage, type LeadDecisionContext } from './types'
 
@@ -13,10 +14,15 @@ const TEMPLATE_PLACEHOLDER = /{{([a-z][a-z0-9_]*)}}/g
 type V2Client = SupabaseClient<Database>
 type LeadRow = Pick<Database['public']['Tables']['leads']['Row'],
   'id' | 'business_name' | 'category_id' | 'category_name' | 'city' | 'website' | 'email' | 'normalized_email' | 'source' | 'status'
-  | 'delivery_suppressed_emails' | 'outreach_suppressed_at' | 'outreach_suppression_reason' | 'reactivation_sent_at'>
+  | 'delivery_suppressed_emails' | 'outreach_suppressed_at' | 'outreach_suppression_reason' | 'reactivation_sent_at' | 'category_policy_facts'>
+type CategoryRow = Pick<Database['public']['Tables']['categories']['Row'],
+  'id' | 'halal_filter' | 'exclude_alcohol_focused' | 'exclude_pork' | 'exclude_gambling'
+  | 'exclude_religious_institutions' | 'exclude_shisha'> & {
+    category_email_templates: TemplateRow[] | null
+  }
 type LoadedLeadRow = LeadRow & {
   deals: { lead_id: string | null }[] | null
-  categories: { category_email_templates: TemplateRow[] | null } | null
+  categories: CategoryRow | null
 }
 type EmailRow = Pick<Database['public']['Tables']['emails']['Row'], 'lead_id' | 'type' | 'status' | 'sent_at' | 'replied_at' | 'created_at'>
 type TemplateRow = Pick<Database['public']['Tables']['category_email_templates']['Row'], 'category_id' | 'template_type' | 'subject_template' | 'body_template'>
@@ -80,7 +86,7 @@ export async function loadDecisionContexts(
   if (ids.length > MAX_DECISION_CONTEXT_BATCH) throw new Error(`Decision context batch exceeds ${MAX_DECISION_CONTEXT_BATCH} leads`)
 
   const [leadResult, emailResult, settingResult, snapshotResult, qualityResult] = await Promise.all([
-    supabase.from('leads').select('id,business_name,category_id,category_name,city,website,email,normalized_email,source,status,delivery_suppressed_emails,outreach_suppressed_at,outreach_suppression_reason,reactivation_sent_at,deals(lead_id),categories!leads_category_id_fkey(category_email_templates(category_id,template_type,subject_template,body_template))').in('id', ids).limit(ids.length),
+    supabase.from('leads').select('id,business_name,category_id,category_name,city,website,email,normalized_email,source,status,delivery_suppressed_emails,outreach_suppressed_at,outreach_suppression_reason,reactivation_sent_at,category_policy_facts,deals(lead_id),categories!leads_category_id_fkey(id,halal_filter,exclude_alcohol_focused,exclude_pork,exclude_gambling,exclude_religious_institutions,exclude_shisha,category_email_templates(category_id,template_type,subject_template,body_template))').in('id', ids).limit(ids.length),
     supabase.from('emails').select('lead_id,type,status,sent_at,replied_at,created_at').in('lead_id', ids).in('type', ['initial_pitch', 'follow_up_1', 'follow_up_2', 'follow_up_3', 'reactivation']).in('status', ['pending_send', 'sent', 'email_sync_failed']).order('created_at', { ascending: true }).limit(ids.length * 6),
     supabase.from('settings').select('key,value').in('key', ['initial_email_mode', 'follow_up_1_days', 'follow_up_2_days', 'follow_up_3_days', 'dead_lead_days', 'reactivation_enabled', 'reactivation_delay_days', 'dead_after_reactivation_days']).limit(8),
     supabase.from('activity_log').select('lead_id,metadata,created_at').in('lead_id', ids).eq('event_type', INITIAL_EMAIL_MODE_SNAPSHOT_EVENT).order('created_at', { ascending: false }).limit(ids.length * 10),
@@ -139,6 +145,18 @@ export async function loadDecisionContexts(
       reply: { received: leadEmails.some((email) => !!email.replied_at) || lead.status === 'replied', classification: null },
       reactivation: { enabled: settings.get('reactivation_enabled') === 'true', sentAt: lead.reactivation_sent_at ?? stageFromRows(leadEmails, 'reactivation').sentAt },
       schedule, asOf, manualOverride: null,
+      categoryPolicy: lead.category_id && lead.categories ? {
+        categoryId: lead.categories.id,
+        policy: {
+          requiresHalalConfirmation: lead.categories.halal_filter === true,
+          excludeAlcoholFocused: lead.categories.exclude_alcohol_focused,
+          excludePork: lead.categories.exclude_pork,
+          excludeGambling: lead.categories.exclude_gambling,
+          excludeReligiousInstitutions: lead.categories.exclude_religious_institutions,
+          excludeShisha: lead.categories.exclude_shisha,
+        },
+        facts: normalizeCategoryPolicyFacts(lead.category_policy_facts),
+      } : null,
       operationalFacts: {
         categoryIdPresent: !!lead.category_id,
         hasUsableCategoryContext: !!lead.category_id && !!lead.categories,

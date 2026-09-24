@@ -34,6 +34,12 @@ function initialDraft(category: ManagedCategory | null): CategoryDraft {
   return {
     name: category?.name ?? '',
     halal_filter: category?.halal_filter ?? false,
+    exclude_alcohol_focused: category?.exclude_alcohol_focused ?? false,
+    exclude_pork: category?.exclude_pork ?? false,
+    exclude_gambling: category?.exclude_gambling ?? false,
+    exclude_religious_institutions: category?.exclude_religious_institutions ?? false,
+    exclude_shisha: category?.exclude_shisha ?? false,
+    custom_policy_instructions: category?.custom_policy_instructions ?? '',
     cities: category?.cities ?? 'all',
     custom_cities: category?.custom_cities ?? [],
     content_type: category?.content_type ?? 'remote',
@@ -154,9 +160,45 @@ export function CategoryModal({ open, onClose, category, onSaved }: CategoryModa
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Toggle checked={form.halal_filter} onChange={(value) => set('halal_filter', value)} label="Halal filter (only show halal businesses)" />
           <Toggle checked={form.use_priority_suburbs} onChange={(value) => set('use_priority_suburbs', value)} label="Use Priority Suburbs" />
         </div>
+
+        <section className="rounded-xl p-4 space-y-4" style={{ border: '1px solid #2a2d3e', background: '#11131c' }}>
+          <div>
+            <h3 className="text-sm font-semibold text-white">Targeting &amp; Exclusions</h3>
+            <p className="text-xs mt-1" style={{ color: '#64748b' }}>Structured facts are evaluated deterministically before any outreach. Unknown required facts go to manual review.</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider mb-2" style={{ color: '#64748b' }}>Targeting</p>
+            <Toggle checked={form.halal_filter} onChange={(value) => set('halal_filter', value)} label="Require verified halal confirmation" />
+            <p className="text-xs ml-[52px] mt-1" style={{ color: '#64748b' }}>Confirmed continues, verified not halal stops, and unknown requires review.</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider mb-2" style={{ color: '#64748b' }}>Exclude</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Toggle checked={form.exclude_alcohol_focused} onChange={(value) => set('exclude_alcohol_focused', value)} label="Alcohol-focused businesses" />
+              <Toggle checked={form.exclude_pork} onChange={(value) => set('exclude_pork', value)} label="Pork-related businesses" />
+              <Toggle checked={form.exclude_gambling} onChange={(value) => set('exclude_gambling', value)} label="Gambling businesses" />
+              <Toggle checked={form.exclude_religious_institutions} onChange={(value) => set('exclude_religious_institutions', value)} label="Religious institutions" />
+              <Toggle checked={form.exclude_shisha} onChange={(value) => set('exclude_shisha', value)} label="Shisha or hookah businesses" />
+            </div>
+            <p className="text-xs mt-2" style={{ color: '#64748b' }}>Serving alcohol alone is not treated as alcohol-focused.</p>
+          </div>
+          <div>
+            <label htmlFor="custom-policy-instructions" className="block text-sm font-medium mb-1.5" style={{ color: '#94a3b8' }}>Custom policy notes</label>
+            <textarea
+              id="custom-policy-instructions"
+              value={form.custom_policy_instructions ?? ''}
+              onChange={(event) => set('custom_policy_instructions', event.target.value)}
+              rows={3}
+              maxLength={2000}
+              placeholder="Context for researchers and manual reviewers"
+              className="w-full px-3 py-2 rounded-lg text-sm text-white resize-y"
+              style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}
+            />
+            <p className="text-xs mt-1" style={{ color: '#64748b' }}>Notes are context only and never override the structured rules.</p>
+          </div>
+        </section>
 
         <div>
           <label className="block text-sm font-medium mb-2" style={{ color: '#94a3b8' }}>Cities</label>
