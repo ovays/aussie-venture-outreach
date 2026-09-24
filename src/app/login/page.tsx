@@ -22,7 +22,7 @@ function LoginForm() {
     const res = await fetch('/api/auth/me'); const body = await res.json()
     if (!res.ok || !body.data?.profile?.is_active) { await supabase.auth.signOut(); setError('This account is inactive. Contact an administrator.'); setLoading(false); return }
     if (!remember) window.addEventListener('beforeunload', () => { supabase.auth.signOut() }, { once: true })
-    const next = searchParams.get('next'); router.push(next?.startsWith('/dashboard') ? next : '/dashboard'); router.refresh()
+    const next = searchParams.get('next'); router.push(next?.startsWith('/dashboard') || next === '/onboarding' ? next : '/dashboard'); router.refresh()
   }
 
   return <main className="grid min-h-screen bg-[#F7F8FC] lg:grid-cols-[minmax(0,1fr)_minmax(28rem,0.75fr)]">

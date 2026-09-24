@@ -11,6 +11,9 @@ import { requireUser } from '@/lib/auth'
 import { requireWorkspaceContext } from '@/lib/workspace-context'
 import { getPlatformSettings, getWorkspaceSettings } from '@/lib/workspace-settings'
 import { Tabs } from '@/components/ui/Tabs'
+import { getOnboardingState } from '@/lib/onboarding-server'
+import { timezoneOptions } from '@/lib/onboarding'
+import { WorkspaceProfileSettings } from '@/components/settings/WorkspaceProfileSettings'
 
 export const revalidate = 0
 
@@ -39,6 +42,7 @@ export default async function SettingsPage() {
   const auth = await requireUser()
   const workspace = await requireWorkspaceContext(auth)
   const supabase = createServiceClient()
+  const onboardingState = await getOnboardingState(workspace.workspaceId)
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
   const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
@@ -181,6 +185,13 @@ export default async function SettingsPage() {
             </div>
           </Card>
         )}
+        <Card>
+          <WorkspaceProfileSettings
+            initialState={onboardingState}
+            timezones={timezoneOptions()}
+            canEdit={workspace.isPlatformAdmin || workspace.role === 'owner' || workspace.role === 'admin'}
+          />
+        </Card>
         <Card>
           <div id="sequences" className="scroll-mt-28"><SystemSettings initialSettings={settingsWithDefaults} initialTemplateModeBlockers={templateModeBlockers} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} cities={Object.keys(suburbsByCity).sort()} /></div>
         </Card>

@@ -6,10 +6,16 @@ import { LeadDrawerProvider } from '@/lib/lead-drawer-context'
 import { LeadCRMDrawer } from '@/components/leads/LeadCRMDrawer'
 import { requireWorkspaceContext } from '@/lib/workspace-context'
 import { createServiceClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import { getOnboardingState } from '@/lib/onboarding-server'
+import { onboardingDestination } from '@/lib/onboarding'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const auth = await requireUser()
   const workspace = await requireWorkspaceContext(auth)
+  const onboarding = await getOnboardingState(workspace.workspaceId)
+  const destination = onboardingDestination('dashboard', onboarding.status)
+  if (destination) redirect(destination)
   const { data: workspaceRecord } = await createServiceClient()
     .from('workspaces')
     .select('name')

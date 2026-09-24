@@ -36,9 +36,10 @@ async function main() {
     '/dashboard/admin/data-quality',
     '/dashboard/admin',
   ]
+  const baseUrl = process.env.V2_APP_BASE_URL ?? 'http://127.0.0.1:3005'
   const results: Record<string, number> = {}
   for (const path of paths) {
-    const response = await fetch(`http://127.0.0.1:3005${path}`, {
+    const response = await fetch(`${baseUrl}${path}`, {
       headers: { cookie: cookieHeader },
       redirect: 'manual',
     })

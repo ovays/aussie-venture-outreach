@@ -174,6 +174,7 @@ function testStaticBoundariesAndCompatibility() {
     '00000000000008_workspace_indexes_and_constraints.sql',
     '00000000000009_workspace_scope_functions_and_keys.sql',
     '00000000000010_remove_workspace_default.sql',
+    '00000000000011_customer_onboarding.sql',
   ])
 }
 

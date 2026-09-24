@@ -27,6 +27,8 @@
     "test:hosted-safety:v2": "tsx scripts/verify-v2-hosted-safety.ts",
     "test:application:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-application-baseline.ts",
     "test:pages:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-pages.ts",
+    "test:onboarding:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-onboarding.ts",
+    "test:onboarding-pages:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-onboarding-pages.ts",
     "benchmark:performance:v2": "dotenv -e .env.v2.local -- tsx scripts/benchmark-v2-performance.ts",
     "test:performance-reliability:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-performance-reliability.ts",
     "test:decision-engine:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-decision-engine.ts",

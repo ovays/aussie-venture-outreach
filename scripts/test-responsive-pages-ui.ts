@@ -19,6 +19,7 @@ const dmQueue = source('src/components/dm-queue/DMQueueTable.tsx')
 const pipeline = source('src/components/pipeline/KanbanBoard.tsx')
 const users = source('src/components/admin/UserManagement.tsx')
 const settings = source('src/components/settings/SystemSettings.tsx')
+const onboarding = source('src/components/onboarding/OnboardingFlow.tsx')
 
 assert.match(filterToolbar, /filter-toolbar__controls/, 'shared filter toolbar has a responsive controls region')
 assert.match(globals, /@media \(max-width: 430px\)/, 'compact phone layout is explicitly constrained')
@@ -46,6 +47,10 @@ assert.match(pipeline, /data-testid="pipeline-mobile-swipe"/, 'Pipeline exposes 
 assert.match(users, /data-testid="user-management-mobile-cards"/, 'User Management has mobile cards')
 assert.match(settings, /System Settings/, 'Settings forms remain available')
 assert.match(settings, /Follow-up Settings/, 'Settings follow-up form remains available')
+assert.match(onboarding, /sm:grid-cols-2/, 'onboarding forms collapse to a single column on mobile')
+assert.match(onboarding, /w-full sm:w-auto/, 'onboarding actions are full width on mobile')
+assert.match(onboarding, /aria-current=\{active \? 'step'/, 'onboarding progress exposes the current step')
+assert.match(onboarding, /aria-invalid/, 'onboarding fields expose validation state accessibly')
 
 assert.match(modal, /max-w-\[calc\(100vw-1rem\)\]/, 'modals are viewport constrained')
 assert.match(modal, /document\.body\.style\.overflow = 'hidden'/, 'open modals lock background scrolling')

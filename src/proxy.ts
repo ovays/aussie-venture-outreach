@@ -3,7 +3,7 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { NextResponse, type NextRequest } from 'next/server'
 import { assertV2SupabaseTarget } from '@/lib/v2-runtime-safety'
 
-const protectedPrefixes = ['/dashboard', '/api']
+const protectedPrefixes = ['/dashboard', '/onboarding', '/api']
 const publicApiPrefixes = ['/api/webhooks']
 const adminPrefixes = [
   '/dashboard/admin',
