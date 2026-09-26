@@ -5,7 +5,8 @@ import { renderInitialTemplate } from '@/services/initial-content/template-rende
 import type { PersonalizedInitialWriter } from '@/ai/writer'
 import { isInitialEmailMode, type InitialEmailMode } from '@/lib/settingsDefaults'
 import { claimRecipientOutreach, releaseRecipientOutreachClaim, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
-import { workspaceRow } from '@/lib/supabase/workspace-service'
+import { requireWorkspaceIdForServiceClient, workspaceRow } from '@/lib/supabase/workspace-service'
+import { currentWorkflowTrace, withWorkflowTrace } from '@/lib/observability/context'
 
 export type InitialEmailLead = {
   id: string; business_name: string; category_id: string | null; category_name: string | null
@@ -63,7 +64,18 @@ export async function routeInitialEmail(
   options: { operation?: 'normal' | 'regenerate' | 'content_only'; pendingEmailId?: string; aiWriter?: PersonalizedInitialWriter } = {},
 ): Promise<InitialEmailResult> {
   const operation = options.operation ?? 'normal'
-  if (operation === 'content_only') return generateContent(supabase, lead, mode, options.aiWriter)
+  if (operation === 'content_only') {
+    if (currentWorkflowTrace() || mode === 'template' || options.aiWriter) {
+      return generateContent(supabase, lead, mode, options.aiWriter)
+    }
+    return withWorkflowTrace(
+      {
+        workspaceId: requireWorkspaceIdForServiceClient(supabase),
+        workflowRunId: `initial-email:${lead.id}:content-only:${options.pendingEmailId ?? 'request'}`,
+      },
+      () => generateContent(supabase, lead, mode, options.aiWriter),
+    )
+  }
   const lockKey = `initial-email-generation:${lead.id}`
   const token = await acquireLock(supabase, lockKey)
   if (!token) return failure(lead, mode, 'generation_in_progress', 'Initial Email generation is already in progress for this lead.')
@@ -95,7 +107,15 @@ export async function routeInitialEmail(
           : `Recipient is not eligible for outreach: ${ownership.reason ?? 'suppressed'}.`,
       )
     }
-    const generated = await generateContent(supabase, lead, mode, options.aiWriter)
+    const generated = currentWorkflowTrace() || mode === 'template' || options.aiWriter
+      ? await generateContent(supabase, lead, mode, options.aiWriter)
+      : await withWorkflowTrace(
+          {
+            workspaceId: requireWorkspaceIdForServiceClient(supabase),
+            workflowRunId: `initial-email:${lead.id}:${operation}:${targetId ?? 'new'}`,
+          },
+          () => generateContent(supabase, lead, mode, options.aiWriter),
+        )
     if (!generated.ok) {
       await releaseRecipientOutreachClaim(supabase, lead.id, ownership.normalizedEmail, ownership.claimToken)
       return generated

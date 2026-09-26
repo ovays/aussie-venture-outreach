@@ -5,6 +5,9 @@ import { isApiWorkspaceError, requireApiWorkspaceAdmin } from '@/lib/api-workspa
 import { resolveContentType } from '@/lib/content-type'
 import { Resend } from 'resend'
 import { assertOutreachSendEnabled } from '@/lib/side-effect-safety'
+import { randomUUID } from 'node:crypto'
+import { withWorkflowTrace } from '@/lib/observability/context'
+import { consumeOutboundEmailQuota } from '@/lib/quota/gate'
 
 function getResend() {
   const key = process.env.RESEND_API_KEY
@@ -64,16 +67,19 @@ export async function POST(req: NextRequest) {
           : null,
       } : { name: category }, city)
 
-      const result = await writeOutreachEmail({
-        business_name,
-        category,
-        suburb,
-        city,
-        website: '',
-        description: '',
-        services: '',
-        content_type: contentType,
-      })
+      const result = await withWorkflowTrace(
+        { workspaceId: access.workspace.workspaceId, workflowRunId: `test-email:${randomUUID()}` },
+        () => writeOutreachEmail({
+          business_name,
+          category,
+          suburb,
+          city,
+          website: '',
+          description: '',
+          services: '',
+          content_type: contentType,
+        }),
+      )
 
       return NextResponse.json({
         subject: result.subject,
@@ -92,6 +98,8 @@ export async function POST(req: NextRequest) {
 
       const resend = getResend()
       const html = wrapInTemplate(emailBodyToHtml(emailBody))
+      const testSendId = `test:${randomUUID()}`
+      await consumeOutboundEmailQuota(access.workspace.workspaceId, testSendId)
 
       const result = await resend.emails.send({
         from: 'Owais | Aussie Venture <hello@aussieventure.com>',
@@ -99,7 +107,7 @@ export async function POST(req: NextRequest) {
         subject: `[TEST] ${subject}`,
         html,
         text: emailBody,
-      })
+      }, { idempotencyKey: testSendId })
 
       if (result.error) {
         return NextResponse.json({ error: result.error.message }, { status: 500 })

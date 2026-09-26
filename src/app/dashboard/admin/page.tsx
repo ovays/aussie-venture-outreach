@@ -4,6 +4,7 @@ import TopBar from '@/components/layout/TopBar'
 import { Card } from '@/components/ui/Card'
 import { UserManagement } from '@/components/admin/UserManagement'
 import type { Profile } from '@/lib/auth-types'
+import { UsageAdministration } from '@/components/admin/UsageAdministration'
 
 export const revalidate = 0
 
@@ -44,6 +45,9 @@ export default async function AdminPage() {
 
         <Card>
           <UserManagement initialUsers={(users ?? []) as Profile[]} currentUserId={user.id} />
+        </Card>
+        <Card>
+          <UsageAdministration />
         </Card>
       </div>
     </div>

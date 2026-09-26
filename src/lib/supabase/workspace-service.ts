@@ -29,6 +29,12 @@ export const WORKSPACE_TENANT_TABLES = [
   'search_cache',
   'workflow_runs',
   'workflow_steps',
+  'workspace_entitlement_override_audit',
+  'workspace_entitlement_overrides',
+  'workspace_entitlements',
+  'workspace_usage_counters',
+  'workspace_usage_events',
+  'workspace_usage_periods',
   'workspace_settings',
 ] as const
 

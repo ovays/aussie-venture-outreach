@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { AIGenerateRequest, AIGenerateResponse, AIProvider } from './AIProvider'
 import type { AIWorkflow } from './configuration/AIConfiguration'
 import type { AIConfigurationService } from './configuration/AIConfigurationService'
@@ -9,6 +10,7 @@ import {
 import { estimateCost } from './observability/pricing'
 import { getRetryCount } from './observability/retry-count'
 import { sanitizeAIErrorMessage } from './observability/sanitize-error'
+import { currentWorkflowTrace } from '@/lib/observability/context'
 
 export class AIRegistry {
   private readonly providers = new Map<string, AIProvider>()
@@ -17,7 +19,8 @@ export class AIRegistry {
     private readonly configurationService: AIConfigurationService,
     private readonly requestLogger: AIRequestLogEmitter = new NoopAIRequestLogger(),
     private readonly now: () => number = Date.now,
-    private readonly requestSource = 'application'
+    private readonly requestSource = 'application',
+    private readonly quotaConsume?: (workspaceId: string, idempotencyKey: string) => Promise<void>,
   ) {}
 
   register(name: string, provider: AIProvider): this {
@@ -46,6 +49,25 @@ export class AIRegistry {
       providerKey = assignment.providerKey
       modelKey = assignment.modelKey
       const provider = this.get(providerKey)
+
+      // Deterministic quota gate: count a real attempted provider request before
+      // any SDK/HTTP call. Retries inside the provider (withRetry) are one logical
+      // request and charge once. The digest stays stable across a workflow retry
+      // without persisting prompt content in the usage ledger.
+      const workspaceId = request.workspaceId ?? currentWorkflowTrace()?.workspaceId
+      if (workspaceId && this.quotaConsume) {
+        const trace = currentWorkflowTrace()
+        const digest = createHash('sha256')
+          .update(JSON.stringify({ workflow, system: request.system ?? '', messages: request.messages }))
+          .digest('hex')
+          .slice(0, 40)
+        const idempotencyKey = request.idempotencyKey
+          ?? `${trace?.workflowRunId ?? 'direct'}:${trace?.workflowStepId ?? 'request'}:${workflow}:${digest}`
+        await this.quotaConsume(workspaceId, idempotencyKey)
+      } else if (this.quotaConsume) {
+        throw new Error(`AI quota enforcement requires a server-resolved workspace for ${workflow}`)
+      }
+
       const response = await provider.generate({
         ...request,
         workflow,

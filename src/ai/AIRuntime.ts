@@ -5,6 +5,7 @@ import { AnthropicProvider } from './providers/AnthropicProvider'
 import { GeminiProvider } from './providers/GeminiProvider'
 import { OpenAIProvider } from './providers/OpenAIProvider'
 import { aiRequestLogger } from './observability/runtime'
+import { consumeAIRequestQuota } from '@/lib/quota/gate'
 
 export const aiConfigurationService = new AIConfigurationService(
   new SupabaseAIConfigurationRepository()
@@ -12,7 +13,10 @@ export const aiConfigurationService = new AIConfigurationService(
 
 export const aiRegistry = new AIRegistry(
   aiConfigurationService,
-  aiRequestLogger
+  aiRequestLogger,
+  Date.now,
+  'application',
+  consumeAIRequestQuota,
 )
   .register('anthropic', new AnthropicProvider())
   .register('openai', new OpenAIProvider())

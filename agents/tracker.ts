@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createWorkspaceServiceClient, requireWorkspaceIdForServiceClient, workspaceRow } from '@/lib/supabase/workspace-service'
 import { sendEmail, getReceivedEmailHeaders } from '@/lib/resend'
+import { consumeOutboundEmailQuota } from '@/lib/quota/gate'
 import { getAnalyticsDateKey, getDashboardMetrics, getLeadName, logAnalyticsMetrics } from '@/lib/analytics'
 import { logger } from '@/lib/logger'
 import { observability } from '@/lib/observability/service'
@@ -624,6 +625,7 @@ ${(agentErrors ?? []).length > 0 ? `<h3 style="color: #f87171;">Pipeline Errors 
 </html>`
 
     const digestDateKey = getAnalyticsDateKey(now)
+    await consumeOutboundEmailQuota(workspaceId, `digest:${digestDateKey}`)
     const digestResult = await sendEmail({
       to: digestEmail,
       subject: `ReachAgent: Daily Summary ${date}`,

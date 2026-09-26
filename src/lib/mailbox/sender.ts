@@ -7,11 +7,15 @@ import { getMailboxProvider } from './registry'
 import type { MailboxSendRequest, MailboxSendResult } from './types'
 import { assertOutreachSendEnabled } from '@/lib/side-effect-safety'
 import { assertCanaryProviderBoundary, isV2CanaryEnabled } from '@/lib/v2-canary-safety'
+import { requireWorkspaceIdForServiceClient } from '@/lib/supabase/workspace-service'
+import { consumeOutboundEmailQuota } from '@/lib/quota/gate'
 
 export async function sendThroughWorkspaceMailbox(supabase: SupabaseClient<Database>, request: MailboxSendRequest): Promise<MailboxSendResult> {
   assertOutreachSendEnabled('Mailbox provider delivery')
   assertCanaryProviderBoundary({ leadId: request.leadId, phase: request.phase })
   try {
+    const workspaceId = requireWorkspaceIdForServiceClient(supabase)
+    await consumeOutboundEmailQuota(workspaceId, request.emailIntentId)
     // P16/P17 canary approval hashes and the dedicated canary credential are
     // bound to the existing Resend sender identity. Never substitute an OAuth
     // mailbox while canary mode is active.

@@ -177,6 +177,7 @@ function testStaticBoundariesAndCompatibility() {
     '00000000000011_customer_onboarding.sql',
     '00000000000012_category_policy.sql',
     '00000000000013_mailbox_connections.sql',
+    '00000000000014_usage_quotas.sql',
   ])
 }
 

@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { searchBusinesses as searchOutscraper, type OutscraperResult } from './outscraper'
 import { searchBusinessesGoogle } from './googleplaces'
 import { logger } from './logger'
+import { consumeDiscoveryRequestQuota } from './quota/gate'
 
 export type { OutscraperResult }
 
@@ -77,6 +78,7 @@ export async function searchBusinesses(
   let apiUsed: ApiUsed
 
   if (useGoogle) {
+    await consumeDiscoveryRequestQuota(workspaceId, 'google_maps', query, skip)
     try {
       results = await searchBusinessesGoogle(query, limit)
       const costPerRequest = parseFloat(await getSetting(supabase, 'google_maps_cost_per_request') ?? '0.032')
@@ -87,6 +89,7 @@ export async function searchBusinesses(
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
       logger.warn('search', `Google Maps failed for "${query}" — falling back to Outscraper`, { error: msg })
+      await consumeDiscoveryRequestQuota(workspaceId, 'outscraper_fallback', query, skip)
       results = await searchOutscraper(query, limit, skip)
       apiUsed = 'outscraper_fallback'
     }
@@ -94,6 +97,7 @@ export async function searchBusinesses(
     if (primaryApi === 'google_maps' && !withinBudget) {
       logger.warn('search', `Google Maps budget reached ($${googleSpend.toFixed(2)}/$${googleLimit}) — using Outscraper`)
     }
+    await consumeDiscoveryRequestQuota(workspaceId, 'outscraper', query, skip)
     results = await searchOutscraper(query, limit, skip)
     apiUsed = 'outscraper'
   }

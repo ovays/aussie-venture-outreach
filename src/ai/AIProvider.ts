@@ -11,6 +11,14 @@ export interface AIGenerateRequest {
   maxTokens: number
   system?: string
   messages: readonly AIMessage[]
+  /**
+   * Server-resolved workspace id. Present when the caller can supply it; the
+   * registry otherwise falls back to the ambient workflow trace. Required for
+   * quota enforcement.
+   */
+  workspaceId?: string
+  /** Stable idempotency key for quota consumption (caller-supplied where available). */
+  idempotencyKey?: string
 }
 
 export interface AIGenerateResponse {
