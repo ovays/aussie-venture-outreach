@@ -221,6 +221,8 @@ function testStaticBoundaries() {
     '00000000000012_category_policy.sql',
     '00000000000013_mailbox_connections.sql',
     '00000000000014_usage_quotas.sql',
+    '00000000000015_dashboard_summary_performance.sql',
+    '00000000000016_billing_stripe.sql',
   ], 'V2 migration set matches the approved foundation and SaaS additions')
 }
 

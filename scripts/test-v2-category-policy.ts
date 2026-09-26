@@ -121,7 +121,7 @@ async function testSendPrevention(): Promise<void> {
 }
 
 function testStaticBoundaries(): void {
-  const root = resolve(import.meta.dirname, '..')
+  const root = resolve(process.cwd())
   const evaluator = readFileSync(resolve(root, 'src/domain/category-policy/evaluate.ts'), 'utf8')
   const orchestrator = readFileSync(resolve(root, 'src/domain/orchestrator/orchestrate-lead.ts'), 'utf8')
   const route = readFileSync(resolve(root, 'src/app/api/categories/route.ts'), 'utf8')

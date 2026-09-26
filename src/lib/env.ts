@@ -41,6 +41,11 @@ const schema = z.object({
   MICROSOFT_MAILBOX_CLIENT_SECRET: z.string().optional(),
   MICROSOFT_MAILBOX_TENANT_ID: z.string().optional(),
   NEXT_PUBLIC_APP_URL: z.string().url().optional().default('http://localhost:3000'),
+  STRIPE_SECRET_KEY: z.string().startsWith('sk_test_').optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
+  STRIPE_PRICE_STARTER_MONTHLY: z.string().startsWith('price_').optional(),
+  STRIPE_PRICE_GROWTH_MONTHLY: z.string().startsWith('price_').optional(),
+  STRIPE_PRICE_PRO_MONTHLY: z.string().startsWith('price_').optional(),
 })
 
 export type Env = z.infer<typeof schema>

@@ -16,6 +16,7 @@ import { timezoneOptions } from '@/lib/onboarding'
 import { WorkspaceProfileSettings } from '@/components/settings/WorkspaceProfileSettings'
 import { MailboxSettings } from '@/components/settings/MailboxSettings'
 import { UsageLimits } from '@/components/settings/UsageLimits'
+import { BillingSettings } from '@/components/settings/BillingSettings'
 
 export const revalidate = 0
 
@@ -175,6 +176,7 @@ export default async function SettingsPage() {
       <div className="page-content page-stack max-w-4xl">
         <Tabs label="Settings sections" items={[
           { label: 'Workspace', href: '/dashboard/settings' },
+           { label: 'Billing', href: '#billing' },
            { label: 'Mailboxes', href: '#mailboxes' },
            { label: 'Usage & Limits', href: '#usage' },
           { label: 'Sequences', href: '#sequences' },
@@ -197,6 +199,7 @@ export default async function SettingsPage() {
           />
         </Card>
         <Card><MailboxSettings /></Card>
+        <Card><BillingSettings canManage={workspace.isPlatformAdmin || workspace.role === 'owner' || workspace.role === 'admin'} /></Card>
         <Card><UsageLimits /></Card>
         <Card>
           <div id="sequences" className="scroll-mt-28"><SystemSettings initialSettings={settingsWithDefaults} initialTemplateModeBlockers={templateModeBlockers} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} cities={Object.keys(suburbsByCity).sort()} /></div>

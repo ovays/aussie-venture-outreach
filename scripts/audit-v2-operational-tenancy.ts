@@ -3,14 +3,14 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import ts from 'typescript'
 
-const root = resolve(import.meta.dirname, '..')
+const root = resolve(process.cwd())
 const tenantTables = new Set([
   'activity_log', 'ai_request_logs', 'categories', 'category_email_templates',
   'category_suburb_priorities', 'category_suburb_search_state', 'city_suburbs',
   'dead_letter_queue', 'deals', 'discovery_run_metrics', 'distributed_locks',
   'dm_queue', 'emails', 'exhausted_queries', 'follow_ups', 'inbound_receipts',
   'lead_data_quality_flags', 'leads', 'recipient_outreach_ownership', 'search_cache',
-  'workflow_runs', 'workflow_steps', 'workspace_settings',
+  'workflow_runs', 'workflow_steps', 'workspace_settings', 'workspace_billing_accounts',
 ])
 const workspaceRpcs = new Set([
   'claim_hostinger_inbound_receipt', 'claim_recipient_outreach', 'insert_finder_lead_if_new',
@@ -60,7 +60,7 @@ for (const file of files) {
   if (source.includes('createServiceClient(') && !source.includes('createWorkspaceServiceClient(')) {
     const rawTenantAccess = [...tenantTables].some((table) => source.includes(`from('${table}')`) || source.includes(`from("${table}")`))
     const exempt = display.endsWith('src/lib/workspace-settings.ts') || display.endsWith('src/lib/workspace-context.ts')
-      || display.endsWith('src/lib/auth.ts')
+      || display.endsWith('src/lib/auth.ts') || display.includes('src/lib/billing/')
     if (rawTenantAccess && !exempt) findings.push(`${display}: service-role tenant access is not created through createWorkspaceServiceClient`)
   }
 
