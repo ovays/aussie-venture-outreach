@@ -35,6 +35,7 @@
     "test:category-policy:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-category-policy.ts",
     "test:mailbox-providers:v2": "tsx --conditions=react-server scripts/test-v2-mailbox-providers.ts",
     "test:usage-quotas:v2": "tsx scripts/test-v2-usage-quotas.ts",
+    "test:dashboard-summary:v2": "tsx scripts/test-dashboard-summary-performance.ts",
     "test:prompt15-safety-gate:v2": "tsx scripts/test-prompt15-product-decision-safety-gate.ts",
     "test:observability:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-observability.ts",
     "audit:tenancy:v2": "tsx scripts/audit-v2-operational-tenancy.ts",

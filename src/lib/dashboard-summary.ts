@@ -101,7 +101,7 @@ interface DashboardSummaryWire {
 type DashboardRpcClient = {
   rpc: (
     functionName: string,
-    args: { p_as_of: string }
+    args: { p_as_of: string; p_workspace_id: string }
   ) => PromiseLike<{ data: unknown; error: { message: string } | null }>
 }
 
@@ -199,10 +199,12 @@ export function adaptDashboardSummary(data: unknown): DashboardSummary {
 
 export async function getDashboardSummary(
   supabase: DashboardRpcClient,
+  workspaceId: string,
   asOf = new Date()
 ): Promise<DashboardSummary> {
   const { data, error } = await supabase.rpc('get_dashboard_summary', {
     p_as_of: asOf.toISOString(),
+    p_workspace_id: workspaceId,
   })
 
   if (error) {

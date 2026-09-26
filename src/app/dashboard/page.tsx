@@ -10,12 +10,16 @@ import { Card } from '@/components/ui/Card'
 import { logAnalyticsMetrics } from '@/lib/analytics'
 import { getDashboardSummary } from '@/lib/dashboard-summary'
 import { buildStageCounts } from '@/lib/lead-status'
+import { requireUser } from '@/lib/auth'
+import { requireWorkspaceContext } from '@/lib/workspace-context'
 
 export const revalidate = 60
 
 export default async function DashboardPage() {
+  const auth = await requireUser()
+  const workspace = await requireWorkspaceContext(auth)
   const supabase = await createClient()
-  const { analytics, statusMap, recentActivity, pendingDMCount, dealsRolling30DayCount, hotLeads } = await getDashboardSummary(supabase)
+  const { analytics, statusMap, recentActivity, pendingDMCount, dealsRolling30DayCount, hotLeads } = await getDashboardSummary(supabase, workspace.workspaceId)
   logAnalyticsMetrics('[DASHBOARD_METRICS]', { range: analytics.todayEmailStats.range, totalEmails: analytics.todayEmailStats.totalSent, followups: analytics.followupStats.sentToday, replies: analytics.replyStats.repliesToday })
   const stageCounts = buildStageCounts(statusMap)
   const totalLeads = Object.values(statusMap).reduce((sum, count) => sum + count, 0)

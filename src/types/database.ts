@@ -2039,7 +2039,10 @@ export type Database = {
         }
         Returns: Json
       }
-      get_dashboard_summary: { Args: { p_as_of?: string }; Returns: Json }
+      get_dashboard_summary: {
+        Args: { p_as_of?: string; p_workspace_id?: string }
+        Returns: Json
+      }
       get_data_quality_report: {
         Args: {
           p_business?: string
