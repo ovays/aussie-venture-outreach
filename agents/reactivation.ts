@@ -1,5 +1,5 @@
 import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
-import { sendEmail } from '@/lib/resend'
+import { MailboxProviderError } from '@/lib/mailbox/errors'
 import { logger } from '@/lib/logger'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
 import { generateStoredReactivation } from '@/lib/stored-sequence-templates'
@@ -276,19 +276,34 @@ export async function runReactivationAgent(workspaceId: string): Promise<void> {
         bodyHtml: html,
         bodyText: body,
       })
-      if (intent.status === 'sent' || intent.status === 'email_sync_failed') continue
+      if (intent.status === 'sent' || intent.status === 'delivery_uncertain' || intent.status === 'email_sync_failed') continue
 
-      const result = await sendEmail({
-        to: sendTimeLead.email,
-        subject: intent.subject,
-        html: intent.body_html,
-        text: intent.body_text,
-        leadId: lead.id,
-        idempotencyKey: outboundIdempotencyKey(intent.id),
-        messageId: outboundMessageId(intent.id),
-        emailIntentId: intent.id,
-        phase: 'reactivation',
-      })
+      let result
+      try {
+        const { sendThroughWorkspaceMailbox } = await import('@/lib/mailbox/sender')
+        result = await sendThroughWorkspaceMailbox(supabase, {
+          to: sendTimeLead.email,
+          subject: intent.subject,
+          html: intent.body_html,
+          text: intent.body_text,
+          leadId: lead.id,
+          idempotencyKey: outboundIdempotencyKey(intent.id),
+          messageId: outboundMessageId(intent.id),
+          emailIntentId: intent.id,
+          phase: 'reactivation',
+        })
+      } catch (error) {
+        if (error instanceof MailboxProviderError && error.code === 'DELIVERY_UNCERTAIN') {
+          await supabase.from('emails').update({ status: 'delivery_uncertain' }).eq('id', intent.id)
+          logger.error('reactivation', 'Reactivation has an uncertain provider outcome', { lead_id: lead.id, email_id: intent.id })
+          continue
+        }
+        if (error instanceof MailboxProviderError && error.code === 'SEND_INTENT_CONFLICT') {
+          logger.warn('reactivation', 'Reactivation skipped because its durable intent is already claimed', { lead_id: lead.id, email_id: intent.id })
+          continue
+        }
+        throw error
+      }
 
       const sentAt = new Date().toISOString()
 

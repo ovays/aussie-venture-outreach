@@ -614,10 +614,11 @@ async function main() {
     return { provider: 'hostinger', providerMessageId: '<reply@example.test>', from: 'owner@example.test', headers: {} }
   }
   const processReply = async () => { processCount += 1; return { outcome: 'processed' as const, leadId: 'lead-1' } }
-  const completed = await processHostingerInboundReceipt('receipt-bg', 'run-bg', {
+  const workspaceId = '00000000-0000-0000-0000-000000000001'
+  const completed = await processHostingerInboundReceipt('receipt-bg', 'run-bg', workspaceId, {
     supabase: fakeSupabase(receipts), fetchMessage, processReply: processReply as never,
   })
-  const replay = await processHostingerInboundReceipt('receipt-bg', 'run-bg', {
+  const replay = await processHostingerInboundReceipt('receipt-bg', 'run-bg', workspaceId, {
     supabase: fakeSupabase(receipts), fetchMessage, processReply: processReply as never,
   })
   assert.equal(completed.status, 'processed')
@@ -633,11 +634,11 @@ async function main() {
     if (attempts === 1) throw new Error('temporary failure')
     return { outcome: 'processed' as const }
   }
-  await assert.rejects(processHostingerInboundReceipt('receipt-retry', 'run-retry', {
+  await assert.rejects(processHostingerInboundReceipt('receipt-retry', 'run-retry', workspaceId, {
     supabase: fakeSupabase(retryRows), fetchMessage, processReply: retryProcessor as never,
   }))
   assert.equal(retryRows[0].status, 'failed')
-  const retryResult = await processHostingerInboundReceipt('receipt-retry', 'run-retry', {
+  const retryResult = await processHostingerInboundReceipt('receipt-retry', 'run-retry', workspaceId, {
     supabase: fakeSupabase(retryRows), fetchMessage, processReply: retryProcessor as never,
   })
   assert.equal(retryResult.status, 'processed')
@@ -645,7 +646,7 @@ async function main() {
   assert.equal(retryRows[0].attempts, 2)
 
   const missingLeadRows: Row[] = [{ id: 'receipt-missing', status: 'queued', payload: processingPayload, attempts: 0 }]
-  await assert.rejects(processHostingerInboundReceipt('receipt-missing', 'run-missing', {
+  await assert.rejects(processHostingerInboundReceipt('receipt-missing', 'run-missing', workspaceId, {
     supabase: fakeSupabase(missingLeadRows), fetchMessage,
     processReply: (async () => { throw new Error('Matched inbound reply lead lead-gone could not be loaded: not found') }) as never,
   }), /lead-gone/)
@@ -656,7 +657,7 @@ async function main() {
     id: 'receipt-fresh', status: 'processing', payload: processingPayload,
     processing_run_id: 'run-active', processing_started_at: new Date().toISOString(), attempts: 1,
   }]
-  const fresh = await processHostingerInboundReceipt('receipt-fresh', 'run-other', {
+  const fresh = await processHostingerInboundReceipt('receipt-fresh', 'run-other', workspaceId, {
     supabase: fakeSupabase(freshRows), fetchMessage, processReply: processReply as never,
   })
   assert.equal(fresh.skipped, true)
@@ -666,7 +667,7 @@ async function main() {
     id: 'receipt-same-run', status: 'processing', payload: processingPayload,
     processing_run_id: 'run-retry', processing_started_at: new Date().toISOString(), attempts: 1,
   }]
-  const sameRun = await processHostingerInboundReceipt('receipt-same-run', 'run-retry', {
+  const sameRun = await processHostingerInboundReceipt('receipt-same-run', 'run-retry', workspaceId, {
     supabase: fakeSupabase(sameRunRows), fetchMessage, processReply: processReply as never,
   })
   assert.equal(sameRun.status, 'processed')
@@ -676,7 +677,7 @@ async function main() {
     id: 'receipt-stale', status: 'processing', payload: processingPayload,
     processing_run_id: 'run-crashed', processing_started_at: '2026-01-01T00:00:00.000Z', attempts: 1,
   }]
-  const stale = await processHostingerInboundReceipt('receipt-stale', 'run-reclaim', {
+  const stale = await processHostingerInboundReceipt('receipt-stale', 'run-reclaim', workspaceId, {
     supabase: fakeSupabase(staleRows), fetchMessage, processReply: processReply as never,
   })
   assert.equal(stale.status, 'processed')
@@ -684,9 +685,9 @@ async function main() {
 
   assert.throws(() => validateHostingerInboundTaskPayload(undefined), /expected an object/)
   assert.throws(() => validateHostingerInboundTaskPayload({}), /receiptId/)
-  assert.throws(() => validateHostingerInboundTaskPayload({ receiptId: '   ' }), /receiptId/)
-  assert.throws(() => validateHostingerInboundTaskPayload({ receiptId: 'receipt-ok', extra: true }), /receiptId/)
-  assert.deepEqual(validateHostingerInboundTaskPayload({ receiptId: ' receipt-ok ' }), { receiptId: 'receipt-ok' })
+  assert.throws(() => validateHostingerInboundTaskPayload({ receiptId: '   ', workspaceId }), /receiptId/)
+  assert.throws(() => validateHostingerInboundTaskPayload({ receiptId: 'receipt-ok', workspaceId, extra: true }), /receiptId/)
+  assert.deepEqual(validateHostingerInboundTaskPayload({ receiptId: ' receipt-ok ', workspaceId }), { receiptId: 'receipt-ok', workspaceId })
 
   const mailSource = fs.readFileSync(path.join(process.cwd(), 'src/lib/hostinger-mail.ts'), 'utf8')
   assert.doesNotMatch(mailSource, /messages[^\n]*\/source/)

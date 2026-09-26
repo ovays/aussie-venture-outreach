@@ -1,7 +1,8 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { workspaceRow } from '@/lib/supabase/workspace-service'
-import { sendEmail } from '@/lib/resend'
+import { sendEmail, UncertainEmailDeliveryError } from '@/lib/resend'
+import { MailboxProviderError } from '@/lib/mailbox/errors'
 import { getAnalyticsDayRange } from '@/lib/analytics'
 import { computeFollowUpEligibility, isFuEmailSent, type FollowUpType } from '@/lib/followup-eligibility'
 import { logger } from '@/lib/logger'
@@ -91,7 +92,7 @@ export async function sendFollowUp(
   candidate: FollowUpCandidate,
   type: FollowUpType,
   aiGenerator?: Parameters<typeof generateFollowUpEmail>[4],
-  sendEmailFn: typeof sendEmail = sendEmail
+  sendEmailFn?: typeof sendEmail
 ) {
   const followUpNumber = type === 'follow_up_1' ? 1 : type === 'follow_up_2' ? 2 : 3
 
@@ -148,7 +149,7 @@ export async function sendFollowUp(
     .select('id')
     .eq('lead_id', candidate.lead.id)
     .eq('type', type)
-    .in('status', ['sent', 'email_sync_failed'])
+    .in('status', ['sent', 'delivery_uncertain', 'email_sync_failed'])
     .limit(1)
 
   if (alreadySent?.length) {
@@ -196,20 +197,38 @@ export async function sendFollowUp(
     bodyHtml: html,
     bodyText: body,
   })
-  if (intent.status === 'sent' || intent.status === 'email_sync_failed') return false
+  if (intent.status === 'sent' || intent.status === 'delivery_uncertain' || intent.status === 'email_sync_failed') return false
 
-  const result = await sendEmailFn({
-    to: sendTo,
-    subject: intent.subject,
-    html: intent.body_html,
-    text: intent.body_text,
-    leadId: candidate.lead.id,
-    references: references.length ? references : undefined,
-    idempotencyKey: outboundIdempotencyKey(intent.id),
-    messageId: outboundMessageId(intent.id),
-    emailIntentId: intent.id,
-    phase: type,
+  const send = sendEmailFn ?? (async (request: Parameters<typeof sendEmail>[0]) => {
+    const { sendThroughWorkspaceMailbox } = await import('@/lib/mailbox/sender')
+    return sendThroughWorkspaceMailbox(supabase as Parameters<typeof sendThroughWorkspaceMailbox>[0], request as Parameters<typeof sendThroughWorkspaceMailbox>[1])
   })
+  let result
+  try {
+    result = await send({
+      to: sendTo,
+      subject: intent.subject,
+      html: intent.body_html,
+      text: intent.body_text,
+      leadId: candidate.lead.id,
+      references: references.length ? references : undefined,
+      idempotencyKey: outboundIdempotencyKey(intent.id),
+      messageId: outboundMessageId(intent.id),
+      emailIntentId: intent.id,
+      phase: type,
+    })
+  } catch (error) {
+    if (error instanceof UncertainEmailDeliveryError || (error instanceof MailboxProviderError && error.code === 'DELIVERY_UNCERTAIN')) {
+      await supabase.from('emails').update({ status: 'delivery_uncertain' }).eq('id', intent.id)
+      logger.error('followup', `Follow-up ${followUpNumber} has an uncertain provider outcome`, { lead_id: candidate.lead.id, email_id: intent.id })
+      return false
+    }
+    if (error instanceof MailboxProviderError && error.code === 'SEND_INTENT_CONFLICT') {
+      logger.warn('followup', `Follow-up ${followUpNumber} skipped because its durable intent is already claimed`, { lead_id: candidate.lead.id, email_id: intent.id })
+      return false
+    }
+    throw error
+  }
 
   const sentAt = new Date().toISOString()
 
@@ -290,7 +309,7 @@ export async function sendFollowUp(
 
 export async function runFollowUpAgent(
   workspaceId: string,
-  sendEmailFn: FollowUpEmailSender = sendEmail
+  sendEmailFn?: FollowUpEmailSender
 ): Promise<void> {
   const supabase = createWorkspaceServiceClient(workspaceId)
 

@@ -33,6 +33,13 @@ const schema = z.object({
   V2_SHADOW_SUPABASE_ACCESS_TOKEN: z.string().min(1).optional(),
   V2_SHADOW_SUPABASE_SCHEMA: z.literal('reachagent_prompt15_shadow').optional(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
+  MAILBOX_CREDENTIAL_ENCRYPTION_KEY: z.string().optional(),
+  MAILBOX_OAUTH_REDIRECT_BASE_URL: z.string().url().optional(),
+  GOOGLE_MAILBOX_CLIENT_ID: z.string().optional(),
+  GOOGLE_MAILBOX_CLIENT_SECRET: z.string().optional(),
+  MICROSOFT_MAILBOX_CLIENT_ID: z.string().optional(),
+  MICROSOFT_MAILBOX_CLIENT_SECRET: z.string().optional(),
+  MICROSOFT_MAILBOX_TENANT_ID: z.string().optional(),
   NEXT_PUBLIC_APP_URL: z.string().url().optional().default('http://localhost:3000'),
 })
 

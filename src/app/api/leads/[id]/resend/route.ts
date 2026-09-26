@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
-import { sendEmail } from '@/lib/resend'
+import { MailboxProviderError } from '@/lib/mailbox/errors'
+import { sendThroughWorkspaceMailbox } from '@/lib/mailbox/sender'
 import { emailBodyToHtml } from '@/lib/utils'
 import { handleEmailSyncFailure } from '@/lib/email-status'
 import { acquireLock, releaseLock } from '@/lib/distributed-lock'
@@ -10,6 +11,7 @@ import { FOLLOW_UP_NUMBER } from '@/lib/stage-import'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 import { claimRecipientOutreach, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
+import { ensureOutboundEmailIntent, outboundIdempotencyKey, outboundMessageId } from '@/lib/outbound-send'
 
 // Generation + send + DB write normally completes in a few seconds; 3 minutes
 // gives ample headroom before a stale lock is reclaimed from a crashed request.
@@ -94,18 +96,20 @@ export async function POST(
   // Block re-sends of this exact stage when a previous attempt was delivered
   // but not recorded cleanly. Re-sending would cause a duplicate delivery.
   // Use the repair script to resolve these first.
-  const { data: syncFailed } = await supabase
+  const { data: unresolvedDelivery } = await supabase
     .from('emails')
-    .select('id')
+    .select('id,status')
     .eq('lead_id', id)
     .eq('type', emailType)
-    .eq('status', 'email_sync_failed')
+    .in('status', ['delivery_uncertain', 'email_sync_failed'])
     .limit(1)
     .maybeSingle()
 
-  if (syncFailed) {
+  if (unresolvedDelivery) {
     return NextResponse.json(
-      { error: 'A previous send attempt was delivered but not recorded cleanly. Run the repair script before re-sending to avoid a duplicate.' },
+      { error: unresolvedDelivery.status === 'delivery_uncertain'
+        ? 'A previous provider result is uncertain. Reconcile it manually before sending again to avoid a duplicate.'
+        : 'A previous send attempt was delivered but not recorded cleanly. Run the repair script before re-sending to avoid a duplicate.' },
       { status: 409 }
     )
   }
@@ -185,14 +189,40 @@ export async function POST(
     return NextResponse.json({ error: 'This email address entered a terminal delivery failure state before send.' }, { status: 409 })
   }
 
-  const result = await sendEmail({
-    to:      sendTimeLead.email,
-    subject,
-    html:    bodyHtml,
-    text:    bodyText,
-    leadId:  id,
-    references: references.length ? references : undefined,
-  })
+  if (!emailRowId) {
+    const ensured = await ensureOutboundEmailIntent(supabase, { leadId: id, type: emailType, subject, bodyHtml, bodyText })
+    if (ensured.intent.status === 'sent' || ensured.intent.status === 'delivery_uncertain' || ensured.intent.status === 'email_sync_failed') {
+      return NextResponse.json({ error: 'This email stage already has a delivered or unresolved provider outcome.' }, { status: 409 })
+    }
+    emailRowId = ensured.intent.id
+    subject = ensured.intent.subject
+    bodyHtml = ensured.intent.body_html
+    bodyText = ensured.intent.body_text
+  }
+
+  let result
+  try {
+    result = await sendThroughWorkspaceMailbox(supabase, {
+      to: sendTimeLead.email,
+      subject,
+      html: bodyHtml,
+      text: bodyText,
+      leadId: id,
+      references: references.length ? references : undefined,
+      idempotencyKey: outboundIdempotencyKey(emailRowId),
+      messageId: outboundMessageId(emailRowId),
+      emailIntentId: emailRowId,
+      phase: emailType,
+    })
+  } catch (error) {
+    if (error instanceof MailboxProviderError && error.code === 'DELIVERY_UNCERTAIN') {
+      return NextResponse.json({ error: 'The provider delivery result is uncertain. Do not resend until it has been reconciled.' }, { status: 502 })
+    }
+    if (error instanceof MailboxProviderError && error.code === 'SEND_INTENT_CONFLICT') {
+      return NextResponse.json({ error: 'This email stage is already being sent or has already been resolved.' }, { status: 409 })
+    }
+    throw error
+  }
 
   if (!result) {
     return NextResponse.json({ error: 'Failed to send email — check Resend API key' }, { status: 500 })

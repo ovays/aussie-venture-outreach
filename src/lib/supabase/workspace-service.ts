@@ -24,6 +24,7 @@ export const WORKSPACE_TENANT_TABLES = [
   'inbound_receipts',
   'lead_data_quality_flags',
   'leads',
+  'mailbox_connections',
   'recipient_outreach_ownership',
   'search_cache',
   'workflow_runs',

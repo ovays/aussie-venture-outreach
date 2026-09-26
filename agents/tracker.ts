@@ -92,8 +92,9 @@ function inboundHeader(headers: Record<string, string> | null, name: string): st
 }
 
 export interface NormalizedInboundMessage {
-  provider: 'resend' | 'hostinger'
+  provider: 'resend' | 'hostinger' | 'gmail' | 'microsoft'
   providerMessageId: string
+  mailboxConnectionId?: string | null
   mailboxId?: string
   folder?: string
   uid?: number | string

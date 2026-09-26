@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { sendEmail, UncertainEmailDeliveryError } from '@/lib/resend'
+import { MailboxProviderError } from '@/lib/mailbox/errors'
 import { handleEmailSyncFailure } from '@/lib/email-status'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 import { claimRecipientOutreach, removeLeadFromInitialOutreachQueue, classifyEmailQuality } from '@/lib/data-quality'
@@ -63,7 +64,7 @@ async function sendLegacyInitialOutreach(input: SendInitialOutreachInput): Promi
     return { outcome: 'skipped', changedState: true, details: { reason: ownership.reason ?? 'recipient_not_owned' } }
   }
   const already = await input.client.from('emails').select('id').eq('lead_id', input.leadId)
-    .in('status', ['sent', 'email_sync_failed']).neq('id', record.id).limit(1)
+    .in('status', ['sent', 'delivery_uncertain', 'email_sync_failed']).neq('id', record.id).limit(1)
   if (already.error) return serviceFailure(already.error.message, true)
   if (already.data?.length) {
     await input.client.from('emails').update({ status: 'failed' }).eq('id', record.id)
@@ -79,7 +80,10 @@ async function sendLegacyInitialOutreach(input: SendInitialOutreachInput): Promi
       await removeLeadFromInitialOutreachQueue(input.client, input.leadId, 'suppressed')
       return { outcome: 'skipped', changedState: true, details: { reason: 'send_time_delivery_suppressed' } }
     }
-    const send = input.send ?? sendEmail
+    const send = input.send ?? (async (request: Parameters<typeof sendEmail>[0]) => {
+      const { sendThroughWorkspaceMailbox } = await import('@/lib/mailbox/sender')
+      return sendThroughWorkspaceMailbox(input.client as Parameters<typeof sendThroughWorkspaceMailbox>[0], request as Parameters<typeof sendThroughWorkspaceMailbox>[1])
+    })
     const delivered = await send({
       to: current.data.email, subject: record.subject, html: record.body_html, text: record.body_text,
       leadId: input.leadId, idempotencyKey: outboundIdempotencyKey(record.id), messageId: outboundMessageId(record.id),
@@ -108,7 +112,13 @@ async function sendLegacyInitialOutreach(input: SendInitialOutreachInput): Promi
     })
     return { outcome: 'completed', changedState: true, details: { email_id: record.id, provider_accepted: true } }
   } catch (error) {
-    if (error instanceof UncertainEmailDeliveryError) return serviceFailure('provider_delivery_uncertain', true)
+    if (error instanceof UncertainEmailDeliveryError || (error instanceof MailboxProviderError && error.code === 'DELIVERY_UNCERTAIN')) {
+      await input.client.from('emails').update({ status: 'delivery_uncertain' }).eq('id', record.id)
+      return serviceFailure('provider_delivery_uncertain')
+    }
+    if (error instanceof MailboxProviderError && error.code === 'SEND_INTENT_CONFLICT') {
+      return { outcome: 'skipped', changedState: false, details: { reason: 'send_claim_conflict' } }
+    }
     throw error
   }
 }
@@ -211,7 +221,10 @@ async function sendCanaryInitialOutreach(input: SendInitialOutreachInput): Promi
       return { outcome: 'skipped', changedState: true, details: { reason: 'send_time_delivery_suppressed' } }
     }
 
-    const send = input.send ?? sendEmail
+    const send = input.send ?? (async (request: Parameters<typeof sendEmail>[0]) => {
+      const { sendThroughWorkspaceMailbox } = await import('@/lib/mailbox/sender')
+      return sendThroughWorkspaceMailbox(input.client as Parameters<typeof sendThroughWorkspaceMailbox>[0], request as Parameters<typeof sendThroughWorkspaceMailbox>[1])
+    })
     const delivered = await send({
       to: current.data.email, subject: record.subject, html: record.body_html, text: record.body_text,
       leadId: input.leadId, idempotencyKey: envelope.idempotency_key, messageId: outboundMessageId(record.id),
@@ -244,9 +257,12 @@ async function sendCanaryInitialOutreach(input: SendInitialOutreachInput): Promi
     })
     return { outcome: 'completed', changedState: true, details: { email_id: record.id, provider_accepted: true } }
   } catch (error) {
-    if (error instanceof UncertainEmailDeliveryError) {
+    if (error instanceof UncertainEmailDeliveryError || (error instanceof MailboxProviderError && error.code === 'DELIVERY_UNCERTAIN')) {
       await input.client.from('emails').update({ status: 'delivery_uncertain' }).eq('id', record.id).eq('status', 'sending')
-      return serviceFailure('provider_delivery_uncertain', true)
+      return serviceFailure('provider_delivery_uncertain')
+    }
+    if (error instanceof MailboxProviderError && error.code === 'SEND_INTENT_CONFLICT') {
+      return { outcome: 'skipped', changedState: false, details: { reason: 'send_claim_conflict' } }
     }
     throw error
   }

@@ -1,5 +1,6 @@
 import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
-import { sendEmail, UncertainEmailDeliveryError } from '@/lib/resend'
+import { UncertainEmailDeliveryError } from '@/lib/resend'
+import { MailboxProviderError } from '@/lib/mailbox/errors'
 import { logger } from '@/lib/logger'
 import { getAnalyticsDayRange } from '@/lib/analytics'
 import { handleEmailSyncFailure } from '@/lib/email-status'
@@ -279,7 +280,8 @@ if (isDeliverySuppressedForAddress(sendTimeLead.email, sendTimeLead.delivery_sup
   await removeLeadFromInitialOutreachQueue(supabase, emailRecord.lead_id, 'suppressed')
   continue
 }
-const result = await sendEmail({
+const { sendThroughWorkspaceMailbox } = await import('@/lib/mailbox/sender')
+const result = await sendThroughWorkspaceMailbox(supabase, {
     to: sendTimeLead.email,
     subject: emailRecord.subject,
     html: emailRecord.body_html,
@@ -371,16 +373,23 @@ const result = await sendEmail({
       const msg = error instanceof Error ? error.message : String(error)
       logger.error('sender', `#${i + 1}/${total} EXCEPTION for ${lead.email}: ${msg}`)
 
-      if (error instanceof UncertainEmailDeliveryError) {
-        // Keep the durable intent pending. A retry reuses this row's provider
-        // idempotency key, so it confirms the same delivery instead of sending
-        // a second message after an ambiguous transport failure.
+      if (error instanceof UncertainEmailDeliveryError || (error instanceof MailboxProviderError && error.code === 'DELIVERY_UNCERTAIN')) {
+        // An ambiguous provider result is terminal for automatic execution.
+        // A human must reconcile it before any later attempt, because not all
+        // mailbox providers offer provider-side idempotency.
+        await supabase.from('emails').update({ status: 'delivery_uncertain' }).eq('id', emailRecord.id)
         await supabase.from('dead_letter_queue').insert({
           workspace_id: workspaceId,
           operation: 'send_email_uncertain',
           payload: { lead_id: emailRecord.lead_id, email_id: emailRecord.id },
           error: msg,
         })
+        failed++
+        continue
+      }
+
+      if (error instanceof MailboxProviderError && error.code === 'SEND_INTENT_CONFLICT') {
+        logger.warn('sender', 'Send skipped because the durable email intent is already claimed or resolved', { email_id: emailRecord.id, lead_id: emailRecord.lead_id })
         failed++
         continue
       }

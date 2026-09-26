@@ -25,6 +25,7 @@ import {
 } from '../agents/tracker'
 import { isDeliverySuppressedForAddress } from '../src/lib/delivery-suppression'
 import { parseHostingerWebhookPayload, verifyHostingerBearerSecret } from '../src/lib/hostinger-webhook'
+import { registerWorkspaceServiceClient } from '../src/lib/supabase/workspace-scope'
 
 const SEP = '═'.repeat(60)
 let passed = 0
@@ -57,7 +58,7 @@ async function expectReject(promise: Promise<unknown>, pattern: RegExp, label: s
 type Row = Record<string, unknown>
 
 function makeFakeSupabase(tables: Record<string, Row[]>, failUpdates: Record<string, string> = {}) {
-  return {
+  const client = {
     async rpc(name: string, args: { p_lead_id: string; p_email: string }) {
       if (name !== 'suppress_lead_delivery_email') return { error: { message: 'unknown rpc' } }
       const lead = (tables.leads ?? []).find((row) => row.id === args.p_lead_id)
@@ -126,6 +127,8 @@ function makeFakeSupabase(tables: Record<string, Row[]>, failUpdates: Record<str
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any
+  registerWorkspaceServiceClient(client, '00000000-0000-0000-0000-000000000001')
+  return client
 }
 
 console.log(SEP)

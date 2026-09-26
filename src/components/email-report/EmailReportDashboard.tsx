@@ -23,6 +23,7 @@ import { EmailAddressList } from '@/components/email-report/EmailAddressList'
 import { FilterToolbar } from '@/components/ui/FilterToolbar'
 import { DataCardField, ResponsiveDataCard } from '@/components/ui/ResponsiveDataCard'
 import { DataSkeleton, DataState } from '@/components/ui/DataState'
+import type { PublicMailboxConnection } from '@/lib/mailbox/types'
 
 const PRESETS: Array<{ value: EmailReportPreset; label: string }> = [
   { value: 'today', label: 'Today' },
@@ -49,7 +50,7 @@ function EmailStatusBadge({ status }: { status: EmailReportStatus }) {
 function errorMessageForStatus(status: number, apiMessage?: string): string {
   if (status === 400) return apiMessage || 'Choose a valid date range of no more than 366 days.'
   if (status === 401 || status === 403) return 'Your session has expired or you do not have access. Please sign in again.'
-  if (status === 502) return 'Unable to load email activity from Hostinger Mail. Please try again.'
+  if (status === 502) return 'Unable to load email activity from the selected mailbox. Please try again.'
   return 'Unable to load the email report. Please try again.'
 }
 
@@ -65,6 +66,8 @@ export function EmailReportDashboard() {
   const [search, setSearch] = useState('')
   const [emailStatus, setEmailStatus] = useState('')
   const [reachagentStatus, setReachagentStatus] = useState('')
+  const [mailboxes, setMailboxes] = useState<PublicMailboxConnection[]>([])
+  const [mailboxId, setMailboxId] = useState('')
   const requestSequence = useRef(0)
   const { openDrawer } = useLeadDrawer()
 
@@ -72,6 +75,7 @@ export function EmailReportDashboard() {
     setLoading(true)
     setError(null)
     const params = new URLSearchParams({ from: appliedRange.from, to: appliedRange.to })
+    if (mailboxId) params.set('mailbox', mailboxId)
     try {
       const response = await fetch(`/api/email-report?${params.toString()}`, { signal, method: 'GET' })
       const json = await response.json() as EmailReportResponse & { error?: string }
@@ -86,7 +90,14 @@ export function EmailReportDashboard() {
     } finally {
       if (sequence === requestSequence.current) setLoading(false)
     }
-  }, [appliedRange])
+  }, [appliedRange, mailboxId])
+
+  useEffect(() => {
+    void fetch('/api/mailboxes').then((response) => response.json()).then((body) => {
+      const readable = ((body.data ?? []) as PublicMailboxConnection[]).filter((row) => row.status === 'connected' && (row.capabilities.canReadInbox || row.capabilities.canReadSent))
+      setMailboxes(readable)
+    }).catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -132,7 +143,9 @@ export function EmailReportDashboard() {
   return (
     <div className="space-y-5" data-testid="email-report-page">
       <Card>
+        {report?.mailbox && <p className="mb-3 text-sm text-[var(--text-muted)]">Mailbox: <span className="text-[var(--text-primary)]">{report.mailbox.email_address}</span> · {report.mailbox.provider}</p>}
         <div className="flex flex-wrap items-end gap-3">
+          {mailboxes.length > 0 && <Select label="Mailbox" value={mailboxId} onChange={(event) => setMailboxId(event.target.value)} options={[{ value: '', label: 'Default mailbox' }, ...mailboxes.map((mailbox) => ({ value: mailbox.id, label: `${mailbox.email_address} (${mailbox.provider})` }))]} />}
           <div className="min-w-40 flex-1 sm:flex-none">
             <Input label="From date" type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
           </div>
@@ -220,7 +233,7 @@ export function EmailReportDashboard() {
           <table className="w-full min-w-[940px] text-sm">
             <thead>
               <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
-                {['Business', 'Email', 'ReachAgent Status', 'Received', 'Sent', 'Email Status', 'Last Activity', 'Last Direction'].map((label) => (
+                {['Business', 'Email', 'Provider', 'Subject', 'ReachAgent Status', 'Received', 'Sent', 'Email Status', 'Last Activity', 'Last Direction'].map((label) => (
                   <th key={label} className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#64748b' }}>{label}</th>
                 ))}
               </tr>
@@ -255,6 +268,8 @@ function MobileReportCard({ row, openLead }: { row: EmailReportRow; openLead: (l
       actions={row.lead_id ? <Button size="sm" variant="secondary" onClick={() => openLead(row.lead_id!)}>Open lead</Button> : undefined}
     >
       <DataCardField label="Email"><EmailAddressList addresses={addresses} expanded={expanded} onToggle={() => setExpanded((value) => !value)} /></DataCardField>
+      <DataCardField label="Provider">{row.provider ?? 'unknown'} · {row.mailbox ?? 'mailbox'}</DataCardField>
+      <DataCardField label="Subject">{row.last_subject || '—'}</DataCardField>
       <DataCardField label="Status">{reachAgentStatusLabel(row.reachagent_status, row.matching_lead_count)}</DataCardField>
       <DataCardField label="Activity">{row.received_count} received · {row.sent_count} sent</DataCardField>
       <DataCardField label="Last">{formatSydneyTimestamp(row.last_activity_at)} · {row.last_direction}</DataCardField>
@@ -265,13 +280,13 @@ function MobileReportCard({ row, openLead }: { row: EmailReportRow; openLead: (l
 function LoadingRows() {
   return <>{[0, 1, 2, 3].map((index) => (
     <tr key={index} className="border-b" style={{ borderColor: '#1e2130' }}>
-      <td colSpan={8} className="px-4 py-4"><div className="h-5 animate-pulse rounded" style={{ background: '#2a2d3e', width: `${88 - index * 8}%` }} /></td>
+      <td colSpan={10} className="px-4 py-4"><div className="h-5 animate-pulse rounded" style={{ background: '#2a2d3e', width: `${88 - index * 8}%` }} /></td>
     </tr>
   ))}</>
 }
 
 function MessageRow({ message, tone = 'muted' }: { message: string; tone?: 'muted' | 'error' }) {
-  return <tr><td colSpan={8} className={`px-4 py-14 text-center ${tone === 'error' ? 'text-red-400' : ''}`} style={tone === 'muted' ? { color: '#64748b' } : undefined}>{message}</td></tr>
+  return <tr><td colSpan={10} className={`px-4 py-14 text-center ${tone === 'error' ? 'text-red-400' : ''}`} style={tone === 'muted' ? { color: '#64748b' } : undefined}>{message}</td></tr>
 }
 
 function ReportRow({ row, openLead }: { row: EmailReportRow; openLead: (leadId: string) => void }) {
@@ -292,6 +307,8 @@ function ReportRow({ row, openLead }: { row: EmailReportRow; openLead: (leadId: 
           onToggle={() => setAddressesExpanded((current) => !current)}
         />
       </td>
+      <td className="px-4 py-3 capitalize text-[var(--text-muted)]">{row.provider ?? '—'}</td>
+      <td className="max-w-52 truncate px-4 py-3 text-[var(--text-muted)]" title={row.last_subject ?? undefined}>{row.last_subject || '—'}</td>
       <td className="px-4 py-3">
         {row.reachagent_status === 'not_found' || row.reachagent_status === 'ambiguous'
           ? <span className="inline-flex rounded-full bg-gray-500/20 px-2.5 py-1 text-xs font-medium text-gray-300">{reachAgentStatusLabel(row.reachagent_status, row.matching_lead_count)}</span>

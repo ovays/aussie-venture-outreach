@@ -135,6 +135,9 @@ export function generateEmailReportCsv(rows: EmailReportRow[]): string {
   const columns = [
     'Business',
     'Email Addresses',
+    'Mailbox',
+    'Provider',
+    'Last Subject',
     'ReachAgent Status',
     'Received',
     'Sent',
@@ -145,6 +148,9 @@ export function generateEmailReportCsv(rows: EmailReportRow[]): string {
   const records = rows.map((row) => [
     row.business_name ?? '—',
     (row.email_addresses?.length ? row.email_addresses : [row.email]).join('; '),
+    row.mailbox ?? '',
+    row.provider ?? '',
+    row.last_subject ?? '',
     reachAgentStatusLabel(row.reachagent_status, row.matching_lead_count),
     row.received_count,
     row.sent_count,

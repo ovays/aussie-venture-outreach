@@ -25,6 +25,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { sendFollowUp } from '../agents/followup'
+import { registerWorkspaceServiceClient } from '../src/lib/supabase/workspace-scope'
 
 const SEP = '═'.repeat(60)
 let passed = 0
@@ -49,7 +50,7 @@ function makeFakeSupabase(
   tables: Record<string, Row[]>,
   opts: { enforceUniqueDeliveredPerLeadType?: boolean } = {}
 ) {
-  return {
+  const client = {
     async rpc(name: string, args: Record<string, unknown>) {
       if (name === 'claim_recipient_outreach') {
         const leadId = String(args.p_lead_id)
@@ -129,6 +130,8 @@ function makeFakeSupabase(
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any
+  registerWorkspaceServiceClient(client, '00000000-0000-0000-0000-000000000001')
+  return client
 }
 
 function makeCandidate(leadId: string) {
@@ -270,6 +273,7 @@ async function main() {
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any
+    registerWorkspaceServiceClient(db, '00000000-0000-0000-0000-000000000001')
 
     const stubSendEmail = async () => ({ id: 'rs_race', messageId: '<race@aussieventure.com>' })
 

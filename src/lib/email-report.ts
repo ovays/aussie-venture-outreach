@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { HostingerMessageMetadata, HostingerReportMailboxMessages } from '@/lib/hostinger-mail'
+import type { MailboxProviderType, ProviderMailboxMessage } from '@/lib/mailbox/types'
 import { isAutomatedInboundEmail, normalizeInboundEmailAddress } from '../../agents/tracker'
 
 export const EMAIL_REPORT_TIME_ZONE = 'Australia/Sydney'
@@ -51,6 +52,10 @@ export interface EmailReportRow {
   last_direction: EmailReportDirection
   email_status: EmailReportStatus
   matching_lead_count?: number
+  provider?: MailboxProviderType
+  mailbox?: string
+  last_subject?: string | null
+  provider_status?: string | null
 }
 
 export interface EmailReportResponse {
@@ -64,6 +69,31 @@ export interface EmailReportResponse {
     reachagent_status_counts: Record<string, number>
   }
   rows: EmailReportRow[]
+  mailbox?: { id: string | null; email_address: string; provider: MailboxProviderType }
+}
+
+export function buildProviderEmailReportActivityRows(messages: ProviderMailboxMessage[], mailboxAddress: string): EmailReportRow[] {
+  const ownAddress = normalizeEmailReportAddress(mailboxAddress)
+  const hostingerShape: HostingerReportMailboxMessages = {
+    mailboxAddress,
+    sentFolder: 'Sent',
+    received: messages.filter((message) => message.direction === 'received').map((message, index) => ({ uid: index + 1, path: 'INBOX', date: message.receivedAt, subject: message.subject, from: { address: message.from }, to: message.to.map((address) => ({ address })), messageId: message.messageId ?? message.providerMessageId })),
+    sent: messages.filter((message) => message.direction === 'sent').map((message, index) => ({ uid: index + 1, path: 'Sent', date: message.receivedAt, subject: message.subject, from: { address: message.from || ownAddress || mailboxAddress }, to: message.to.map((address) => ({ address })), messageId: message.messageId ?? message.providerMessageId })),
+  }
+  const provider = messages[0]?.provider
+  const rows = buildEmailReportActivityRows(hostingerShape)
+  return rows.map((row) => {
+    const addressSet = new Set(row.email_addresses)
+    const related = messages.filter((message) => {
+      const parties = message.direction === 'received' ? [message.from] : message.to
+      return parties.some((address) => {
+        const normalized = normalizeEmailReportAddress(address)
+        return normalized ? addressSet.has(normalized) || emailReportGroupKey(normalized) === emailReportGroupKey(row.email) : false
+      })
+    }).sort((a, b) => a.receivedAt.localeCompare(b.receivedAt))
+    const last = related.at(-1)
+    return { ...row, provider, mailbox: mailboxAddress, last_subject: last?.subject ?? null, provider_status: last?.status ?? null }
+  })
 }
 
 export class EmailReportValidationError extends Error {}

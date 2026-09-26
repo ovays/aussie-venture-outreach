@@ -14,6 +14,7 @@ import { Tabs } from '@/components/ui/Tabs'
 import { getOnboardingState } from '@/lib/onboarding-server'
 import { timezoneOptions } from '@/lib/onboarding'
 import { WorkspaceProfileSettings } from '@/components/settings/WorkspaceProfileSettings'
+import { MailboxSettings } from '@/components/settings/MailboxSettings'
 
 export const revalidate = 0
 
@@ -173,6 +174,7 @@ export default async function SettingsPage() {
       <div className="page-content page-stack max-w-4xl">
         <Tabs label="Settings sections" items={[
           { label: 'Workspace', href: '/dashboard/settings' },
+          { label: 'Mailboxes', href: '#mailboxes' },
           { label: 'Sequences', href: '#sequences' },
           { label: 'Suburbs', href: '#suburbs' },
           { label: 'Targeting', href: '#targeting' },
@@ -192,6 +194,7 @@ export default async function SettingsPage() {
             canEdit={workspace.isPlatformAdmin || workspace.role === 'owner' || workspace.role === 'admin'}
           />
         </Card>
+        <Card><MailboxSettings /></Card>
         <Card>
           <div id="sequences" className="scroll-mt-28"><SystemSettings initialSettings={settingsWithDefaults} initialTemplateModeBlockers={templateModeBlockers} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} cities={Object.keys(suburbsByCity).sort()} /></div>
         </Card>

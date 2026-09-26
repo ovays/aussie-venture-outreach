@@ -1,24 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  buildEmailReportActivityRows,
+  buildProviderEmailReportActivityRows,
   completeEmailReport,
   EmailReportValidationError,
   fetchEmailReportLeads,
   parseEmailReportDateRange,
 } from '@/lib/email-report'
-import { fetchHostingerReportMessages, isHostingerMailboxConfigured } from '@/lib/hostinger-mail'
+import { isHostingerMailboxConfigured } from '@/lib/hostinger-mail'
 import { logger } from '@/lib/logger'
-import { createClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { ensureFreshAccessToken, getUsableMailboxConnection, listMailboxConnections } from '@/lib/mailbox/connections'
+import { getMailboxProvider } from '@/lib/mailbox/registry'
 
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!isHostingerMailboxConfigured()) {
-    return NextResponse.json(
-      { error: 'Mailbox not configured', configured: false },
-      { status: 503 },
-    )
-  }
+  const context = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(context)) return context
   let range
   try {
     range = parseEmailReportDateRange(
@@ -32,32 +30,44 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     throw error
   }
 
-  let mailbox
+  let connection = null
+  let provider = null
+  let mailboxAddress = ''
   try {
-    mailbox = await fetchHostingerReportMessages(range)
+    const requested = request.nextUrl.searchParams.get('mailbox')
+    if (requested === 'env:hostinger') {
+      if (process.env.HOSTINGER_WORKSPACE_ID !== context.workspace.workspaceId || !isHostingerMailboxConfigured()) throw new Error('Hostinger mailbox is not available in this workspace')
+      provider = getMailboxProvider('hostinger')
+      mailboxAddress = process.env.HOSTINGER_MAILBOX_ADDRESS!
+    } else {
+      const candidate = requested
+        ? await getUsableMailboxConnection(context.supabase, requested)
+        : (await listMailboxConnections(context.supabase)).find((row) => row.status === 'connected' && (row.capabilities.canReadInbox || row.capabilities.canReadSent)) ?? null
+      if (!candidate) {
+        if (process.env.HOSTINGER_WORKSPACE_ID === context.workspace.workspaceId && isHostingerMailboxConfigured()) {
+          provider = getMailboxProvider('hostinger'); mailboxAddress = process.env.HOSTINGER_MAILBOX_ADDRESS!
+        } else throw new Error('No readable mailbox is connected')
+      } else {
+        connection = requested ? candidate : await ensureFreshAccessToken(context.supabase, candidate)
+        provider = getMailboxProvider(connection.provider)
+        mailboxAddress = connection.email_address
+      }
+    }
+    if (!provider.listMessages) throw new Error('Selected provider does not support mailbox reporting')
+    const messages = await provider.listMessages(connection, range)
+    const activityRows = buildProviderEmailReportActivityRows(messages, mailboxAddress)
+    const leads = await fetchEmailReportLeads(context.supabase, activityRows)
+    return NextResponse.json({ ...completeEmailReport(range, activityRows, leads), mailbox: { id: connection?.id ?? 'env:hostinger', email_address: mailboxAddress, provider: provider.type } })
   } catch (error) {
-    logger.error('email-report', 'Failed to load Hostinger mailbox metadata', {
+    logger.error('email-report', 'Failed to load mailbox metadata', {
       error: error instanceof Error ? error.message : String(error),
+      workspace_id: context.workspace.workspaceId,
+      mailbox_connection_id: connection?.id ?? null,
+      provider: provider?.type ?? null,
     })
     return NextResponse.json(
-      { error: 'Unable to load email activity from Hostinger Mail' },
+      { error: 'Unable to load email activity from the selected mailbox' },
       { status: 502 },
-    )
-  }
-
-  const activityRows = buildEmailReportActivityRows(mailbox)
-
-  try {
-    const supabase = await createClient()
-    const leads = await fetchEmailReportLeads(supabase, activityRows)
-    return NextResponse.json(completeEmailReport(range, activityRows, leads))
-  } catch (error) {
-    logger.error('email-report', 'Failed to match current ReachAgent leads', {
-      error: error instanceof Error ? error.message : String(error),
-    })
-    return NextResponse.json(
-      { error: 'Unable to match current ReachAgent lead statuses' },
-      { status: 500 },
     )
   }
 }

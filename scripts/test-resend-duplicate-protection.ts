@@ -89,6 +89,7 @@ function makeFakeLockClient() {
 }
 
 async function main() {
+  const workspaceId = '00000000-0000-0000-0000-000000000001'
   console.log(SEP)
   console.log('  TEST:RESEND-DUPLICATE-PROTECTION')
   console.log(SEP)
@@ -103,7 +104,7 @@ async function main() {
     let resendCalls = 0
 
     async function simulateRequest(): Promise<{ status: number }> {
-      const token = await acquireLock(db, `resend:${leadId}`, 3 * 60 * 1000)
+      const token = await acquireLock(db, `resend:${leadId}`, 3 * 60 * 1000, workspaceId)
       if (!token) return { status: 409 }
       aiCalls++
       resendCalls++
@@ -122,8 +123,8 @@ async function main() {
   console.log('\n  2. Resend for a different lead is unaffected by another lead\'s in-flight resend')
   {
     const db = makeFakeLockClient()
-    const gotA = await acquireLock(db, 'resend:lead-a')
-    const gotB = await acquireLock(db, 'resend:lead-b')
+    const gotA = await acquireLock(db, 'resend:lead-a', undefined, workspaceId)
+    const gotB = await acquireLock(db, 'resend:lead-b', undefined, workspaceId)
     assert(!!gotA && !!gotB, 'Locks are scoped per-lead, not global')
   }
 
@@ -136,11 +137,11 @@ async function main() {
   console.log('\n  3. Lock is acquired before the email_sync_failed / pending-draft checks')
   {
     const lockIdx = routeSrc.indexOf("acquireLock(supabase, lockKey, RESEND_LOCK_TTL_MS)")
-    const syncFailedIdx = routeSrc.indexOf("eq('status', 'email_sync_failed')")
-    const sendIdx = routeSrc.indexOf('await sendEmail({')
+    const syncFailedIdx = routeSrc.indexOf(".in('status', ['delivery_uncertain', 'email_sync_failed'])")
+    const sendIdx = routeSrc.indexOf('await sendThroughWorkspaceMailbox(supabase, {')
     assert(lockIdx !== -1, 'route.ts calls acquireLock(supabase, lockKey, RESEND_LOCK_TTL_MS)')
     assert(lockIdx < syncFailedIdx, 'Lock is acquired before the email_sync_failed guard read')
-    assert(lockIdx < sendIdx, 'Lock is acquired before sendEmail() is ever called')
+    assert(lockIdx < sendIdx, 'Lock is acquired before the workspace mailbox transport is ever called')
   }
 
   // ── 4. Failed acquire returns 409 with a clear message ──────────────────────

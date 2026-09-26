@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { sendEmail } from '@/lib/resend'
+import { MailboxProviderError } from '@/lib/mailbox/errors'
 import { insertEmailSyncFailedRecovery } from '@/lib/email-status'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 import { claimRecipientOutreach } from '@/lib/data-quality'
@@ -42,15 +43,30 @@ export async function sendReactivation(input: SendReactivationInput): Promise<Se
   const { intent } = await ensureOutboundEmailIntent(input.client, {
     leadId: input.leadId, type: 'reactivation', subject: content.subject, bodyHtml: content.html, bodyText: content.body,
   })
-  if (intent.status === 'sent' || intent.status === 'email_sync_failed') {
+  if (intent.status === 'sent' || intent.status === 'delivery_uncertain' || intent.status === 'email_sync_failed') {
     return { outcome: 'completed', changedState: true, details: { reason: 'already_delivered' } }
   }
-  const send = input.send ?? sendEmail
-  const delivered = await send({
-    to: current.data.email, subject: intent.subject, html: intent.body_html, text: intent.body_text,
-    leadId: input.leadId, idempotencyKey: outboundIdempotencyKey(intent.id), messageId: outboundMessageId(intent.id),
-    emailIntentId: intent.id, phase: 'reactivation',
+  const send = input.send ?? (async (request: Parameters<typeof sendEmail>[0]) => {
+    const { sendThroughWorkspaceMailbox } = await import('@/lib/mailbox/sender')
+    return sendThroughWorkspaceMailbox(input.client as Parameters<typeof sendThroughWorkspaceMailbox>[0], request as Parameters<typeof sendThroughWorkspaceMailbox>[1])
   })
+  let delivered
+  try {
+    delivered = await send({
+      to: current.data.email, subject: intent.subject, html: intent.body_html, text: intent.body_text,
+      leadId: input.leadId, idempotencyKey: outboundIdempotencyKey(intent.id), messageId: outboundMessageId(intent.id),
+      emailIntentId: intent.id, phase: 'reactivation',
+    })
+  } catch (error) {
+    if (error instanceof MailboxProviderError && error.code === 'DELIVERY_UNCERTAIN') {
+      await input.client.from('emails').update({ status: 'delivery_uncertain' }).eq('id', intent.id)
+      return serviceFailure('provider_delivery_uncertain')
+    }
+    if (error instanceof MailboxProviderError && error.code === 'SEND_INTENT_CONFLICT') {
+      return { outcome: 'skipped', changedState: false, details: { reason: 'send_claim_conflict' } }
+    }
+    throw error
+  }
   if (!delivered) return serviceFailure('provider_returned_no_delivery', true)
   const sentAt = new Date().toISOString()
   const emailUpdate = await input.client.from('emails').update({

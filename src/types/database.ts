@@ -1047,6 +1047,93 @@ export type Database = {
           },
         ]
       }
+      mailbox_connections: {
+        Row: {
+          access_token_encrypted: string | null
+          capabilities: Json
+          created_at: string
+          created_by: string | null
+          display_name: string | null
+          email_address: string
+          id: string
+          is_default_sender: boolean
+          last_connected_at: string | null
+          last_error_at: string | null
+          last_error_code: string | null
+          last_refreshed_at: string | null
+          last_sync_at: string | null
+          provider: string
+          provider_account_id: string | null
+          refresh_token_encrypted: string | null
+          scopes: string[]
+          status: string
+          token_expires_at: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          access_token_encrypted?: string | null
+          capabilities?: Json
+          created_at?: string
+          created_by?: string | null
+          display_name?: string | null
+          email_address: string
+          id?: string
+          is_default_sender?: boolean
+          last_connected_at?: string | null
+          last_error_at?: string | null
+          last_error_code?: string | null
+          last_refreshed_at?: string | null
+          last_sync_at?: string | null
+          provider: string
+          provider_account_id?: string | null
+          refresh_token_encrypted?: string | null
+          scopes?: string[]
+          status?: string
+          token_expires_at?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          access_token_encrypted?: string | null
+          capabilities?: Json
+          created_at?: string
+          created_by?: string | null
+          display_name?: string | null
+          email_address?: string
+          id?: string
+          is_default_sender?: boolean
+          last_connected_at?: string | null
+          last_error_at?: string | null
+          last_error_code?: string | null
+          last_refreshed_at?: string | null
+          last_sync_at?: string | null
+          provider?: string
+          provider_account_id?: string | null
+          refresh_token_encrypted?: string | null
+          scopes?: string[]
+          status?: string
+          token_expires_at?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mailbox_connections_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mailbox_connections_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inbound_receipts: {
         Row: {
           attempts: number

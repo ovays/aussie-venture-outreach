@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
-import { sendEmail } from '@/lib/resend'
+import { sendThroughWorkspaceMailbox } from '@/lib/mailbox/sender'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
 import { researchOneLead, researchPurposeForInitialEmailMode } from '@/lib/research-lead'
 import { writeOneLead } from '@/lib/write-lead'
@@ -15,6 +15,7 @@ import {
 } from '@/lib/leads-bulk-progress'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 import { claimRecipientOutreach, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
+import { outboundIdempotencyKey, outboundMessageId } from '@/lib/outbound-send'
 
 // Same protection agents/sender.ts (idempotency re-check) and
 // resend/route.ts (per-lead lock) already apply to their send paths — this
@@ -110,7 +111,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           .select('id')
           .eq('lead_id', lead_id)
           .eq('type', 'initial_pitch')
-          .in('status', ['sent', 'email_sync_failed'])
+          .in('status', ['sent', 'delivery_uncertain', 'email_sync_failed'])
           .limit(1)
 
         if (alreadySent?.length) {
@@ -177,7 +178,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           continue
         }
 
-        const result = await sendEmail({ to: sendTimeLead.email, subject, html: bodyHtml, text: bodyText, leadId: lead_id })
+        const result = await sendThroughWorkspaceMailbox(supabase, {
+          to: sendTimeLead.email,
+          subject,
+          html: bodyHtml,
+          text: bodyText,
+          leadId: lead_id,
+          idempotencyKey: outboundIdempotencyKey(pendingEmail.id),
+          messageId: outboundMessageId(pendingEmail.id),
+          emailIntentId: pendingEmail.id,
+          phase: 'initial_pitch',
+        })
 
         if (!result) {
           const failure = { lead_id, business_name: lead.business_name, reason: 'Email send failed' }
