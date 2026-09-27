@@ -2070,7 +2070,7 @@ export type Database = {
       }
       get_data_quality_summary: { Args: never; Returns: Json }
       get_deals_search_page: {
-        Args: { p_page?: number; p_page_size?: number; p_search?: string }
+        Args: { p_page?: number; p_page_size?: number; p_search?: string; p_workspace_id?: string }
         Returns: Json
       }
       get_delivery_failure_lead_selection: {
@@ -2079,6 +2079,7 @@ export type Database = {
           p_include_ids?: boolean
           p_search?: string
           p_status?: string
+          p_workspace_id?: string
         }
         Returns: Json
       }
@@ -2089,6 +2090,7 @@ export type Database = {
           p_page_size?: number
           p_search?: string
           p_status?: string
+          p_workspace_id?: string
         }
         Returns: Json
       }
@@ -2100,6 +2102,7 @@ export type Database = {
           p_platform?: string
           p_search?: string
           p_status?: string
+          p_workspace_id?: string
         }
         Returns: Json
       }
@@ -2110,6 +2113,7 @@ export type Database = {
           p_search?: string
           p_status?: string
           p_type?: string
+          p_workspace_id?: string
         }
         Returns: Json
       }
@@ -2143,6 +2147,7 @@ export type Database = {
           p_page_size?: number
           p_search?: string
           p_statuses?: string[]
+          p_workspace_id?: string
         }
         Returns: Json
       }
@@ -2155,6 +2160,7 @@ export type Database = {
           p_search?: string
           p_sort_dir?: string
           p_sort_key?: string
+          p_workspace_id?: string
         }
         Returns: Json
       }
@@ -2164,6 +2170,7 @@ export type Database = {
           p_page_size?: number
           p_search?: string
           p_statuses: string[]
+          p_workspace_id?: string
         }
         Returns: Json
       }

@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 import {
-  adminListWorkspaceDirectory,
+  adminListWorkspaceDirectoryPage,
   adminSetWorkspaceStatus,
   adminUpdateWorkspaceName,
 } from '@/lib/admin/workspaces'
+import { resolvePagination } from '@/lib/pagination'
+import { normalizeSearchTerm } from '@/lib/search'
 
 const mutationSchema = z.discriminatedUnion('action', [
   z.object({
@@ -20,11 +22,19 @@ const mutationSchema = z.discriminatedUnion('action', [
   }),
 ])
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const auth = await requireApiAdmin()
   if (isAuthErrorResponse(auth)) return auth
   try {
-    return NextResponse.json({ data: await adminListWorkspaceDirectory() })
+    const pagination = resolvePagination({
+      page: request.nextUrl.searchParams.get('page'),
+      pageSize: request.nextUrl.searchParams.get('page_size'),
+    })
+    const result = await adminListWorkspaceDirectoryPage({
+      ...pagination,
+      search: normalizeSearchTerm(request.nextUrl.searchParams.get('search')),
+    })
+    return NextResponse.json(result)
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to load workspace directory' }, { status: 500 })
   }

@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { resolvePagination } from '@/lib/pagination'
 import { normalizeSearchTerm } from '@/lib/search'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const supabase = await createClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase, workspace } = access
   const { searchParams } = new URL(request.url)
 
   const status = searchParams.get('status')
@@ -15,12 +17,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     pageSize: searchParams.get('page_size'),
   })
   const { data: result, error } = await supabase.rpc('get_dm_queue_search_page', {
-    p_status: status,
-    p_platform: platform,
-    p_city: city,
+    p_status: status ?? undefined,
+    p_platform: platform ?? undefined,
+    p_city: city ?? undefined,
     p_search: normalizeSearchTerm(searchParams.get('search')),
     p_page: pagination.page,
     p_page_size: pagination.pageSize,
+    p_workspace_id: workspace.workspaceId,
   })
 
   if (error) {
@@ -37,10 +40,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const supabase = await createClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase, workspace } = access
   const body = await request.json() as { id: string; status: 'sent' | 'skipped' | 'pending' }
 
-  const update: Record<string, unknown> = { status: body.status }
+  const update: { status: 'sent' | 'skipped' | 'pending'; sent_at?: string } = { status: body.status }
   if (body.status === 'sent') {
     update.sent_at = new Date().toISOString()
   }
@@ -48,6 +53,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await supabase
     .from('dm_queue')
     .update(update)
+    .eq('workspace_id', workspace.workspaceId)
     .eq('id', body.id)
     .select()
     .single()

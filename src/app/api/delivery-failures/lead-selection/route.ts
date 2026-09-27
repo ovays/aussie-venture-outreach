@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAuthErrorResponse, requireApiUser } from '@/lib/auth'
 import { parseDeliveryFailureFilters } from '@/lib/delivery-failure-report'
 import { escapePostgresLikeTerm } from '@/lib/search'
-import { createClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 
 interface LeadSelectionRpcResult {
   count?: unknown
@@ -10,17 +9,18 @@ interface LeadSelectionRpcResult {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const auth = await requireApiUser()
-  if (isAuthErrorResponse(auth)) return auth
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
 
   const filters = parseDeliveryFailureFilters(request.nextUrl.searchParams)
   const includeIds = request.nextUrl.searchParams.get('include_ids') === 'true'
-  const supabase = await createClient()
+  const { supabase, workspace } = access
   const { data, error } = await supabase.rpc('get_delivery_failure_lead_selection', {
-    p_status: filters.status,
-    p_email_type: filters.emailType,
+    p_status: filters.status ?? undefined,
+    p_email_type: filters.emailType ?? undefined,
     p_search: escapePostgresLikeTerm(filters.search),
     p_include_ids: includeIds,
+    p_workspace_id: workspace.workspaceId,
   })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { resolvePagination } from '@/lib/pagination'
 import { STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
 import { normalizeSearchTerm } from '@/lib/search'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 
 const NEW_STATUSES = ['new'] as const
 
@@ -21,12 +21,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     page: searchParams.get('page'),
     pageSize: searchParams.get('page_size'),
   })
-  const supabase = await createClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase, workspace } = access
   const { data: result, error } = await supabase.rpc('get_pipeline_search_page', {
     p_statuses: [...statuses],
     p_search: normalizeSearchTerm(searchParams.get('search')),
     p_page: pagination.page,
     p_page_size: pagination.pageSize,
+    p_workspace_id: workspace.workspaceId,
   })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

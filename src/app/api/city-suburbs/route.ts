@@ -31,9 +31,11 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = await createClient()
+  const workspace = await requireWorkspaceContext(auth)
   const suburbsQuery = supabase
     .from('city_suburbs')
     .select('id, city, suburb, active, priority')
+    .eq('workspace_id', workspace.workspaceId)
     .order('city')
     .order('suburb')
 
@@ -51,8 +53,9 @@ export async function GET(req: NextRequest) {
     supabase
       .from('category_suburb_priorities')
       .select('city_suburb_id, priority')
+      .eq('workspace_id', workspace.workspaceId)
       .eq('category_id', categoryId),
-    supabase.from('categories').select('id').eq('id', categoryId).maybeSingle(),
+    supabase.from('categories').select('id').eq('workspace_id', workspace.workspaceId).eq('id', categoryId).maybeSingle(),
   ])
   const error = suburbError ?? priorityError ?? categoryError
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

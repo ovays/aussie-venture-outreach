@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { ALL_STATUSES, STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
 import { STAGE_VALUES } from '@/lib/stage-import'
@@ -103,7 +102,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { allowed } = checkRateLimit(`leads:${ip}`, 60)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
-  const supabase = await createClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase, workspace } = access
   const { searchParams } = new URL(request.url)
 
   const status = searchParams.get('status')
@@ -131,13 +132,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const { data: result, error } = await supabase.rpc('get_leads_search_page', {
-    p_statuses: statuses,
-    p_category: category,
-    p_city: city,
+    p_statuses: statuses ?? undefined,
+    p_category: category ?? undefined,
+    p_city: city ?? undefined,
     p_search: search,
     p_page: pagination.page,
     p_page_size: pagination.pageSize,
     p_ids_only: idsOnly,
+    p_workspace_id: workspace.workspaceId,
   })
 
   if (error) {
@@ -158,7 +160,9 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { allowed } = checkRateLimit(`leads:${ip}`, 60)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
-  const supabase = await createClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase, workspace } = access
   const raw = await request.json()
 
   const parsed = patchLeadSchema.safeParse(raw)
@@ -171,6 +175,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await supabase
     .from('leads')
     .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('workspace_id', workspace.workspaceId)
     .eq('id', id)
     .select()
     .single()
@@ -180,8 +185,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   }
 
   if (updates.status === 'closed_manual') {
-    await supabase.from('dm_queue').update({ status: 'skipped' }).eq('lead_id', id).eq('status', 'pending')
-    await supabase.from('follow_ups').update({ status: 'cancelled' }).eq('lead_id', id).eq('status', 'scheduled')
+    await Promise.all([
+      supabase.from('dm_queue').update({ status: 'skipped' }).eq('workspace_id', workspace.workspaceId).eq('lead_id', id).eq('status', 'pending'),
+      supabase.from('follow_ups').update({ status: 'cancelled' }).eq('workspace_id', workspace.workspaceId).eq('lead_id', id).eq('status', 'scheduled'),
+    ])
   }
 
   return NextResponse.json({ data })

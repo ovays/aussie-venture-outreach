@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
 import type { Database, Json } from '../src/types/database'
 import { ensureOutboundEmailIntent, outboundIdempotencyKey, outboundMessageId } from '../src/lib/outbound-send'
+import { createWorkspaceServiceClient } from '../src/lib/supabase/workspace-service'
 
 function required(name: string): string {
   const value = process.env[name]
@@ -19,6 +20,7 @@ const db = createClient<Database>(url, required('SUPABASE_SERVICE_ROLE_KEY'), {
 const runId = Date.now().toString(36)
 const prefix = `V2_PR_${runId}_`
 const WORKSPACE_ID = '00000000-0000-0000-0000-000000000001'
+const workspaceDb = createWorkspaceServiceClient(WORKSPACE_ID)
 
 function source(path: string): string {
   return readFileSync(path, 'utf8')
@@ -175,7 +177,7 @@ async function main(): Promise<void> {
     assert.ifError(intentLeadResult.error)
     const intentContent = { leadId: intentLeadResult.data!.id, type: 'follow_up_1' as const, subject: 'Stable', bodyHtml: '<p>Stable</p>', bodyText: 'Stable' }
     const [intentA, intentB] = await Promise.all([
-      ensureOutboundEmailIntent(db, intentContent), ensureOutboundEmailIntent(db, intentContent),
+      ensureOutboundEmailIntent(workspaceDb, intentContent), ensureOutboundEmailIntent(workspaceDb, intentContent),
     ])
     assert.equal(intentA.intent.id, intentB.intent.id, 'duplicate workers converge on one durable send intent')
     assert.equal([intentA.created, intentB.created].filter(Boolean).length, 1)
@@ -200,7 +202,7 @@ async function main(): Promise<void> {
     assert.equal(outboundMessageId(intentA.intent.id), `<${intentA.intent.id}@aussieventure.com>`)
     const confirmed = await db.from('emails').update({ status: 'sent', resend_id: providerId, message_id: outboundMessageId(intentA.intent.id), sent_at: new Date().toISOString() }).eq('id', intentA.intent.id)
     assert.ifError(confirmed.error)
-    const recovered = await ensureOutboundEmailIntent(db, intentContent)
+    const recovered = await ensureOutboundEmailIntent(workspaceDb, intentContent)
     assert.equal(recovered.intent.status, 'sent', 'confirmed intent blocks later duplicate delivery')
 
     const invalid = await db.from('leads').insert({

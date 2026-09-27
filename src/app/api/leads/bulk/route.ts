@@ -25,6 +25,12 @@ import { outboundIdempotencyKey, outboundMessageId } from '@/lib/outbound-send'
 // the common path here UPDATEs an existing pending_send row rather than
 // INSERTing (migration 027's unique index only guards INSERTs).
 const BULK_SEND_LOCK_TTL_MS = 3 * 60 * 1000
+const BULK_LEAD_FIELDS = `
+  id, business_name, email, status, source, city, category_id, category_name,
+  suburb, website, description, services, content_type, instagram_handle,
+  delivery_suppressed_emails, outreach_suppression_reason,
+  outreach_suppressed_at, halal_confidence_score, google_reviews_count
+`
 
 type FailedItem = { lead_id: string; business_name: string; reason: string }
 
@@ -51,6 +57,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const initialEmailMode = action === 'research_leads' || action === 'process_researched_leads' || action === 'send_initial_emails'
     ? suppliedInitialEmailMode ?? await readInitialEmailMode(supabase)
     : null
+  const preload = action === 'delete'
+    ? { data: [], error: null }
+    : await supabase.from('leads').select(BULK_LEAD_FIELDS).in('id', lead_ids).limit(200)
+  if (preload.error) return NextResponse.json({ error: preload.error.message }, { status: 500 })
+  const leadsById = new Map((preload.data ?? []).map((lead) => [lead.id, lead]))
 
   // ── Send Initial Emails ──────────────────────────────────────────────────────
   if (action === 'send_initial_emails') {
@@ -60,11 +71,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const outcomes: LeadsBulkOutcome[] = []
 
     for (const lead_id of lead_ids) {
-      const { data: lead } = await supabase
-        .from('leads')
-        .select('id, business_name, email, status, source, city, category_id, category_name, suburb, website, description, services, content_type, delivery_suppressed_emails')
-        .eq('id', lead_id)
-        .single()
+      const lead = leadsById.get(lead_id)
 
       if (!lead) {
         const failure = { lead_id, business_name: lead_id, reason: 'Lead not found' }
@@ -295,11 +302,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const dedupeIndex = await fetchPipelineDedupeIndex(supabase)
 
     for (const lead_id of lead_ids) {
-      const { data: lead } = await supabase
-        .from('leads')
-        .select('id, business_name, category_id, category_name, suburb, city, website, description, services, email, instagram_handle, content_type, status, delivery_suppressed_emails, outreach_suppression_reason, outreach_suppressed_at')
-        .eq('id', lead_id)
-        .single()
+      const lead = leadsById.get(lead_id)
 
       if (!lead) {
         outcomes.push({ lead_id, business_name: lead_id, status: 'failed', reason: 'Lead not found' })
@@ -344,11 +347,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const dedupeIndex = await fetchPipelineDedupeIndex(supabase)
 
     for (const lead_id of lead_ids) {
-      const { data: lead } = await supabase
-        .from('leads')
-        .select('*')
-        .eq('id', lead_id)
-        .single()
+      const lead = leadsById.get(lead_id)
 
       if (!lead) {
         const failure = { lead_id, business_name: lead_id, reason: 'Lead not found' }

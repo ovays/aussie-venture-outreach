@@ -17,10 +17,19 @@ import { requireWorkspaceContext, type WorkspaceContext } from '@/lib/workspace-
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>
 type CategoryRow = Record<string, unknown> & { id: string; name: string; status: 'active' | 'paused' }
 
+const CATEGORY_LIST_FIELDS = `
+  id, name, status, cities, city_content_types, content_type, custom_cities,
+  custom_policy_instructions, dm_template, exclude_alcohol_focused,
+  exclude_gambling, exclude_pork, exclude_religious_institutions,
+  exclude_shisha, halal_filter, pitch_template, search_keywords,
+  use_priority_suburbs
+`
+const CATEGORY_TEMPLATE_LIST_FIELDS = 'category_id, template_type, subject_template, body_template'
+
 async function fetchCategoriesAndTemplates(supabase: SupabaseClient, workspaceId: string) {
   const [{ data: categories, error: categoryError }, { data: templates, error: templateError }] = await Promise.all([
-    supabase.from('categories').select('*').eq('workspace_id', workspaceId).order('name'),
-    supabase.from('category_email_templates').select('*').eq('workspace_id', workspaceId),
+    supabase.from('categories').select(CATEGORY_LIST_FIELDS).eq('workspace_id', workspaceId).order('name'),
+    supabase.from('category_email_templates').select(CATEGORY_TEMPLATE_LIST_FIELDS).eq('workspace_id', workspaceId),
   ])
   return {
     categories: (categories ?? []) as CategoryRow[],

@@ -41,49 +41,55 @@ export interface OutscraperUsageData {
   last7Days: UsageRow[]
 }
 
+interface SettingsPerformanceSummary {
+  today_calls?: number
+  week_calls?: number
+  month_calls?: number
+  total_runs?: number
+  dead_letter_count?: number
+  search_cache_count?: number
+  last_7_days?: Array<{ date: string; runs: number; calls: number }>
+}
+
 export default async function SettingsPage() {
   const auth = await requireUser()
   const workspace = await requireWorkspaceContext(auth)
   const supabase = createServiceClient()
-  const onboardingState = await getOnboardingState(workspace.workspaceId)
-
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
-  const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString()
-
-  const [{ data: categories }, { data: categoryTemplates }, { data: usageEvents }, { data: suburbRows }, { count: dlqCount }, { count: searchCacheCount }] = await Promise.all([
-    supabase.from('categories').select('*').eq('workspace_id', workspace.workspaceId).order('name'),
+  const settingsKeys = Object.keys(SETTINGS_DEFAULTS) as Array<keyof typeof SETTINGS_DEFAULTS>
+  const asOf = new Date()
+  const [
+    onboardingState,
+    { data: categories },
+    { data: categoryTemplates },
+    { data: suburbRows },
+    { data: rawPerformance, error: performanceError },
+    platform,
+    tenant,
+  ] = await Promise.all([
+    getOnboardingState(workspace.workspaceId),
+    supabase.from('categories').select(`
+      id, name, status, cities, city_content_types, content_type, custom_cities,
+      custom_policy_instructions, dm_template, exclude_alcohol_focused,
+      exclude_gambling, exclude_pork, exclude_religious_institutions,
+      exclude_shisha, halal_filter, pitch_template, search_keywords,
+      use_priority_suburbs
+    `).eq('workspace_id', workspace.workspaceId).order('name'),
     supabase.from('category_email_templates').select('category_id, template_type, subject_template, body_template').eq('workspace_id', workspace.workspaceId),
-    supabase
-      .from('activity_log')
-      .select('created_at, metadata')
-      .eq('workspace_id', workspace.workspaceId)
-      .eq('event_type', 'finder_complete')
-      .gte('created_at', thirtyDaysAgo)
-      .order('created_at', { ascending: false }),
     supabase
       .from('city_suburbs')
       .select('id, city, suburb, active, priority')
       .eq('workspace_id', workspace.workspaceId)
       .order('city')
       .order('suburb'),
-    supabase
-      .from('dead_letter_queue')
-      .select('*', { count: 'exact', head: true })
-      .eq('workspace_id', workspace.workspaceId)
-      .eq('resolved', false)
-      .gte('created_at', since24h),
-    supabase
-      .from('search_cache')
-      .select('*', { count: 'exact', head: true })
-      .eq('workspace_id', workspace.workspaceId)
-      .gt('expires_at', new Date().toISOString()),
-  ])
-
-  const settingsKeys = Object.keys(SETTINGS_DEFAULTS) as Array<keyof typeof SETTINGS_DEFAULTS>
-  const [platform, tenant] = await Promise.all([
+    supabase.rpc('get_settings_performance_summary', {
+      p_workspace_id: workspace.workspaceId,
+      p_as_of: asOf.toISOString(),
+    }),
     getPlatformSettings(settingsKeys),
     getWorkspaceSettings(workspace.workspaceId, settingsKeys),
   ])
+  if (performanceError) throw new Error(`Settings summary failed: ${performanceError.message}`)
+  const performance = (rawPerformance ?? {}) as SettingsPerformanceSummary
   const settings = settingsKeys.map((key) => ({
     key,
     value: platform.get(key) ?? tenant.get(key) ?? SETTINGS_DEFAULTS[key].value,
@@ -98,43 +104,23 @@ export default async function SettingsPage() {
     suburbsByCity[row.city].push({ id: row.id, suburb: row.suburb, active: row.active, priority: r.priority ?? 1 })
   }
 
-  // Compute usage stats from raw events
-  const now = Date.now()
-  const todayStr  = new Date(now).toISOString().slice(0, 10)
-  const weekAgo   = new Date(now - 7  * 86_400_000).toISOString()
-  const monthAgo  = new Date(now - 30 * 86_400_000).toISOString()
-
-  function callsFrom(events: typeof usageEvents, since: string) {
-    return (events ?? [])
-      .filter((e) => e.created_at >= since)
-      .reduce((sum, e) => {
-        const meta = e.metadata as Record<string, unknown>
-        return sum + (typeof meta?.outscraper_calls === 'number' ? meta.outscraper_calls : 0)
-      }, 0)
-  }
-
-  const todayCalls  = callsFrom(usageEvents, `${todayStr}T00:00:00.000Z`)
-  const weekCalls   = callsFrom(usageEvents, weekAgo)
-  const monthCalls  = callsFrom(usageEvents, monthAgo)
-  const totalRuns   = (usageEvents ?? []).length
+  const todayCalls = Number(performance.today_calls ?? 0)
+  const weekCalls = Number(performance.week_calls ?? 0)
+  const monthCalls = Number(performance.month_calls ?? 0)
+  const totalRuns = Number(performance.total_runs ?? 0)
   const avgCallsPerRun = totalRuns > 0 ? Math.round(monthCalls / totalRuns) : 0
   const estimatedMonthlyCost = monthCalls * 0.002
 
-  // Last 7 days breakdown
-  const last7Days: UsageRow[] = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(now - i * 86_400_000)
-    const dateStr = d.toISOString().slice(0, 10)
-    const dayEvents = (usageEvents ?? []).filter((e) => e.created_at.slice(0, 10) === dateStr)
-    const calls = dayEvents.reduce((sum, e) => {
-      const meta = e.metadata as Record<string, unknown>
-      return sum + (typeof meta?.outscraper_calls === 'number' ? meta.outscraper_calls : 0)
-    }, 0)
+  const last7Days: UsageRow[] = (performance.last_7_days ?? []).map((row, i) => {
+    const d = new Date(`${row.date}T00:00:00.000Z`)
+    const dateStr = row.date
+    const calls = Number(row.calls ?? 0)
     const label = i === 0
       ? `Today (${d.getDate()} ${d.toLocaleString('en', { month: 'short' })})`
       : i === 1
         ? `Yesterday (${d.getDate()} ${d.toLocaleString('en', { month: 'short' })})`
         : `${d.getDate()} ${d.toLocaleString('en', { month: 'short' })}`
-    return { date: dateStr, label, runs: dayEvents.length, calls, cost: calls * 0.002 }
+    return { date: dateStr, label, runs: Number(row.runs ?? 0), calls, cost: calls * 0.002 }
   })
 
   const usageData: OutscraperUsageData = {
@@ -184,10 +170,10 @@ export default async function SettingsPage() {
           { label: 'Targeting', href: '#targeting' },
           { label: 'Categories & templates', href: '#categories' },
         ]} />
-        {(dlqCount ?? 0) > 0 && (
+        {Number(performance.dead_letter_count ?? 0) > 0 && (
           <Card>
             <div role="alert" className="notice notice--warning">
-              ⚠ {dlqCount} failed operation{dlqCount === 1 ? '' : 's'} in dead-letter queue (last 24h). Check pipeline logs for details.
+              ⚠ {Number(performance.dead_letter_count)} failed operation{Number(performance.dead_letter_count) === 1 ? '' : 's'} in dead-letter queue (last 24h). Check pipeline logs for details.
             </div>
           </Card>
         )}
@@ -202,7 +188,7 @@ export default async function SettingsPage() {
         <Card><BillingSettings canManage={workspace.isPlatformAdmin || workspace.role === 'owner' || workspace.role === 'admin'} /></Card>
         <Card><UsageLimits /></Card>
         <Card>
-          <div id="sequences" className="scroll-mt-28"><SystemSettings initialSettings={settingsWithDefaults} initialTemplateModeBlockers={templateModeBlockers} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={searchCacheCount ?? 0} cities={Object.keys(suburbsByCity).sort()} /></div>
+          <div id="sequences" className="scroll-mt-28"><SystemSettings initialSettings={settingsWithDefaults} initialTemplateModeBlockers={templateModeBlockers} usageData={usageData} hasGoogleMapsKey={hasGoogleMapsKey} searchCacheCount={Number(performance.search_cache_count ?? 0)} cities={Object.keys(suburbsByCity).sort()} /></div>
         </Card>
 
         <Card>

@@ -18,6 +18,30 @@ export interface WorkspaceDirectoryRow {
   billingStatus: string | null
 }
 
+export interface WorkspaceDirectoryPage {
+  data: WorkspaceDirectoryRow[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
+function mapWorkspaceDirectoryRows(data: unknown): WorkspaceDirectoryRow[] {
+  return (Array.isArray(data) ? data : []).map((row: Record<string, unknown>) => ({
+    id: String(row.id ?? ''),
+    name: String(row.name ?? ''),
+    slug: String(row.slug ?? ''),
+    status: String(row.status ?? ''),
+    createdAt: String(row.created_at ?? ''),
+    memberCount: Number(row.member_count ?? 0),
+    storedLeads: Number(row.stored_leads ?? 0),
+    mailboxCount: Number(row.mailbox_count ?? 0),
+    planCode: row.plan_code === null ? null : String(row.plan_code ?? ''),
+    planName: row.plan_name === null ? null : String(row.plan_name ?? ''),
+    billingStatus: row.billing_status === null ? null : String(row.billing_status ?? ''),
+  }))
+}
+
 export interface WorkspaceMemberRow {
   userId: string
   email: string | null
@@ -49,19 +73,31 @@ export async function adminListWorkspaceDirectory(): Promise<WorkspaceDirectoryR
   const service = createServiceClient()
   const { data, error } = await service.rpc('admin_list_workspace_directory')
   if (error) throw new Error(error.message)
-  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
-    id: String(row.id ?? ''),
-    name: String(row.name ?? ''),
-    slug: String(row.slug ?? ''),
-    status: String(row.status ?? ''),
-    createdAt: String(row.created_at ?? ''),
-    memberCount: Number(row.member_count ?? 0),
-    storedLeads: Number(row.stored_leads ?? 0),
-    mailboxCount: Number(row.mailbox_count ?? 0),
-    planCode: row.plan_code === null ? null : String(row.plan_code ?? ''),
-    planName: row.plan_name === null ? null : String(row.plan_name ?? ''),
-    billingStatus: row.billing_status === null ? null : String(row.billing_status ?? ''),
-  }))
+  return mapWorkspaceDirectoryRows(data)
+}
+
+export async function adminListWorkspaceDirectoryPage(input: {
+  page: number
+  pageSize: number
+  search?: string
+}): Promise<WorkspaceDirectoryPage> {
+  const service = createServiceClient()
+  const { data, error } = await service.rpc('admin_list_workspace_directory_page', {
+    p_page: input.page,
+    p_page_size: input.pageSize,
+    p_search: input.search?.trim() ?? '',
+  })
+  if (error) throw new Error(error.message)
+  const result = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const total = Number(result.total ?? 0) || 0
+  const pageSize = Number(result.page_size ?? input.pageSize) || input.pageSize
+  return {
+    data: mapWorkspaceDirectoryRows(result.data),
+    total,
+    page: Number(result.page ?? input.page) || input.page,
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
+  }
 }
 
 export async function adminGetWorkspaceDetail(workspaceId: string): Promise<WorkspaceAdminDetail> {

@@ -32,15 +32,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const outcomes: LeadsBulkOutcome[] = []
   let regenerated = 0
   let skipped = 0
+  const [leadResult, pendingResult] = await Promise.all([
+    supabase.from('leads')
+      .select('id, business_name, category_id, category_name, suburb, city, website, description, services, status, content_type')
+      .in('id', parsed.data.lead_ids)
+      .limit(200),
+    supabase.from('emails')
+      .select('id, lead_id')
+      .in('lead_id', parsed.data.lead_ids)
+      .eq('type', 'initial_pitch')
+      .eq('status', 'pending_send')
+      .limit(200),
+  ])
+  const loadError = leadResult.error ?? pendingResult.error
+  if (loadError) return NextResponse.json({ error: loadError.message }, { status: 500 })
+  const leadsById = new Map((leadResult.data ?? []).map((lead) => [lead.id, lead]))
+  const pendingByLeadId = new Map((pendingResult.data ?? []).map((email) => [email.lead_id, email]))
 
   for (const id of parsed.data.lead_ids) {
     try {
-      const { data: lead } = await supabase.from('leads')
-        .select('id, business_name, category_id, category_name, suburb, city, website, description, services, status, content_type')
-        .eq('id', id).maybeSingle()
+      const lead = leadsById.get(id)
       if (!lead) { skipped++; outcomes.push({ lead_id: id, business_name: id, status: 'skipped', reason: 'Lead not found.' }); continue }
       if (lead.status !== 'email_ready') { skipped++; outcomes.push({ lead_id: id, business_name: lead.business_name, status: 'skipped', reason: 'Lead is not email_ready.' }); continue }
-      const { data: pending } = await supabase.from('emails').select('id').eq('lead_id', id).eq('type', 'initial_pitch').eq('status', 'pending_send').limit(1).maybeSingle()
+      const pending = pendingByLeadId.get(id)
       if (!pending) { skipped++; outcomes.push({ lead_id: id, business_name: lead.business_name, status: 'skipped', reason: 'No pending Initial Email exists.' }); continue }
       const result = await routeInitialEmail(supabase, lead, mode, { operation: 'regenerate', pendingEmailId: pending.id })
       if (result.ok) {

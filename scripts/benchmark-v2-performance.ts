@@ -1,141 +1,259 @@
 import assert from 'node:assert/strict'
 import { performance } from 'node:perf_hooks'
-import { createClient } from '@supabase/supabase-js'
+import { Client, type QueryResultRow } from 'pg'
 
+const DATABASE_URL = process.env.V2_LOCAL_DATABASE_URL
+  ?? 'postgresql://postgres:postgres@127.0.0.1:54322/postgres'
+const parsedDatabaseUrl = new URL(DATABASE_URL)
+assert(
+  parsedDatabaseUrl.hostname === '127.0.0.1' || parsedDatabaseUrl.hostname === 'localhost',
+  'benchmark refuses non-local Postgres',
+)
+
+const PRIMARY_WORKSPACE = '00000000-0000-0000-0000-000000000001'
+const DECOY_WORKSPACE = 'aaaaaaaa-0000-0000-0000-000000000002'
 const FIXTURE_PREFIX = 'V2_PERF_FIXTURE_'
-const LEAD_COUNT = 2_000
-const CONTACTED_COUNT = 1_500
+const PRIMARY_LEADS = 6_000
+const DECOY_LEADS = 2_000
 
-function env(name: string): string {
-  const value = process.env[name]
-  if (!value) throw new Error(`${name} is required`)
-  return value
+interface PlanNode {
+  'Node Type': string
+  'Actual Rows'?: number
+  'Actual Loops'?: number
+  'Index Name'?: string
+  Plans?: PlanNode[]
 }
 
-const url = env('NEXT_PUBLIC_SUPABASE_URL')
-assert(/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$/i.test(url), 'benchmark refuses non-local Supabase')
-assert.equal(process.env.NEXT_PUBLIC_REACHAGENT_RUNTIME, 'v2', 'benchmark requires NEXT_PUBLIC_REACHAGENT_RUNTIME=v2')
-const supabase = createClient(url, env('SUPABASE_SERVICE_ROLE_KEY'), {
-  auth: { autoRefreshToken: false, persistSession: false },
-})
+function round(value: number): number {
+  return Number(value.toFixed(2))
+}
 
-async function timed<T>(operation: () => PromiseLike<{ data: T; error: { message: string } | null; count?: number | null }>) {
-  const started = performance.now()
-  const result = await operation()
-  const durationMs = performance.now() - started
-  if (result.error) throw new Error(result.error.message)
+function percent(before: number, after: number): number | null {
+  return before > 0 ? round(((before - after) / before) * 100) : null
+}
+
+async function medianTimed<T extends QueryResultRow>(client: Client, text: string, values: unknown[] = []) {
+  const durations: number[] = []
+  let rows: T[] = []
+  for (let run = 0; run < 3; run += 1) {
+    const started = performance.now()
+    const result = await client.query<T>(text, values)
+    durations.push(performance.now() - started)
+    rows = result.rows
+  }
+  durations.sort((a, b) => a - b)
   return {
-    data: result.data,
-    durationMs: Number(durationMs.toFixed(1)),
-    bytes: Buffer.byteLength(JSON.stringify(result.data ?? null)),
-    count: result.count ?? null,
+    durationMs: round(durations[1]),
+    rows,
+    bytes: Buffer.byteLength(JSON.stringify(rows)),
   }
 }
 
-async function seed() {
-  for (let offset = 0; offset < LEAD_COUNT; offset += 250) {
-    const rows = Array.from({ length: Math.min(250, LEAD_COUNT - offset) }, (_, index) => {
-      const number = offset + index
-      return {
-        business_name: `${FIXTURE_PREFIX}${number.toString().padStart(4, '0')}`,
-        email: `perf-${number}@fixture-${number % 300}.example`,
-        city: number % 2 ? 'Sydney' : 'Melbourne',
-        suburb: `Suburb ${number % 50}`,
-        category_name: `Category ${number % 10}`,
-        phone: `0400${number.toString().padStart(6, '0')}`,
-        status: number < CONTACTED_COUNT ? 'contacted' : number % 2 ? 'new' : 'researched',
-        source: 'manual',
-      }
-    })
-    const { error } = await supabase.from('leads').insert(rows)
-    if (error) throw new Error(`fixture lead insert failed: ${error.message}`)
+function summarizePlan(node: PlanNode): { rowsScanned: number; indexes: string[]; scans: string[] } {
+  let rowsScanned = 0
+  const indexes = new Set<string>()
+  const scans = new Set<string>()
+  function visit(current: PlanNode) {
+    if (current['Node Type'].includes('Scan')) {
+      rowsScanned += (current['Actual Rows'] ?? 0) * (current['Actual Loops'] ?? 1)
+      scans.add(current['Node Type'])
+    }
+    if (current['Index Name']) indexes.add(current['Index Name'])
+    for (const child of current.Plans ?? []) visit(child)
   }
-
-  const leads: Array<{ id: string; business_name: string }> = []
-  for (let from = 0; from < LEAD_COUNT; from += 1_000) {
-    const result = await supabase.from('leads')
-      .select('id,business_name').like('business_name', `${FIXTURE_PREFIX}%`)
-      .order('business_name').range(from, from + 999)
-    if (result.error) throw new Error(result.error.message)
-    leads.push(...(result.data ?? []))
-  }
-  if (leads.length !== LEAD_COUNT) throw new Error(`fixture lead count mismatch: ${leads.length}`)
-  for (let offset = 0; offset < CONTACTED_COUNT; offset += 250) {
-    const rows = leads.slice(offset, Math.min(offset + 250, CONTACTED_COUNT)).flatMap((lead, index) => {
-      const sequence = offset + index
-      const initial = new Date(Date.UTC(2026, 5, 1) + sequence * 1_000).toISOString()
-      return [
-        { lead_id: lead.id, type: 'initial_pitch', subject: 'Fixture initial', body_text: 'Fixture', body_html: '<p>Fixture</p>', status: 'sent', sent_at: initial },
-        ...(sequence % 2 === 0 ? [{ lead_id: lead.id, type: 'follow_up_1', subject: 'Fixture FU1', body_text: 'Fixture', body_html: '<p>Fixture</p>', status: 'sent', sent_at: new Date(Date.parse(initial) + 7 * 86_400_000).toISOString() }] : []),
-        ...(sequence % 4 === 0 ? [{ lead_id: lead.id, type: 'follow_up_2', subject: 'Fixture FU2', body_text: 'Fixture', body_html: '<p>Fixture</p>', status: 'sent', sent_at: new Date(Date.parse(initial) + 14 * 86_400_000).toISOString() }] : []),
-      ]
-    })
-    const { error: emailError } = await supabase.from('emails').insert(rows)
-    if (emailError) throw new Error(`fixture email insert failed: ${emailError.message}`)
-  }
+  visit(node)
+  return { rowsScanned, indexes: [...indexes].sort(), scans: [...scans].sort() }
 }
 
-async function cleanup() {
-  const { error } = await supabase.from('leads').delete().like('business_name', `${FIXTURE_PREFIX}%`)
-  if (error) throw new Error(`fixture cleanup failed: ${error.message}`)
+async function explain(client: Client, text: string, values: unknown[] = []) {
+  const result = await client.query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${text}`, values)
+  const document = result.rows[0]['QUERY PLAN'][0] as { Plan: PlanNode; 'Execution Time': number }
+  return { durationMs: round(document['Execution Time']), ...summarizePlan(document.Plan) }
 }
 
-async function benchmark() {
-  const leads = await timed(() => supabase.rpc('get_leads_search_page', {
-    p_statuses: null, p_category: null, p_city: null, p_search: '',
-    p_page: 1, p_page_size: 50, p_ids_only: false,
-  }))
-  const lifecycle = await timed(() => supabase.rpc('get_lifecycle_page', {
-    p_as_of: '2026-09-15T00:00:00.000Z', p_filter: 'all', p_search: '',
-    p_sort_key: 'next_action_date', p_sort_dir: 'asc', p_page: 1, p_page_size: 50,
-  }))
-  const finderCandidates = Array.from({ length: 25 }, (_, index) => ({
-    name: `${FIXTURE_PREFIX}${index.toString().padStart(4, '0')}`,
-    city: index % 2 ? 'Sydney' : 'Melbourne',
-  }))
-  const finder = await timed(() => supabase.rpc('lookup_finder_candidates', {
-    p_candidates: finderCandidates.map((candidate, candidateIndex) => ({
-      candidate_index: candidateIndex, business_name: candidate.name,
-      city: candidate.city, phone: null, email: null,
-      email_root_domain: null, is_public_email_domain: false, website_domain: null,
-    })),
-  }))
+async function seed(client: Client) {
+  await client.query(`
+    INSERT INTO public.leads (
+      workspace_id, business_name, email, city, suburb, category_name,
+      phone, status, source, created_at
+    )
+    SELECT $1::uuid,
+      $2 || lpad(n::text, 5, '0'),
+      'perf-' || n || '@fixture-' || (n % 500) || '.example',
+      CASE WHEN n % 2 = 0 THEN 'Sydney' ELSE 'Melbourne' END,
+      'Suburb ' || (n % 80), 'Category ' || (n % 12),
+      '0400' || lpad(n::text, 6, '0'),
+      CASE WHEN n <= 4500 THEN 'contacted' WHEN n % 2 = 0 THEN 'new' ELSE 'researched' END,
+      'manual', now() - (n || ' seconds')::interval
+    FROM generate_series(1, $3::integer) AS series(n)
+  `, [PRIMARY_WORKSPACE, FIXTURE_PREFIX, PRIMARY_LEADS])
 
-  const leadPayload = leads.data as { data?: unknown[]; total?: number }
-  const lifecyclePayload = lifecycle.data as { data?: unknown[]; total?: number }
+  await client.query(`
+    INSERT INTO public.leads (
+      workspace_id, business_name, email, city, suburb, category_name,
+      phone, status, source, created_at
+    )
+    SELECT $1::uuid,
+      $2 || 'DECOY_' || lpad(n::text, 5, '0'),
+      'decoy-' || n || '@fixture.example', 'Perth', 'Decoy', 'Decoy',
+      '0500' || lpad(n::text, 6, '0'), 'contacted', 'manual',
+      now() - (n || ' seconds')::interval
+    FROM generate_series(1, $3::integer) AS series(n)
+  `, [DECOY_WORKSPACE, FIXTURE_PREFIX, DECOY_LEADS])
+
+  await client.query(`
+    INSERT INTO public.emails (
+      workspace_id, lead_id, type, subject, body_text, body_html, status, sent_at, created_at
+    )
+    SELECT workspace_id, id, 'initial_pitch', 'Fixture initial',
+      repeat('Fixture body ', 20), repeat('<p>Fixture body</p>', 20),
+      CASE WHEN row_number() OVER (ORDER BY created_at) % 20 = 0 THEN 'bounced' ELSE 'sent' END,
+      created_at, created_at
+    FROM public.leads
+    WHERE business_name LIKE $1 AND status = 'contacted'
+  `, [`${FIXTURE_PREFIX}%`])
+
+  await client.query(`
+    INSERT INTO public.emails (
+      workspace_id, lead_id, type, subject, body_text, body_html, status, sent_at, created_at
+    )
+    SELECT workspace_id, id, 'follow_up_1', 'Fixture follow-up',
+      repeat('Fixture follow-up body ', 20), repeat('<p>Fixture follow-up body</p>', 20),
+      'sent', created_at + interval '7 days', created_at + interval '7 days'
+    FROM public.leads
+    WHERE workspace_id = $1 AND business_name LIKE $2 AND status = 'contacted'
+      AND right(business_name, 1)::integer % 2 = 0
+  `, [PRIMARY_WORKSPACE, `${FIXTURE_PREFIX}%`])
+
+  await client.query(`
+    INSERT INTO public.dm_queue (workspace_id, lead_id, platform, handle, message_text, status, created_at)
+    SELECT workspace_id, id, CASE WHEN row_number() OVER () % 2 = 0 THEN 'instagram' ELSE 'facebook' END,
+      '@perf_' || row_number() OVER (), repeat('Fixture DM ', 25),
+      CASE WHEN row_number() OVER () % 3 = 0 THEN 'sent' ELSE 'pending' END, created_at
+    FROM public.leads WHERE workspace_id = $1 AND business_name LIKE $2 LIMIT 1500
+  `, [PRIMARY_WORKSPACE, `${FIXTURE_PREFIX}%`])
+
+  await client.query(`
+    INSERT INTO public.deals (workspace_id, lead_id, deal_value, deal_type, notes, closed_at, created_at)
+    SELECT workspace_id, id, 500 + row_number() OVER (), 'remote_sponsored',
+      repeat('Fixture deal note ', 10), created_at, created_at
+    FROM public.leads WHERE workspace_id = $1 AND business_name LIKE $2 LIMIT 500
+  `, [PRIMARY_WORKSPACE, `${FIXTURE_PREFIX}%`])
+
+  await client.query(`
+    INSERT INTO public.activity_log (workspace_id, event_type, description, metadata, created_at)
+    SELECT $1::uuid, 'finder_complete', 'Fixture finder run',
+      jsonb_build_object('outscraper_calls', n % 10), now() - (n || ' minutes')::interval
+    FROM generate_series(1, 3000) AS series(n)
+  `, [PRIMARY_WORKSPACE])
+
+  await client.query(`
+    INSERT INTO public.workspaces (id, name, slug, status)
+    SELECT ('10000000-0000-0000-' || lpad(to_hex(n), 4, '0') || '-000000000000')::uuid,
+      $1 || ' Workspace ' || n, 'perf-workspace-' || n, 'active'
+    FROM generate_series(1, 400) AS series(n)
+  `, [FIXTURE_PREFIX])
+
+  await client.query('ANALYZE public.leads; ANALYZE public.emails; ANALYZE public.dm_queue; ANALYZE public.deals; ANALYZE public.activity_log; ANALYZE public.workspaces')
+}
+
+async function benchmark(client: Client) {
+  const legacyLeads = await medianTimed(client,
+    `SELECT public.get_leads_search_page(NULL, NULL, NULL, '', 1, 50, false)`)
+  const scopedLeads = await medianTimed(client,
+    `SELECT public.get_leads_search_page($1::uuid, NULL, NULL, NULL, '', 1, 50, false)`,
+    [PRIMARY_WORKSPACE])
+
+  const legacyPipeline = await medianTimed(client,
+    `SELECT public.get_pipeline_search_page(ARRAY['contacted'], '', 1, 50)`)
+  const scopedPipeline = await medianTimed(client,
+    `SELECT public.get_pipeline_search_page($1::uuid, ARRAY['contacted'], '', 1, 50)`,
+    [PRIMARY_WORKSPACE])
+
+  const legacyEmail = await medianTimed(client, `
+    SELECT public.get_email_log_search_page(NULL, NULL, '', 1, 50) AS page,
+      public.get_email_log_summary(NULL, NULL, '') AS summary
+  `)
+  const scopedEmail = await medianTimed(client,
+    `SELECT public.get_email_log_search_page($1::uuid, NULL, NULL, '', 1, 50)`,
+    [PRIMARY_WORKSPACE])
+
+  const legacyLifecycle = await medianTimed(client,
+    `SELECT public.get_lifecycle_page('2026-09-15T00:00:00Z', 'all', '', 'next_action_date', 'asc', 1, 50)`)
+  const scopedLifecycle = await medianTimed(client,
+    `SELECT public.get_lifecycle_page($1::uuid, '2026-09-15T00:00:00Z', 'all', '', 'next_action_date', 'asc', 1, 50)`,
+    [PRIMARY_WORKSPACE])
+
+  const legacyDirectory = await medianTimed(client, `
+    SELECT w.id,
+      (SELECT count(*) FROM public.workspace_members m WHERE m.workspace_id = w.id AND m.status = 'active'),
+      (SELECT count(*) FROM public.leads l WHERE l.workspace_id = w.id),
+      (SELECT count(*) FROM public.mailbox_connections mc WHERE mc.workspace_id = w.id AND mc.status <> 'disconnected')
+    FROM public.workspaces w ORDER BY w.created_at, w.id
+  `)
+  await client.query(`SELECT set_config('request.jwt.claim.role', 'service_role', true)`)
+  const pagedDirectory = await medianTimed(client,
+    `SELECT public.admin_list_workspace_directory_page('', 1, 50)`)
+
+  const listPlan = await explain(client, `
+    SELECT id, business_name, category_name, city, suburb, status, created_at
+    FROM public.leads
+    WHERE workspace_id = $1 AND status = 'contacted'
+    ORDER BY created_at DESC, id ASC LIMIT 50
+  `, [PRIMARY_WORKSPACE])
+  const emailPlan = await explain(client, `
+    SELECT id, type, subject, status, sent_at, replied_at, created_at
+    FROM public.emails
+    WHERE workspace_id = $1 AND type = 'follow_up_1'
+    ORDER BY created_at DESC, id ASC LIMIT 50
+  `, [PRIMARY_WORKSPACE])
+  const dmPlan = await explain(client, `
+    SELECT id, platform, handle, status, created_at
+    FROM public.dm_queue
+    WHERE workspace_id = $1 AND status = 'pending'
+    ORDER BY created_at DESC, id ASC LIMIT 50
+  `, [PRIMARY_WORKSPACE])
+
+  const comparison = (before: typeof legacyLeads, after: typeof scopedLeads) => ({
+    before_ms: before.durationMs,
+    after_ms: after.durationMs,
+    change_percent: percent(before.durationMs, after.durationMs),
+    before_payload_bytes: before.bytes,
+    after_payload_bytes: after.bytes,
+  })
+
   return {
-    fixture: { leads: LEAD_COUNT, contacted: CONTACTED_COUNT },
-    leads_page: { database_calls: 1, rows_returned: leadPayload.data?.length ?? 0, matched_total: leadPayload.total ?? 0, duration_ms: leads.durationMs, payload_bytes: leads.bytes, server_paged: true },
-    lifecycle_page: { database_calls: 1, rows_returned: lifecyclePayload.data?.length ?? 0, matched_total: lifecyclePayload.total ?? 0, duration_ms: lifecycle.durationMs, payload_bytes: lifecycle.bytes, server_paged: true, full_candidate_classification: true, wide_candidate_enrichment: false },
-    finder_dedupe_preload: { database_calls: 0, rows_returned: 0, bounded: true },
-    finder_candidate_lookup: { database_calls: 1, candidates: finderCandidates.length, rows_returned: Array.isArray(finder.data) ? finder.data.length : 0, duration_ms: finder.durationMs, payload_bytes: finder.bytes, n_plus_one: false },
-    source_audit: {
-      researcher_new_leads: { bounded_after: true, default_limit: 100 },
-      writer_researched_leads: { bounded_after: true, default_limit: 100 },
-      reactivation_contacted_leads: { bounded_after: true, default_limit: 100 },
-      email_report: { default_days: 30, maximum_explicit_days: 366, provider_folders_parallel: true, server_render_blocking: false },
-      data_quality: { issue_groups_server_paged: true, page_size_maximum: 100, detail_queries_per_page: '5 parallel plus optional owner-name lookup' },
+    methodology: {
+      database: 'isolated local V2',
+      fixture: { primary_leads: PRIMARY_LEADS, decoy_workspace_leads: DECOY_LEADS, activity_rows: 3000, synthetic_workspaces: 400 },
+      timing: 'median of three warm database calls; transaction rolled back after benchmark',
+      caveat: 'database timings do not claim browser-render improvements',
+    },
+    comparisons: {
+      leads_page: { ...comparison(legacyLeads, scopedLeads), before_calls: 1, after_calls: 1, rows_returned: 50 },
+      pipeline_page: { ...comparison(legacyPipeline, scopedPipeline), before_calls: 1, after_calls: 1, rows_returned: 50 },
+      email_log: { ...comparison(legacyEmail, scopedEmail), before_calls: 2, after_calls: 1, rows_returned: 50 },
+      lifecycle_page: { ...comparison(legacyLifecycle, scopedLifecycle), before_calls: 1, after_calls: 1, rows_returned: 50 },
+      admin_workspace_directory: { ...comparison(legacyDirectory, pagedDirectory), before_rows: legacyDirectory.rows.length, after_page_size: 50 },
+    },
+    plans: {
+      leads_status_page: listPlan,
+      email_type_page: emailPlan,
+      dm_status_page: dmPlan,
     },
   }
 }
 
 async function main() {
-  if (process.argv.includes('--cleanup-only')) {
-    await cleanup()
-    console.log('V2 performance fixtures removed')
-    return
-  }
-  await cleanup()
-  if (process.argv.includes('--seed-only')) {
-    await seed()
-    console.log(`Seeded ${LEAD_COUNT} V2 performance fixtures`)
-    return
-  }
+  const client = new Client({ connectionString: DATABASE_URL })
+  await client.connect()
+  await client.query('BEGIN')
   try {
-    await seed()
-    console.log(JSON.stringify(await benchmark(), null, 2))
+    await seed(client)
+    console.log(JSON.stringify(await benchmark(client), null, 2))
   } finally {
-    await cleanup()
+    await client.query('ROLLBACK')
+    await client.end()
   }
 }
 

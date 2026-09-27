@@ -4,10 +4,11 @@ import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspac
 export async function GET() {
   const access = await requireApiWorkspaceUser()
   if (isApiWorkspaceError(access)) return access
-  const { supabase } = access
+  const { supabase, workspace } = access
   const { data, error } = await supabase
     .from('city_suburbs')
     .select('city')
+    .eq('workspace_id', workspace.workspaceId)
     .order('city')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import {
   mapDeliveryFailureRow,
   normalizeDeliveryFailureSummary,
   parseDeliveryFailureFilters,
 } from '@/lib/delivery-failure-report'
 import { escapePostgresLikeTerm } from '@/lib/search'
+import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
 
 interface ReportRpcResult {
   data?: unknown
@@ -17,13 +17,16 @@ interface ReportRpcResult {
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const filters = parseDeliveryFailureFilters(request.nextUrl.searchParams)
-  const supabase = await createClient()
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
+  const { supabase, workspace } = access
   const { data, error } = await supabase.rpc('get_delivery_failure_report', {
-    p_status: filters.status,
-    p_email_type: filters.emailType,
+    p_status: filters.status ?? undefined,
+    p_email_type: filters.emailType ?? undefined,
     p_search: escapePostgresLikeTerm(filters.search),
     p_page: filters.page,
     p_page_size: filters.pageSize,
+    p_workspace_id: workspace.workspaceId,
   })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

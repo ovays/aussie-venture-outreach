@@ -30,6 +30,7 @@
     "test:onboarding:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-onboarding.ts",
     "test:onboarding-pages:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-onboarding-pages.ts",
     "benchmark:performance:v2": "dotenv -e .env.v2.local -- tsx scripts/benchmark-v2-performance.ts",
+    "test:performance:v2": "tsx scripts/test-v2-performance.ts",
     "test:performance-reliability:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-performance-reliability.ts",
     "test:decision-engine:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-decision-engine.ts",
     "test:category-policy:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-category-policy.ts",
