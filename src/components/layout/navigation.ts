@@ -81,7 +81,10 @@ export const navigationSections: NavigationSection[] = [
 ]
 
 export const adminNavigation: NavigationItem[] = [
+  { href: '/dashboard/admin/workspaces', label: 'Workspaces', icon: Building2, adminOnly: true },
   { href: '/dashboard/admin', label: 'Team & Members', icon: Shield, adminOnly: true, exact: true },
+  { href: '/dashboard/admin/usage', label: 'Usage & Billing', icon: CircleDollarSign, adminOnly: true },
+  { href: '/dashboard/admin/audit', label: 'Audit Log', icon: FileText, adminOnly: true },
   { href: '/dashboard/admin/data-quality', label: 'Data Quality', icon: ShieldCheck, adminOnly: true },
   { href: '/dashboard/settings/ai/analytics', label: 'AI Analytics', icon: BarChart3, adminOnly: true },
 ]

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createServiceClient } from '@/lib/supabase/server'
 import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
+import { writeAuditEvent } from '@/lib/audit/write'
+import { AuditAction } from '@/lib/audit/types'
 
 const createUserSchema = z.object({
   email: z.string().email(),
@@ -75,6 +77,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  await writeAuditEvent({
+    actorUserId: auth.user.id,
+    actorRole: 'platform_admin',
+    action: AuditAction.AdminUserCreated,
+    targetType: 'profile',
+    targetId: created.user.id,
+    metadata: { role },
+  })
+
   return NextResponse.json({ data }, { status: 201 })
 }
 
@@ -93,6 +104,14 @@ export async function PATCH(request: NextRequest) {
   }
 
   const supabase = createServiceClient()
+  const { data: currentProfile, error: currentProfileError } = await supabase
+    .from('profiles')
+    .select('role, is_active')
+    .eq('id', userId)
+    .maybeSingle()
+  if (currentProfileError) return NextResponse.json({ error: currentProfileError.message }, { status: 500 })
+  if (!currentProfile) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+
   const profileUpdates: Record<string, unknown> = {}
   const authUpdates: {
     password?: string
@@ -130,7 +149,42 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
+    await writeAuditEvent({
+      actorUserId: auth.user.id,
+      actorRole: 'platform_admin',
+      action: AuditAction.AdminUserUpdated,
+      targetType: 'profile',
+      targetId: userId,
+      metadata: {
+        changed_fields: Object.keys(profileUpdates),
+        old_role: currentProfile.role,
+        new_role: role ?? currentProfile.role,
+        old_active: currentProfile.is_active,
+        new_active: is_active ?? currentProfile.is_active,
+      },
+    })
+
+    if (password !== undefined) {
+      await writeAuditEvent({
+        actorUserId: auth.user.id,
+        actorRole: 'platform_admin',
+        action: AuditAction.AdminPasswordResetRequested,
+        targetType: 'profile',
+        targetId: userId,
+      })
+    }
+
     return NextResponse.json({ data })
+  }
+
+  if (password !== undefined) {
+    await writeAuditEvent({
+      actorUserId: auth.user.id,
+      actorRole: 'platform_admin',
+      action: AuditAction.AdminPasswordResetRequested,
+      targetType: 'profile',
+      targetId: userId,
+    })
   }
 
   const { data, error } = await supabase
@@ -164,6 +218,14 @@ export async function DELETE(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  await writeAuditEvent({
+    actorUserId: auth.user.id,
+    actorRole: 'platform_admin',
+    action: AuditAction.AdminUserDeleted,
+    targetType: 'profile',
+    targetId: userId,
+  })
 
   return NextResponse.json({ ok: true })
 }

@@ -37,6 +37,7 @@
     "test:usage-quotas:v2": "tsx scripts/test-v2-usage-quotas.ts",
     "test:dashboard-summary:v2": "tsx scripts/test-dashboard-summary-performance.ts",
     "test:billing:v2": "tsx --conditions=react-server scripts/test-v2-billing.ts",
+    "test:admin-audit:v2": "tsx scripts/test-v2-admin-audit.ts",
     "test:billing-migration:v2": "tsx scripts/test-v2-billing-migration.ts",
     "test:prompt15-safety-gate:v2": "tsx scripts/test-prompt15-product-decision-safety-gate.ts",
     "test:observability:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-observability.ts",
