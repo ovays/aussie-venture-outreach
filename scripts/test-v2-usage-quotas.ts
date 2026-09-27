@@ -31,12 +31,12 @@ async function testAIQuotaBoundary(): Promise<void> {
   const events: string[] = []
   const keys: string[] = []
   const registry = new AIRegistry(
-    { getWorkflowAssignment: async () => ({ providerKey: 'mock', modelKey: 'mock-model' }) } as never,
+    { getWorkflowAssignment: async () => ({ providerKey: 'anthropic', modelKey: 'claude-sonnet-4-6' }) } as never,
     undefined,
     Date.now,
     'quota-test',
     async (_workspaceId, key) => { events.push('quota'); keys.push(key) },
-  ).register('mock', {
+  ).register('anthropic', {
     generate: async () => { events.push('provider'); return { text: 'ok' } },
   })
 

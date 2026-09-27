@@ -1,4 +1,9 @@
-import { aiRegistry } from './AIRuntime'
+import { PROMPT_VERSIONS } from './prompt-versions'
+import { WRITER_OUTPUT_SCHEMA } from './output'
+import { renderContextItems, type AIContextItem } from './context'
+import { executeAIWorkflow } from './execute'
+import { isAIExecutionError } from './errors'
+import type { AIExecuteWorkflow } from './harness'
 import { normalizeContentType, type ContentType } from '../lib/content-type'
 import { getContentFocus, getReactivationFocus } from '../lib/category-copy'
 import {
@@ -90,8 +95,6 @@ export function buildOutreachEmailPrompt(
     `- Name: ${params.business_name}`,
     `- Category: ${params.category}`,
     `- Location: ${params.suburb} ${params.city}`,
-    params.description ? `- Description: ${params.description}` : null,
-    params.services ? `- Services: ${params.services}` : null,
   ].filter(Boolean).join('\n')
 
   const hasWebsiteFacts = Boolean(params.description || params.services)
@@ -105,10 +108,7 @@ export function buildOutreachEmailPrompt(
   )
   const rhythm = pickVariant(OUTREACH_RHYTHMS, params.business_name, 'initial-rhythm')
 
-  return `Write Owais's first email to this business.
-
-RECIPIENT FACTS
-${businessFacts}
+  const assignment = `Write Owais's first email to this business.
 
 RESEARCH DECISION
 ${hasWebsiteFacts
@@ -141,42 +141,95 @@ Rewrite before returning if any of these are true:
 ${signOffRule(INITIAL_SIGN_OFF)}
 
 Return one valid JSON object only: { "subject": "...", "body": "..." }`
+
+  // Trusted instruction and structural facts stay in the application-context
+  // section; scraped Description/Services are rendered as delimited external
+  // data so an adversarial page can never be read as instruction.
+  const items: AIContextItem[] = [
+    {
+      id: 'recipient_facts',
+      trustLevel: 'internal_data',
+      label: 'Recipient facts',
+      content: businessFacts,
+      truncated: false,
+      originalLength: businessFacts.length,
+    },
+    {
+      id: 'assignment',
+      trustLevel: 'trusted_application',
+      label: 'Assignment',
+      content: assignment,
+      truncated: false,
+      originalLength: assignment.length,
+    },
+  ]
+
+  if (params.description) {
+    items.push({
+      id: 'business_description',
+      trustLevel: 'external_untrusted',
+      label: 'Business description',
+      content: params.description,
+      source: { type: 'website' },
+      truncated: false,
+      originalLength: params.description.length,
+    })
+  }
+
+  if (params.services) {
+    items.push({
+      id: 'business_services',
+      trustLevel: 'external_untrusted',
+      label: 'Business services',
+      content: params.services,
+      source: { type: 'website' },
+      truncated: false,
+      originalLength: params.services.length,
+    })
+  }
+
+  return renderContextItems(items)
 }
 
-export async function writeOutreachEmail(params: {
-  business_name: string
-  category: string
-  suburb: string
-  city: string
-  website: string
-  description: string
-  services: string
-  content_type: string
-}): Promise<{ subject: string; body: string }> {
+export async function writeOutreachEmail(
+  params: {
+    business_name: string
+    category: string
+    suburb: string
+    city: string
+    website: string
+    description: string
+    services: string
+    content_type: string
+  },
+  execute: AIExecuteWorkflow = executeAIWorkflow,
+): Promise<{ subject: string; body: string }> {
   const contentType = normalizeContentType(params.content_type)
-  const response = await aiRegistry.generate('outreach_email_generation', {
-      maxTokens: 400,
-      system: OUTREACH_EMAIL_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: buildOutreachEmailPrompt(params, contentType) }],
-    })
 
   // The subject and the sign-off are decided by us, not by the model — see
   // outreachSubjectFor and enforceSignOff. Only the body is AI-generated.
   const subject = outreachSubjectFor(params.business_name)
-  const text = response.text
+
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]) as { body?: string }
-      if (parsed.body?.trim()) {
-        return { subject, body: composeOutreachEmailBody(enforceSignOff(parsed.body.trim(), FOLLOW_UP_SIGN_OFF)).bodyText }
-      }
+    const result = await execute({
+      workflow: 'outreach_email_generation',
+      promptVersion: PROMPT_VERSIONS.outreachEmailGeneration,
+      system: OUTREACH_EMAIL_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: buildOutreachEmailPrompt(params, contentType) }],
+      outputSchema: WRITER_OUTPUT_SCHEMA,
+      maxTokens: 400,
+    })
+    const body = result.output.body
+    if (body?.trim()) {
+      return { subject, body: composeOutreachEmailBody(enforceSignOff(body.trim(), FOLLOW_UP_SIGN_OFF)).bodyText }
     }
-  } catch {
-    // fallback
+  } catch (error) {
+    // A malformed model reply must never be the reason a lead gets a worse
+    // email than everyone else — fall through to the deterministic fallback.
+    if (!isAIExecutionError(error) || error.code !== 'AI_OUTPUT_INVALID') throw error
   }
-  // Fallback obeys the same voice rules as the prompt — a malformed API response
-  // must never be the reason a lead gets a worse-written email than everyone else.
+
+  // Fallback obeys the same voice rules as the prompt.
   const composed = composeOutreachEmailBody(`Hey ${params.business_name},\n\n${brandIntroOptions(contentType)[0]}\n\nA collaboration with ${params.business_name} is something I'd be keen to explore. I think it could make good content for Aussie Venture, so I wanted to ask directly rather than over-explain it in a first email.\n\nWould you be interested in collaborating?\n\n${FOLLOW_UP_SIGN_OFF}`)
   return { subject, body: composed.bodyText }
 }

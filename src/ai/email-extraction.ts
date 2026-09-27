@@ -1,28 +1,60 @@
-import { aiRegistry } from './AIRuntime'
+import { PROMPT_VERSIONS } from './prompt-versions'
+import { AGENTIC_SEARCH_OUTPUT_SCHEMA, CONTACT_EMAIL_OUTPUT_SCHEMA } from './output'
+import { createAIWorkflowContext, renderContextUserMessage } from './context'
+import { executeAIWorkflow } from './execute'
+import { isAIExecutionError } from './errors'
+import { requireServerWorkspace, type AIExecuteWorkflow } from './harness'
 
-export async function extractEmailWithHaiku(content: string, businessName: string): Promise<string | null> {
-  const response = await aiRegistry.generate('contact_email_extraction', {
+export async function extractEmailWithHaiku(
+  content: string,
+  businessName: string,
+  execute: AIExecuteWorkflow = executeAIWorkflow,
+  workspaceId?: string,
+): Promise<string | null> {
+  const resolvedWorkspaceId = requireServerWorkspace(workspaceId)
+  const context = createAIWorkflowContext({
+    workspaceId: resolvedWorkspaceId,
+    workflow: 'contact_email_extraction',
+    promptVersion: PROMPT_VERSIONS.contactEmailExtraction,
+  })
+    .add({
+      id: 'task',
+      trustLevel: 'trusted_application',
+      label: 'Task',
+      content: `Find a contact email address for "${businessName}" in the supplied text. Respond in JSON only: { "email": "..." }. If no email is found, respond { "email": null }.`,
+    })
+    .add({
+      id: 'text',
+      trustLevel: 'external_untrusted',
+      label: 'Text',
+      content,
+      source: { type: 'website' },
+    })
+
+  const built = context.getContext()
+  const result = await execute({
+    workflow: 'contact_email_extraction',
+    promptVersion: PROMPT_VERSIONS.contactEmailExtraction,
+    workspaceId: resolvedWorkspaceId,
+    messages: [{ role: 'user', content: renderContextUserMessage(built) }],
+    outputSchema: CONTACT_EMAIL_OUTPUT_SCHEMA,
     maxTokens: 64,
-    messages: [
-      {
-        role: 'user',
-        content: `Find a contact email address for "${businessName}" in this text. Return ONLY the email address, nothing else. If no email is found, return "none".\n\n${content.slice(0, 3000)}`,
-      },
-    ],
+    contextSize: built.totalCharacters,
+    contextTruncated: built.truncated,
   })
 
-  const text = response.text.trim()
-  if (text && text.toLowerCase() !== 'none' && text.includes('@') && !text.includes(' ') && text.length < 100) {
-    return text
+  const email = result.output.email
+  if (email && email.includes('@') && !email.includes(' ') && email.length < 100) {
+    return email
   }
   return null
 }
 
 interface AgentDecision {
   action: 'found' | 'fetch_url' | 'search_google' | 'not_found'
-  email?: string
-  url?: string
-  search_query?: string
+  email?: string | null
+  url?: string | null
+  search_query?: string | null
 }
 
 async function fetchPageText(url: string): Promise<string> {
@@ -55,54 +87,87 @@ async function searchWeb(query: string): Promise<string> {
   }
 }
 
-function parseDecision(text: string): AgentDecision {
-  try {
-    const m = text.match(/\{[\s\S]*?\}/)
-    if (m) return JSON.parse(m[0]) as AgentDecision
-  } catch {}
-  return { action: 'not_found' }
-}
+const AGENTIC_SEARCH_SYSTEM = `You are a research agent that finds contact email addresses for businesses. Respond in valid JSON only — no other text.`
 
-export async function agenticEmailSearch(params: {
-  business_name: string
-  website_url: string
-  category: string
-  homepage_content: string
-}): Promise<{ email: string | null; method: string; rounds: number }> {
-  const MAX_ROUNDS = 3
-
-  const SYSTEM = `You are a research agent that finds contact email addresses for businesses. Respond in valid JSON only — no other text.`
-
-  const firstPrompt = `Find the contact email for this business.
-
-Business: ${params.business_name}
-Website: ${params.website_url}
-Category: ${params.category}
-
-Homepage content:
-${params.homepage_content}
-
-Choose ONE action and respond with JSON only:
+function renderDecisionPrompt(
+  workspaceId: string,
+  businessName: string,
+  websiteUrl: string,
+  category: string,
+  content: string,
+): string {
+  const context = createAIWorkflowContext({
+    workspaceId,
+    workflow: 'agentic_email_search',
+    promptVersion: PROMPT_VERSIONS.agenticEmailSearch,
+  })
+    .add({
+      id: 'task',
+      trustLevel: 'trusted_application',
+      label: 'Task',
+      content: `Find the contact email for this business. Choose ONE action and respond with JSON only:
 - Found an email → {"action":"found","email":"email@domain.com"}
 - Need to fetch a subpage → {"action":"fetch_url","url":"/contact"}
-- Need an online search → {"action":"search_google","search_query":"${params.business_name} contact email"}
-- Cannot find → {"action":"not_found"}`
+- Need an online search → {"action":"search_google","search_query":"${businessName} contact email"}
+- Cannot find → {"action":"not_found"}`,
+    })
+    .add({
+      id: 'business',
+      trustLevel: 'internal_data',
+      label: 'Business',
+      content: `Business: ${businessName}\nWebsite: ${websiteUrl}\nCategory: ${category}`,
+    })
+    .add({
+      id: 'content',
+      trustLevel: 'external_untrusted',
+      label: 'Page content',
+      content,
+      source: { type: 'website' },
+    })
+
+  return renderContextUserMessage(context.getContext())
+}
+
+export async function agenticEmailSearch(
+  params: {
+    business_name: string
+    website_url: string
+    category: string
+    homepage_content: string
+  },
+  execute: AIExecuteWorkflow = executeAIWorkflow,
+  workspaceId?: string,
+): Promise<{ email: string | null; method: string; rounds: number }> {
+  const MAX_ROUNDS = 3
+  const resolvedWorkspaceId = requireServerWorkspace(workspaceId)
 
   const messages: { role: 'user' | 'assistant'; content: string }[] = [
-    { role: 'user', content: firstPrompt },
+    { role: 'user', content: renderDecisionPrompt(resolvedWorkspaceId, params.business_name, params.website_url, params.category, params.homepage_content) },
   ]
 
   let method = 'not_found'
 
   for (let round = 1; round <= MAX_ROUNDS; round++) {
-    const response = await aiRegistry.generate('agentic_email_search', {
-      maxTokens: 256,
-      system: SYSTEM,
-      messages,
-    })
-
-    const raw = response.text || '{}'
-    const decision = parseDecision(raw)
+    let decision: AgentDecision
+    let rawText: string
+    try {
+      const response = await execute({
+        workflow: 'agentic_email_search',
+        promptVersion: PROMPT_VERSIONS.agenticEmailSearch,
+        workspaceId: resolvedWorkspaceId,
+        system: AGENTIC_SEARCH_SYSTEM,
+        messages,
+        outputSchema: AGENTIC_SEARCH_OUTPUT_SCHEMA,
+        maxTokens: 256,
+      })
+      decision = response.output
+      rawText = response.rawText
+    } catch (error) {
+      // A malformed model reply must fail safe: stop searching rather than
+      // trust an unvalidated action. Provider/transport failures propagate.
+      if (isAIExecutionError(error) && error.code === 'AI_OUTPUT_INVALID') break
+      throw error
+    }
 
     console.log(`[email-agent] round=${round} action=${decision.action} email=${decision.email ?? '-'}`)
 
@@ -138,7 +203,7 @@ Choose ONE action and respond with JSON only:
       method = 'google_search'
     }
 
-    messages.push({ role: 'assistant', content: raw })
+    messages.push({ role: 'assistant', content: rawText })
 
     if (!fetchedContent) {
       messages.push({

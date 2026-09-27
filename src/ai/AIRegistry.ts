@@ -10,6 +10,8 @@ import {
 import { estimateCost } from './observability/pricing'
 import { getRetryCount } from './observability/retry-count'
 import { sanitizeAIErrorMessage } from './observability/sanitize-error'
+import { classifyAIError } from './errors'
+import { assertModelAllowed, assertProviderAllowed } from './provider-policy'
 import { currentWorkflowTrace } from '@/lib/observability/context'
 
 export class AIRegistry {
@@ -48,6 +50,8 @@ export class AIRegistry {
       const assignment = await this.configurationService.getWorkflowAssignment(workflow)
       providerKey = assignment.providerKey
       modelKey = assignment.modelKey
+      assertProviderAllowed(providerKey)
+      assertModelAllowed(modelKey)
       const provider = this.get(providerKey)
 
       // Deterministic quota gate: count a real attempted provider request before
@@ -100,6 +104,7 @@ export class AIRegistry {
           max_tokens: request.maxTokens,
           message_count: request.messages.length,
           has_system_prompt: Boolean(request.system),
+          ...request.metadata,
         },
       })
 
@@ -131,6 +136,8 @@ export class AIRegistry {
           max_tokens: request.maxTokens,
           message_count: request.messages.length,
           has_system_prompt: Boolean(request.system),
+          error_category: classifyAIError(error).code,
+          ...request.metadata,
         },
       })
       throw error

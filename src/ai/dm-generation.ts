@@ -1,4 +1,6 @@
-import { aiRegistry } from './AIRuntime'
+import { PROMPT_VERSIONS } from './prompt-versions'
+import { executeAIWorkflow } from './execute'
+import type { AIExecuteWorkflow } from './harness'
 import { contentTypeBrandPrefix, normalizeContentType, type ContentType } from '../lib/content-type'
 import { getCategoryReferenceNoun, getContentFocus } from '../lib/category-copy'
 
@@ -46,21 +48,26 @@ Rules:
 Respond with just the DM text, nothing else.`
 }
 
-export async function writeOutreachDM(params: {
-  business_name: string
-  suburb: string
-  city: string
-  category: string
-  content_type: string
-}): Promise<string> {
+export async function writeOutreachDM(
+  params: {
+    business_name: string
+    suburb: string
+    city: string
+    category: string
+    content_type: string
+  },
+  execute: AIExecuteWorkflow = executeAIWorkflow,
+): Promise<string> {
   const contentType = normalizeContentType(params.content_type)
   const brandDesc = getBrandDescription(params.category, contentType)
   const pitch = getCategoryPitch(params.category, contentType)
 
-  const response = await aiRegistry.generate('outreach_dm_generation', {
-    maxTokens: 200,
+  const result = await execute({
+    workflow: 'outreach_dm_generation',
+    promptVersion: PROMPT_VERSIONS.outreachDmGeneration,
     messages: [{ role: 'user', content: buildOutreachDMPrompt(params, brandDesc, pitch) }],
+    maxTokens: 200,
   })
 
-  return response.text
+  return result.rawText
 }

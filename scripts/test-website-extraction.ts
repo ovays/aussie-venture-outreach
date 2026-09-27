@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
-import { aiRegistry } from '@/ai/AIRuntime'
 import { extractWebsiteData } from '@/ai/website-extraction'
+import type { AIExecuteWorkflow } from '@/ai/harness'
+
+const WORKSPACE_ID = '00000000-0000-4000-8000-000000000001'
 
 const responses = [
   {
@@ -26,14 +28,25 @@ const responses = [
   },
 ]
 
-aiRegistry.generate = async () => ({
-  text: JSON.stringify(responses.shift()),
-})
+const execute: AIExecuteWorkflow = async (input) => {
+  const value = responses.shift()!
+  return {
+    output: value,
+    rawText: JSON.stringify(value),
+    provider: 'anthropic',
+    model: 'claude-haiku-4-5-20251001',
+    promptVersion: input.promptVersion,
+    schemaValidated: true,
+    contextSize: null,
+    contextTruncated: false,
+    retryCount: 0,
+  }
+}
 
 async function main(): Promise<void> {
-  const empty = await extractWebsiteData('website content')
-  const populated = await extractWebsiteData('website content')
-  const text = await extractWebsiteData('website content')
+  const empty = await extractWebsiteData('website content', execute, WORKSPACE_ID)
+  const populated = await extractWebsiteData('website content', execute, WORKSPACE_ID)
+  const text = await extractWebsiteData('website content', execute, WORKSPACE_ID)
 
   assert.equal(empty.other_social, null)
   assert.equal(populated.other_social, 'TikTok, LinkedIn')

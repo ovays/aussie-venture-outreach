@@ -19,6 +19,12 @@ export interface AIGenerateRequest {
   workspaceId?: string
   /** Stable idempotency key for quota consumption (caller-supplied where available). */
   idempotencyKey?: string
+  /**
+   * Diagnostic-only metadata merged into the request log (prompt version,
+   * context size, truncation, schema status, correlation id). Must never
+   * contain secrets or full sensitive payloads.
+   */
+  metadata?: Readonly<Record<string, boolean | number | string | null>>
 }
 
 export interface AIGenerateResponse {
