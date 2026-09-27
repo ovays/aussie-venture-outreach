@@ -158,10 +158,17 @@ async function testDatabaseDefaultsAndTenancy(): Promise<void> {
       assert.ifError(created.error)
       users.push(created.data.user!.id)
     }
+    const provision = async (workspaceId: string): Promise<void> => {
+      const raw = service as unknown as {
+        rpc: (fn: string, args: Record<string, unknown>) => Promise<{ error: { message: string } | null }>
+      }
+      assert.ifError((await raw.rpc('admin_set_workspace_entitlement', { p_workspace_id: workspaceId, p_plan_code: 'internal_beta' })).error)
+    }
     for (const index of [0, 1]) {
       const created = await service.from('workspaces').insert({ name: `Policy Workspace ${index} ${suffix}`, slug: `policy-${index}-${suffix}` }).select('id').single()
       assert.ifError(created.error)
       workspaces.push(created.data!.id)
+      await provision(created.data!.id)
       assert.ifError((await service.from('workspace_members').insert({ workspace_id: created.data!.id, user_id: users[index], role: 'owner', status: 'active' })).error)
     }
     const category = await service.from('categories').insert({ workspace_id: workspaces[1], name: `Policy Category ${suffix}` }).select('id,halal_filter,exclude_alcohol_focused,exclude_pork,exclude_gambling,exclude_religious_institutions,exclude_shisha,custom_policy_instructions').single()

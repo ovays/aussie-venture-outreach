@@ -66,10 +66,15 @@ async function main() {
   const workspaceA = randomUUID()
   const workspaceB = randomUUID()
   const workspaceC = randomUUID()
-  const [userA, userB] = (await admin.query<{ id: string }>('select id from auth.users order by id limit 2')).rows
-  assert(userA && userB, 'Local fixture requires two auth users')
+  const userA = randomUUID()
+  const userB = randomUUID()
+  const fixtureUsers = [userA, userB]
 
   try {
+    await admin.query(
+      `insert into auth.users(id,email) values ($1,$3),($2,$4)`,
+      [userA, userB, `quota-a-${userA}@example.test`, `quota-b-${userB}@example.test`],
+    )
     const catalog = await admin.query("select to_regclass('public.workspace_usage_periods')::text as periods")
     assert.equal(catalog.rows[0].periods, 'workspace_usage_periods', 'Migration 14 is applied locally')
 
@@ -156,7 +161,7 @@ async function main() {
 
     await expectQuotaExceeded(admin.query(
       `insert into public.workspace_members(workspace_id,user_id,role,status) values ($1,$2,'member','active')`,
-      [workspaceC, userA.id],
+      [workspaceC, userA],
     ))
 
     await admin.query(
@@ -173,13 +178,13 @@ async function main() {
     await admin.query(
       `insert into public.workspace_members(workspace_id,user_id,role,status)
        values ($1,$2,'owner','active'),($3,$4,'owner','active')`,
-      [workspaceA, userA.id, workspaceB, userB.id],
+      [workspaceA, userA, workspaceB, userB],
     )
     const authenticated = await connect()
     try {
       await authenticated.query('set role authenticated')
       await authenticated.query("select set_config('request.jwt.claim.role','authenticated',false)")
-      await authenticated.query("select set_config('request.jwt.claim.sub',$1,false)", [userA.id])
+      await authenticated.query("select set_config('request.jwt.claim.sub',$1,false)", [userA])
       const visible = await authenticated.query('select workspace_id from public.workspace_usage_periods order by workspace_id')
       assert(visible.rows.every((row) => row.workspace_id === workspaceA), 'RLS hides every other workspace usage period')
       await assert.rejects(
@@ -201,6 +206,8 @@ async function main() {
     console.log('SAAS6_USAGE_QUOTAS_PASS')
   } finally {
     await admin.query('delete from public.workspaces where id=any($1::uuid[])', [[workspaceA, workspaceB, workspaceC]]).catch(() => undefined)
+    await admin.query('delete from public.profiles where id=any($1::uuid[])', [fixtureUsers]).catch(() => undefined)
+    await admin.query('delete from auth.users where id=any($1::uuid[])', [fixtureUsers]).catch(() => undefined)
     await admin.end()
   }
 }
