@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { searchBusinesses, type OutscraperResult } from '@/lib/searchBusinesses'
 import { logger } from '@/lib/logger'
+import { fetchPublicTextResponse } from '@/lib/safe-public-http'
 import {
   addLeadToDedupeIndex,
   checkLeadDedupe,
@@ -776,33 +777,16 @@ async function fetchHtmlWithDiagnostics(url: string): Promise<WebsiteFetchResult
       continue
     }
 
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 7000)
     try {
       console.log(`[HTTP_FETCH] url=${candidate}`)
-      const res = await fetch(candidate, {
-        method: 'GET',
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)' },
-        redirect: 'follow',
-        signal: controller.signal,
-      })
-
-      if (!res.ok) {
-        clearTimeout(timeoutId)
-        lastReason = `${candidate} returned HTTP ${res.status}`
-        continue
-      }
-
-      const html = await res.text()
-      clearTimeout(timeoutId)
+      const res = await fetchPublicTextResponse(candidate, { timeoutMs: 7_000 })
       console.log(`[FETCH_SUCCESS] url=${candidate} status=${res.status}`)
       successResult = {
-        html,
+        html: res.text,
         requestedUrl: normalizeResolvedWebsite(candidate),
-        finalUrl: normalizeResolvedWebsite(res.url || candidate),
+        finalUrl: normalizeResolvedWebsite(res.finalUrl),
       }
     } catch (error) {
-      clearTimeout(timeoutId)
       lastReason = `${candidate} failed: ${error instanceof Error ? error.name || error.message : String(error)}`
     }
   }
@@ -823,34 +807,16 @@ async function fetchHtmlWithDiagnostics(url: string): Promise<WebsiteFetchResult
 // Single-attempt fetch with no protocol/www variant retries.
 // Used for internal pages once the homepage base URL is already known.
 async function fetchHtmlDirect(url: string): Promise<WebsiteFetchResult> {
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 7000)
   try {
     console.log(`[HTTP_FETCH] url=${url}`)
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)' },
-      redirect: 'follow',
-      signal: controller.signal,
-    })
-    clearTimeout(timeoutId)
-    if (!res.ok) {
-      return {
-        html: '',
-        requestedUrl: normalizeResolvedWebsite(url),
-        finalUrl: normalizeResolvedWebsite(url),
-        reason: `${url} returned HTTP ${res.status}`,
-      }
-    }
-    const html = await res.text()
+    const res = await fetchPublicTextResponse(url, { timeoutMs: 7_000 })
     console.log(`[FETCH_SUCCESS] url=${url} status=${res.status}`)
     return {
-      html,
+      html: res.text,
       requestedUrl: normalizeResolvedWebsite(url),
-      finalUrl: normalizeResolvedWebsite(res.url || url),
+      finalUrl: normalizeResolvedWebsite(res.finalUrl),
     }
   } catch (error) {
-    clearTimeout(timeoutId)
     return {
       html: '',
       requestedUrl: normalizeResolvedWebsite(url),

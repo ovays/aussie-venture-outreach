@@ -1,6 +1,8 @@
 export const V2_CANARY_ENV = 'v2_canary'
 export const V2_CANARY_WORKFLOW_TYPE = 'v2_initial_send_canary'
 export const V2_CANARY_PHASE = 'initial_pitch'
+/** Canary execution is intentionally single-shot; DELIVERY_UNCERTAIN is manual-only. */
+export const V2_CANARY_MAX_ATTEMPTS = 1
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 

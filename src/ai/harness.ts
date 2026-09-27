@@ -4,7 +4,7 @@ import { isCanonicalUuid } from '@/lib/uuid'
 import type { AIGenerateRequest, AIGenerateResponse, AIMessage } from './AIProvider'
 import type { AIWorkflow, AIWorkflowAssignment } from './configuration/AIConfiguration'
 import { AIExecutionError, classifyAIError } from './errors'
-import { parseStructuredOutput } from './output'
+import { MAX_AI_OUTPUT_CHARS, parseStructuredOutput } from './output'
 import { assertModelAllowed, assertProviderAllowed } from './provider-policy'
 
 export const DEFAULT_AI_TIMEOUT_MS = 60_000
@@ -121,10 +121,15 @@ export function createAIHarness(dependencies: AIHarnessDependencies = {}): AIExe
       response = await withTimeout(generate(input.workflow, request), timeoutMs)
     } catch (error) {
       const meta = classifyAIError(error)
-      throw error instanceof AIExecutionError ? error : new AIExecutionError(meta.code, safeMessage(error), meta.retryable)
+      throw error instanceof AIExecutionError
+        ? error
+        : new AIExecutionError(meta.code, safeProviderMessage(meta.code), meta.retryable)
     }
 
     const rawText = response.text ?? ''
+    if (rawText.length > MAX_AI_OUTPUT_CHARS) {
+      throw new AIExecutionError('AI_OUTPUT_INVALID', 'AI output exceeded the allowed size', false)
+    }
     const schemaValidated = input.outputSchema !== undefined
     const output = input.outputSchema
       ? parseStructuredOutput(input.outputSchema, rawText)
@@ -146,8 +151,8 @@ export function createAIHarness(dependencies: AIHarnessDependencies = {}): AIExe
   return execute
 }
 
-function safeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error ?? 'unknown error')
+function safeProviderMessage(code: string): string {
+  return `AI request failed (${code})`
 }
 
 // Lazy wiring so the harness module stays free of `server-only`/Supabase

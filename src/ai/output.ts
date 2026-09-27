@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { AIExecutionError } from './errors'
 
+export const MAX_AI_OUTPUT_CHARS = 64_000
+
 // Structured-output contracts for machine-consumed AI responses. Every workflow
 // that parses model text for downstream application logic must validate through
 // a schema here rather than trusting JSON.parse(raw) directly.
@@ -11,23 +13,23 @@ export const WEBSITE_EXTRACTION_OUTPUT_SCHEMA = z.object({
   instagram_handle: z.string().nullable().default(null),
   facebook_url: z.string().nullable().default(null),
   other_social: z.union([z.string(), z.array(z.string()), z.null()]).default(null),
-})
+}).strict()
 
 export const CONTACT_EMAIL_OUTPUT_SCHEMA = z.object({
   email: z.string().nullable().default(null),
-})
+}).strict()
 
 export const AGENTIC_SEARCH_OUTPUT_SCHEMA = z.object({
   action: z.enum(['found', 'fetch_url', 'search_google', 'not_found']),
   email: z.string().nullable().optional(),
   url: z.string().nullable().optional(),
   search_query: z.string().nullable().optional(),
-})
+}).strict()
 
 export const WRITER_OUTPUT_SCHEMA = z.object({
   subject: z.string().max(500).optional(),
   body: z.string().min(1).max(12_000),
-})
+}).strict()
 
 export type WebsiteExtractionOutput = z.infer<typeof WEBSITE_EXTRACTION_OUTPUT_SCHEMA>
 export type ContactEmailOutput = z.infer<typeof CONTACT_EMAIL_OUTPUT_SCHEMA>
@@ -51,6 +53,9 @@ export function parseStructuredOutput<T extends z.ZodTypeAny>(
 ): z.infer<T> {
   const trimmed = (rawText ?? '').trim()
   if (!trimmed) throw new AIExecutionError('AI_OUTPUT_INVALID', 'AI returned no output', false)
+  if (trimmed.length > MAX_AI_OUTPUT_CHARS) {
+    throw new AIExecutionError('AI_OUTPUT_INVALID', 'AI output exceeded the allowed size', false)
+  }
 
   const jsonMatch = trimmed.match(/\{[\s\S]*\}/)
   if (!jsonMatch) {

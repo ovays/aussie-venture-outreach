@@ -225,6 +225,7 @@ function testStaticBoundaries() {
     '00000000000016_billing_stripe.sql',
     '00000000000017_admin_audit.sql',
     '00000000000018_performance_optimisation.sql',
+    '00000000000019_security_hardening.sql',
   ], 'V2 migration set matches the approved foundation and SaaS additions')
 }
 

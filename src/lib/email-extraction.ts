@@ -1,3 +1,5 @@
+import { fetchPublicText } from '@/lib/safe-public-http'
+
 const MAILTO_RE = /href=["']mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi
 const EMAIL_RE  = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
 const BLOCKED_LOCALS = new Set([
@@ -30,10 +32,5 @@ export function extractMailtoEmail(html: string): string | null {
 }
 
 export async function fetchRawHtml(url: string): Promise<string> {
-  const normalised = url.startsWith('http') ? url : `https://${url}`
-  const res = await fetch(normalised, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)' },
-    signal: AbortSignal.timeout(10_000),
-  })
-  return res.text()
+  return fetchPublicText(url)
 }

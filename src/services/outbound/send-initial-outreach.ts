@@ -4,7 +4,7 @@ import { MailboxProviderError } from '@/lib/mailbox/errors'
 import { handleEmailSyncFailure } from '@/lib/email-status'
 import { isDeliverySuppressedForAddress } from '@/lib/delivery-suppression'
 import { claimRecipientOutreach, removeLeadFromInitialOutreachQueue, classifyEmailQuality } from '@/lib/data-quality'
-import { claimOutboundEmailIntent, outboundIdempotencyKey, outboundMessageId, type OutboundSendEnvelope } from '@/lib/outbound-send'
+import { outboundIdempotencyKey, outboundMessageId, type OutboundSendEnvelope } from '@/lib/outbound-send'
 import { assertCanaryAllowlistLeadId, assertCanaryPhase, isV2CanaryEnabled } from '@/lib/v2-canary-safety'
 import { assertCanaryOperatorApproval, hashCanaryContent, recipientFingerprint, V2_CANARY_SENDER_IDENTITY } from '@/lib/v2-canary-approval'
 import { observability } from '@/lib/observability/service'
@@ -200,13 +200,16 @@ async function sendCanaryInitialOutreach(input: SendInitialOutreachInput): Promi
     approval_reference: approval.reference,
   }
 
-  const claim = await claimOutboundEmailIntent(input.client, {
-    leadId: input.leadId,
-    emailId: record.id,
-    messageId: outboundMessageId(record.id),
-    envelope,
-  })
-  if (!claim.claimed) {
+  // Persist the immutable canary approval envelope before provider submission,
+  // but leave the row pending. The shared mailbox boundary performs the only
+  // pending_send -> sending claim after its final authority recheck.
+  const prepared = await input.client.from('emails').update({
+    message_id: outboundMessageId(record.id),
+    send_envelope: envelope as unknown as Record<string, unknown>,
+  }).eq('id', record.id).eq('lead_id', input.leadId).eq('status', 'pending_send')
+    .select('id').maybeSingle()
+  if (prepared.error) return serviceFailure(prepared.error.message, true)
+  if (!prepared.data) {
     return { outcome: 'skipped', changedState: false, details: { reason: 'send_claim_conflict' } }
   }
 

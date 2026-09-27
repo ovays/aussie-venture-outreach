@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { z } from 'zod'
 
-const leadIdsSchema = z.array(z.string().uuid())
+const leadIdsSchema = z.array(z.string().uuid()).max(1_000)
 
 // Supabase serializes `.in()` filters into the URL. One hundred UUIDs keep each
 // server-to-database request comfortably below common proxy URL limits while

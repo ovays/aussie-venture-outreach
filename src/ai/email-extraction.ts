@@ -4,6 +4,7 @@ import { createAIWorkflowContext, renderContextUserMessage } from './context'
 import { executeAIWorkflow } from './execute'
 import { isAIExecutionError } from './errors'
 import { requireServerWorkspace, type AIExecuteWorkflow } from './harness'
+import { fetchPublicText } from '@/lib/safe-public-http'
 
 export async function extractEmailWithHaiku(
   content: string,
@@ -59,12 +60,7 @@ interface AgentDecision {
 
 async function fetchPageText(url: string): Promise<string> {
   try {
-    const normalised = url.startsWith('http') ? url : `https://${url}`
-    const res = await fetch(normalised, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)' },
-      signal: AbortSignal.timeout(10_000),
-    })
-    const html = await res.text()
+    const html = await fetchPublicText(url)
     return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 4000)
   } catch {
     return ''
@@ -73,14 +69,7 @@ async function fetchPageText(url: string): Promise<string> {
 
 async function searchWeb(query: string): Promise<string> {
   try {
-    const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; ReachAgentBot/1.0)',
-        Accept: 'text/html',
-      },
-      signal: AbortSignal.timeout(10_000),
-    })
-    const html = await res.text()
+    const html = await fetchPublicText(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`)
     return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 4000)
   } catch {
     return ''
@@ -185,16 +174,17 @@ export async function agenticEmailSearch(
     let fetchedContent = ''
 
     if (decision.action === 'fetch_url' && decision.url) {
-      let target = decision.url
-      if (!target.startsWith('http')) {
-        try {
-          const base = new URL(
-            params.website_url.startsWith('http') ? params.website_url : `https://${params.website_url}`
-          )
-          target = base.origin + (decision.url.startsWith('/') ? decision.url : `/${decision.url}`)
-        } catch {
-          target = params.website_url + decision.url
-        }
+      let target: string
+      try {
+        const base = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(params.website_url) ? params.website_url : `https://${params.website_url}`)
+        const proposed = new URL(decision.url, base)
+        // A model may choose a path, but it may not choose a different authority.
+        if (proposed.origin !== base.origin) throw new Error('Cross-origin model URL rejected')
+        target = proposed.toString()
+      } catch {
+        messages.push({ role: 'assistant', content: rawText })
+        messages.push({ role: 'user', content: 'That URL was rejected. Use a relative path on the business website or return {"action":"not_found"}.' })
+        continue
       }
       fetchedContent = await fetchPageText(target)
       method = 'subpage'

@@ -33,6 +33,7 @@
     "test:performance:v2": "tsx scripts/test-v2-performance.ts",
     "test:performance-reliability:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-performance-reliability.ts",
     "test:ai-harness:v2": "tsx scripts/test-ai-harness-v2.ts",
+    "test:security-adversarial:v2": "tsx scripts/test-security-adversarial-v2.ts",
     "test:decision-engine:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-decision-engine.ts",
     "test:category-policy:v2": "dotenv -e .env.v2.local -- tsx scripts/test-v2-category-policy.ts",
     "test:mailbox-providers:v2": "tsx --conditions=react-server scripts/test-v2-mailbox-providers.ts",
