@@ -185,12 +185,7 @@ export function AISettings({ initialSettings, canEdit }: AISettingsProps) {
         <div
           role={notice.type === 'error' ? 'alert' : 'status'}
           aria-live={notice.type === 'error' ? 'assertive' : 'polite'}
-          className="flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm"
-          style={{
-            borderColor: notice.type === 'success' ? 'rgba(34,197,94,.35)' : 'rgba(248,113,113,.35)',
-            background: notice.type === 'success' ? 'rgba(34,197,94,.08)' : 'rgba(248,113,113,.08)',
-            color: notice.type === 'success' ? '#86efac' : '#fca5a5',
-          }}
+          className={`notice ${notice.type === 'success' ? 'notice--success' : 'notice--error'}`}
         >
           {notice.type === 'success' ? <Check size={16} className="mt-0.5 shrink-0" /> : <CircleAlert size={16} className="mt-0.5 shrink-0" />}
           <span>{notice.message}</span>
@@ -214,8 +209,7 @@ export function AISettings({ initialSettings, canEdit }: AISettingsProps) {
                     <p className="mt-1 text-xs" style={{ color: '#64748b' }}>{provider.models.length} configured model{provider.models.length === 1 ? '' : 's'}</p>
                   </div>
                   <span
-                    className="rounded-full px-2.5 py-1 text-xs font-medium"
-                    style={{ background: provider.enabled ? 'rgba(34,197,94,.12)' : 'rgba(100,116,139,.15)', color: provider.enabled ? '#86efac' : '#94a3b8' }}
+                    className={`status-chip ${provider.enabled ? 'status-chip--success' : 'status-chip--neutral'}`}
                   >
                     {provider.enabled ? 'Enabled' : 'Disabled'}
                   </span>

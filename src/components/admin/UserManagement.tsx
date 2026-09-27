@@ -25,11 +25,11 @@ interface CreateForm {
 
 function RoleBadge({ role }: { role: UserRole }) {
   const className = role === 'admin'
-    ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
-    : 'bg-slate-500/15 text-slate-300 border-slate-500/30'
+    ? 'status-chip--info'
+    : 'status-chip--neutral'
 
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}>
+    <span className={`status-chip ${className}`}>
       {role}
     </span>
   )
@@ -39,10 +39,10 @@ function StatusBadge({ active }: { active: boolean }) {
   return (
     <span
       className={[
-        'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium',
+        'status-chip',
         active
-          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-          : 'bg-red-500/15 text-red-300 border-red-500/30',
+          ? 'status-chip--success'
+          : 'status-chip--error',
       ].join(' ')}
     >
       {active ? 'active' : 'inactive'}
@@ -206,7 +206,7 @@ export function UserManagement({ initialUsers, currentUserId }: UserManagementPr
       </FilterToolbar>
 
       {error && (
-        <div className="rounded-lg border px-4 py-3 text-sm text-red-300 bg-red-500/10 border-red-500/30">
+        <div role="alert" className="notice notice--error">
           {error}
         </div>
       )}

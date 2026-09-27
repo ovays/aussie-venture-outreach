@@ -246,7 +246,7 @@ export default async function AIAnalyticsPage({ searchParams }: PageProps) {
                     <td className="whitespace-nowrap px-4 py-3 text-slate-400">{new Date(request.createdAt).toLocaleString('en-AU', { timeZone: 'Australia/Sydney' })}</td>
                     <td className="px-4 py-3 text-slate-200">{titleCase(request.workflow)}</td>
                     <td className="px-4 py-3"><div className="text-slate-200">{request.provider ?? 'Unavailable'}</div><div className="text-xs text-slate-500">{request.model ?? 'Unavailable'}</div></td>
-                    <td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-xs ${request.status === 'succeeded' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>{titleCase(request.status)}</span></td>
+                    <td className="px-4 py-3"><span className={`status-chip ${request.status === 'succeeded' ? 'status-chip--success' : 'status-chip--error'}`}>{titleCase(request.status)}</span></td>
                     <td className="px-4 py-3 text-slate-300">{latency(request.durationMs)}</td>
                     <td className="px-4 py-3 text-slate-300" title={`Input: ${request.inputTokens ?? 'unknown'}; Output: ${request.outputTokens ?? 'unknown'}`}>{request.totalTokens === null ? 'Unavailable' : number(request.totalTokens)}</td>
                     <td className="px-4 py-3 text-slate-300">{cost(request.estimatedCostUsd)}</td>
@@ -265,7 +265,7 @@ export default async function AIAnalyticsPage({ searchParams }: PageProps) {
               <article key={request.id} className="responsive-data-card">
                 <div className="flex min-w-0 items-start justify-between gap-3">
                   <div className="min-w-0"><p className="truncate text-sm font-semibold text-[var(--text-primary)]">{titleCase(request.workflow)}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{new Date(request.createdAt).toLocaleString('en-AU', { timeZone: 'Australia/Sydney' })}</p></div>
-                  <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] ${request.status === 'succeeded' ? 'bg-[var(--success-muted)] text-[var(--success)]' : 'bg-[var(--error-muted)] text-[var(--error)]'}`}>{titleCase(request.status)}</span>
+                  <span className={`status-chip shrink-0 text-[11px] ${request.status === 'succeeded' ? 'status-chip--success' : 'status-chip--error'}`}>{titleCase(request.status)}</span>
                 </div>
                 <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
                   <div><dt className="text-[var(--text-muted)]">Provider / Model</dt><dd className="mt-1 break-words text-[var(--text-secondary)]">{request.provider ?? 'Unavailable'} · {request.model ?? 'Unavailable'}</dd></div>

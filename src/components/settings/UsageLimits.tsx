@@ -37,7 +37,7 @@ export function UsageLimits() {
           Current workspace entitlement and monthly usage. Counts update when an operation reserves quota.
         </p>
       </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p role="alert" className="notice notice--error">{error}</p>}
       {!usage && !error && <p className="text-sm text-[var(--text-muted)]">Loading usage…</p>}
       {usage && (
         <>

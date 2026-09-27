@@ -8,6 +8,7 @@
   --surface: #ffffff;
   --surface-raised: #ffffff;
   --surface-hover: #f8fafc;
+  --surface-muted: #f1f3f7;
   --control: #ffffff;
   --border: #dfe3eb;
   --border-subtle: #eaecf2;
@@ -19,14 +20,14 @@
   --accent-muted: rgb(6 182 212 / 10%);
   --text-primary: #111827;
   --text-secondary: #4b5563;
-  --text-muted: #7b8494;
-  --success: #059669;
+  --text-muted: #667085;
+  --success: #047857;
   --success-muted: rgb(16 185 129 / 10%);
   --success-border: rgb(16 185 129 / 24%);
-  --warning: #d97706;
+  --warning: #a15c07;
   --warning-muted: rgb(245 158 11 / 11%);
   --warning-border: rgb(245 158 11 / 24%);
-  --error: #dc2626;
+  --error: #b91c1c;
   --error-muted: rgb(239 68 68 / 9%);
   --error-border: rgb(239 68 68 / 22%);
   --info: #2563eb;
@@ -34,6 +35,7 @@
   --info-border: rgb(37 99 235 / 22%);
   --ai: #7c3aed;
   --ai-muted: rgb(124 58 237 / 9%);
+  --link: #0369a1;
   --radius-sm: 0.5rem;
   --radius-md: 0.625rem;
   --radius-lg: 0.875rem;
@@ -61,7 +63,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .page-stack { display: flex; flex-direction: column; gap: var(--space-section); }
 .surface { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }
 .control-field { min-height: var(--control-height); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--control); color: var(--text-primary); box-shadow: 0 1px 2px rgb(15 23 42 / 3%); }
-.control-field::placeholder { color: #9ca3af; }
+.control-field::placeholder { color: var(--text-muted); opacity: 1; }
+.app-shell input::placeholder, .app-shell textarea::placeholder { color: var(--text-muted); opacity: 1; }
 .control-field:hover { border-color: #c7ccd6; }
 .control-field:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-muted); outline: none; }
 
@@ -94,20 +97,82 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .pagination-bar { display: flex; align-items: center; justify-content: space-between; gap: .75rem; border-top: 1px solid var(--border-subtle); padding: .875rem 1rem; }
 .pagination-bar__label { font-size: .75rem; color: var(--text-muted); }
 
+/* Shared semantic treatments keep notices and status chips readable on light surfaces. */
+.notice { display: flex; align-items: flex-start; gap: .5rem; border: 1px solid; border-radius: var(--radius-md); padding: .625rem .75rem; font-size: .875rem; }
+.notice--error { border-color: var(--error-border); background: var(--error-muted); color: var(--error); }
+.notice--success { border-color: var(--success-border); background: var(--success-muted); color: var(--success); }
+.notice--warning { border-color: var(--warning-border); background: var(--warning-muted); color: var(--warning); }
+.notice--info { border-color: var(--info-border); background: var(--info-muted); color: var(--info); }
+.status-chip { display: inline-flex; min-height: 1.5rem; align-items: center; border: 1px solid; border-radius: 9999px; padding: .25rem .625rem; font-size: .75rem; font-weight: 600; line-height: 1; }
+.status-chip--success { border-color: var(--success-border); background: var(--success-muted); color: var(--success); }
+.status-chip--warning { border-color: var(--warning-border); background: var(--warning-muted); color: var(--warning); }
+.status-chip--error { border-color: var(--error-border); background: var(--error-muted); color: var(--error); }
+.status-chip--info { border-color: var(--info-border); background: var(--info-muted); color: var(--info); }
+.status-chip--neutral { border-color: var(--border); background: var(--surface-muted); color: var(--text-secondary); }
+.link-inline { color: var(--link); font-weight: 500; }
+.link-inline:hover { color: var(--primary-hover); text-decoration: underline; }
+
 /* Compatibility layer for legacy page-level utility colours while components migrate to tokens. */
 .app-shell main .text-white:not([class*="bg-"]) { color: var(--text-primary); }
 .app-shell main .text-slate-200, .app-shell main .text-slate-300 { color: var(--text-secondary); }
 .app-shell main .text-slate-400, .app-shell main .text-slate-500, .app-shell main .text-gray-400 { color: var(--text-muted); }
-.app-shell main .bg-slate-950, .app-shell main .bg-gray-950 { background-color: var(--background-subtle); }
-.app-shell main [style*="background: rgb(15, 17, 23)"], .app-shell main [style*="background: #0f1117"],
-.app-shell main [style*="background: rgb(17, 20, 29)"], .app-shell main [style*="background: #11141d"],
-.app-shell main [style*="background: rgb(30, 33, 48)"], .app-shell main [style*="background: #1e2130"],
-.app-shell main [style*="background: rgb(21, 24, 34)"], .app-shell main [style*="background: #151822"],
-.app-shell main [style*="background: rgb(26, 29, 39)"], .app-shell main [style*="background: #1a1d27"] { background: var(--surface-raised) !important; }
+.app-shell main .text-red-300, .app-shell main .text-red-400 { color: var(--error); }
+.app-shell main .text-green-300, .app-shell main .text-green-400,
+.app-shell main .text-emerald-300, .app-shell main .text-emerald-400 { color: var(--success); }
+.app-shell main .text-amber-200, .app-shell main .text-amber-300,
+.app-shell main .text-yellow-400, .app-shell main .text-orange-300 { color: var(--warning); }
+.app-shell main .text-sky-300, .app-shell main .text-sky-400,
+.app-shell main .text-cyan-400 { color: var(--link); }
+.app-shell main .text-violet-300, .app-shell main .text-purple-300,
+.app-shell main .text-pink-400 { color: var(--ai); }
+.app-shell main .bg-slate-950, .app-shell main .bg-gray-950,
+.app-shell main .bg-slate-950\/45, .app-shell main .bg-slate-950\/60 { background-color: var(--background-subtle); }
+.app-shell main .bg-red-950\/30 { background-color: var(--error-muted); }
+.app-shell main [style*="background: rgb(15, 17, 23)"], .app-shell main [style*="background: #0f1117"], .app-shell main [style*="background:#0f1117"],
+.app-shell main [style*="background: rgb(17, 20, 29)"], .app-shell main [style*="background: #11141d"], .app-shell main [style*="background:#11141d"],
+.app-shell main [style*="background: rgb(30, 33, 48)"], .app-shell main [style*="background: #1e2130"], .app-shell main [style*="background:#1e2130"],
+.app-shell main [style*="background: rgb(21, 24, 34)"], .app-shell main [style*="background: #151822"], .app-shell main [style*="background:#151822"],
+.app-shell main [style*="background: rgb(26, 29, 39)"], .app-shell main [style*="background: #1a1d27"], .app-shell main [style*="background:#1a1d27"] { background: var(--surface-raised) !important; }
+.app-shell main [style*="background: rgb(26, 29, 46)"], .app-shell main [style*="background: #1a1d2e"],
+.app-shell main [style*="background: rgb(26, 10, 10)"], .app-shell main [style*="background: #1a0a0a"],
+.app-shell main [style*="background: rgb(42, 45, 62)"], .app-shell main [style*="background: #2a2d3e"],
+.app-shell main [style*="background:#1a1d2e"], .app-shell main [style*="background:#1a0a0a"],
+.app-shell main [style*="background:#2a2d3e"] { background: var(--surface-muted) !important; }
 .app-shell main [style*="border-color: rgb(42, 45, 62)"], .app-shell main [style*="borderColor: '#2a2d3e'"],
-.app-shell main [style*="border: 1px solid rgb(42, 45, 62)"], .app-shell main [style*="border: 1px solid #2a2d3e"] { border-color: var(--border) !important; }
+.app-shell main [style*="border: 1px solid rgb(42, 45, 62)"], .app-shell main [style*="border: 1px solid #2a2d3e"],
+.app-shell main [style*="border-color:#2a2d3e"], .app-shell main [style*="border:1px solid #2a2d3e"] { border-color: var(--border) !important; }
 .app-shell main [style*="color: rgb(241, 245, 249)"], .app-shell main [style*="color: #f1f5f9"],
 .app-shell main [style*="color: rgb(226, 232, 240)"], .app-shell main [style*="color: #e2e8f0"] { color: var(--text-primary) !important; }
+.app-shell main [style*="color: rgb(203, 213, 225)"], .app-shell main [style*="color: #cbd5e1"], .app-shell main [style*="#cbd5e1"] { color: var(--text-secondary) !important; }
+.app-shell main [style*="color: rgb(148, 163, 184)"], .app-shell main [style*="color: #94a3b8"],
+.app-shell main [style*="color: rgb(100, 116, 139)"], .app-shell main [style*="color: #64748b"],
+.app-shell main [style*="#94a3b8"], .app-shell main [style*="#64748b"] { color: var(--text-muted) !important; }
+.app-shell main [style*="color: rgb(248, 113, 113)"], .app-shell main [style*="color: #f87171"],
+.app-shell main [style*="color: rgb(252, 165, 165)"], .app-shell main [style*="color: #fca5a5"],
+.app-shell main [style*="#f87171"], .app-shell main [style*="#fca5a5"] { color: var(--error) !important; }
+.app-shell main [style*="color: rgb(74, 222, 128)"], .app-shell main [style*="color: #4ade80"],
+.app-shell main [style*="color: rgb(134, 239, 172)"], .app-shell main [style*="color: #86efac"],
+.app-shell main [style*="color: rgb(52, 211, 153)"], .app-shell main [style*="color: #34d399"],
+.app-shell main [style*="#4ade80"], .app-shell main [style*="#86efac"], .app-shell main [style*="#34d399"] { color: var(--success) !important; }
+.app-shell main [style*="color: rgb(251, 191, 36)"], .app-shell main [style*="color: #fbbf24"],
+.app-shell main [style*="color: rgb(252, 211, 77)"], .app-shell main [style*="color: #fcd34d"],
+.app-shell main [style*="color: rgb(253, 230, 138)"], .app-shell main [style*="color: #fde68a"],
+.app-shell main [style*="#fbbf24"], .app-shell main [style*="#fcd34d"], .app-shell main [style*="#fde68a"] { color: var(--warning) !important; }
+.app-shell main [style*="color: rgb(251, 146, 60)"], .app-shell main [style*="color: #fb923c"],
+.app-shell main [style*="color: rgb(253, 186, 116)"], .app-shell main [style*="color: #fdba74"],
+.app-shell main [style*="#fb923c"], .app-shell main [style*="#fdba74"] { color: var(--warning) !important; }
+.app-shell main [style*="color: rgb(56, 189, 248)"], .app-shell main [style*="color: #38bdf8"],
+.app-shell main [style*="color: rgb(125, 211, 252)"], .app-shell main [style*="color: #7dd3fc"],
+.app-shell main [style*="color: rgb(96, 165, 250)"], .app-shell main [style*="color: #60a5fa"],
+.app-shell main [style*="color: rgb(34, 211, 238)"], .app-shell main [style*="color: #22d3ee"],
+.app-shell main [style*="#38bdf8"], .app-shell main [style*="#7dd3fc"],
+.app-shell main [style*="#60a5fa"], .app-shell main [style*="#22d3ee"] { color: var(--link) !important; }
+.app-shell main [style*="color: rgb(167, 139, 250)"], .app-shell main [style*="color: #a78bfa"],
+.app-shell main [style*="color: rgb(192, 132, 252)"], .app-shell main [style*="color: #c084fc"],
+.app-shell main [style*="color: rgb(216, 180, 254)"], .app-shell main [style*="color: #d8b4fe"],
+.app-shell main [style*="#a78bfa"], .app-shell main [style*="#c084fc"], .app-shell main [style*="#d8b4fe"] { color: var(--ai) !important; }
+.app-shell main button[style*="background: rgb(220, 38, 38)"],
+.app-shell main button[style*="background: #dc2626"] { color: #fff !important; }
 
 @media (max-width: 767px) {
   .filter-toolbar { align-items: stretch; padding: .75rem; }

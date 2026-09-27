@@ -186,7 +186,7 @@ export default async function SettingsPage() {
         ]} />
         {(dlqCount ?? 0) > 0 && (
           <Card>
-            <div style={{ color: '#fbbf24', fontSize: '14px' }}>
+            <div role="alert" className="notice notice--warning">
               ⚠ {dlqCount} failed operation{dlqCount === 1 ? '' : 's'} in dead-letter queue (last 24h). Check pipeline logs for details.
             </div>
           </Card>

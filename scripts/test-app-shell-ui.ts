@@ -23,7 +23,14 @@ assert.deepEqual(
   navigationSections[2]?.items?.map((item) => item.label),
   ['Outreach Pipeline', 'DM Queue', 'Email Log', 'Email Report', 'Delivery Failures'],
 )
-assert.deepEqual(adminNavigation.map((item) => item.label), ['Team & Members', 'Data Quality', 'AI Analytics'])
+assert.deepEqual(adminNavigation.map((item) => item.label), [
+  'Workspaces',
+  'Team & Members',
+  'Usage & Billing',
+  'Audit Log',
+  'Data Quality',
+  'AI Analytics',
+])
 assert.deepEqual(utilityNavigation, [])
 
 assert.equal(isRouteActive('/dashboard', '/dashboard'), true)

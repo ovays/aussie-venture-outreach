@@ -97,7 +97,7 @@ export function UsageAdministration() {
       >
         {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} — {workspace.planName ?? 'No entitlement'}</option>)}
       </select>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p role="alert" className="notice notice--error">{error}</p>}
       {selected && detail && (
         <>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--background-subtle)] p-4 text-sm">
@@ -110,7 +110,7 @@ export function UsageAdministration() {
               const override = detail.overrides.find((row) => row.dimensionKey === key)
               return <div key={key} className="rounded-lg border border-[var(--border)] p-3 text-sm">
                 <div className="flex justify-between gap-3"><span>{LABELS[key]}</span><span>{item.used} / {item.limit ?? 'Unlimited'}</span></div>
-                {override && <p className="mt-1 text-xs text-amber-300">Override: {override.limitValue ?? 'Unlimited'}{override.notes ? ` — ${override.notes}` : ''}</p>}
+                {override && <p className="mt-1 text-xs font-medium text-[var(--warning)]">Override: {override.limitValue ?? 'Unlimited'}{override.notes ? ` — ${override.notes}` : ''}</p>}
               </div>
             })}
           </div>

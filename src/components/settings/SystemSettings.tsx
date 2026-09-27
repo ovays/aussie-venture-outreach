@@ -901,7 +901,7 @@ export function SystemSettings({ initialSettings, initialTemplateModeBlockers, u
           ].map(({ label }) => (
             <div key={label} className="flex items-center justify-between py-2.5 px-4 rounded-lg" style={{ background: '#0f1117', border: '1px solid #2a2d3e' }}>
               <span className="text-sm" style={{ color: '#94a3b8' }}>{label}</span>
-              <span className="text-xs px-2.5 py-1 rounded-full" style={{ background: '#2a2d3e', color: '#64748b' }}>
+              <span className="status-chip status-chip--neutral">
                 Configure in .env.local
               </span>
             </div>

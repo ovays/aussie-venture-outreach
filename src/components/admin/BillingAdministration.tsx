@@ -29,7 +29,7 @@ export function BillingAdministration() {
   }, [])
   return <div className="space-y-4">
     <div><h2 className="text-base font-semibold">Workspace billing</h2><p className="mt-1 text-sm text-[var(--text-muted)]">Stripe mapping and entitlement synchronization state.</p></div>
-    {error && <p className="text-sm text-red-400">{error}</p>}
+    {error && <p role="alert" className="notice notice--error">{error}</p>}
     <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
       <th className="p-2">Workspace</th><th className="p-2">Entitlement / plan</th><th className="p-2">Customer / subscription</th><th className="p-2">Status</th><th className="p-2">Price mapping</th><th className="p-2">Period end / sync</th>
     </tr></thead><tbody>{rows.map((row) => {
@@ -39,7 +39,7 @@ export function BillingAdministration() {
         <td className="p-2 font-medium">{row.name}</td><td className="p-2">{entitlement} / {billing?.plan_code ?? 'none'}</td>
         <td className="p-2" title={`${billing?.stripe_customer_id ?? ''} ${billing?.stripe_subscription_id ?? ''}`}>{shortId(billing?.stripe_customer_id)} / {shortId(billing?.stripe_subscription_id)}</td>
         <td className="p-2">{billing?.subscription_status ?? 'none'}</td><td className="p-2" title={billing?.stripe_price_id ?? ''}>{shortId(billing?.stripe_price_id)}</td>
-        <td className="p-2">{billing?.current_period_end ? new Date(billing.current_period_end).toLocaleDateString() : '—'} / {billing?.sync_status ?? 'not configured'}{billing?.last_sync_error ? <p className="text-xs text-red-400">{billing.last_sync_error}</p> : null}</td>
+        <td className="p-2">{billing?.current_period_end ? new Date(billing.current_period_end).toLocaleDateString() : '—'} / {billing?.sync_status ?? 'not configured'}{billing?.last_sync_error ? <p className="mt-1 text-xs font-medium text-[var(--error)]">{billing.last_sync_error}</p> : null}</td>
       </tr>
     })}</tbody></table></div>
   </div>

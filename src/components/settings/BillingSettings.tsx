@@ -40,7 +40,7 @@ export function BillingSettings({ canManage }: { canManage: boolean }) {
         <h2 className="text-base font-semibold text-[var(--text-primary)]">Billing</h2>
         <p className="mt-1 text-sm text-[var(--text-muted)]">Subscription status selects the base entitlement; Usage &amp; Limits enforces it.</p>
       </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p role="alert" className="notice notice--error">{error}</p>}
       {!billing && !error && <p className="text-sm text-[var(--text-muted)]">Loading billing…</p>}
       {billing && (
         <>
@@ -62,7 +62,7 @@ export function BillingSettings({ canManage }: { canManage: boolean }) {
           {!billing.managedInternally && billing.availablePlans.length === 0 && (
             <p className="text-xs text-[var(--text-muted)]">Plan selection is not configured yet. No prices are shown or inferred.</p>
           )}
-          <a className="text-sm text-sky-400 hover:underline" href="#usage">View Usage &amp; Limits</a>
+          <a className="link-inline text-sm" href="#usage">View Usage &amp; Limits</a>
         </>
       )}
     </div>
