@@ -44,3 +44,6 @@ next-env.d.ts
 .trigger/tmp/ 
 .v2-local/
 supabase-v2/.temp/
+
+# Generated final-sync review artifacts (contain operational row identifiers)
+/artifacts/

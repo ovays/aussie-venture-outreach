@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import pg from 'pg'
@@ -9,6 +9,26 @@ const V1_REF = 'obppfnujusqiwjhwzosv'
 const V2_REF = 'ojrxfjlgjhzhdpnkyboa'
 const WORKSPACE_ID = '00000000-0000-0000-0000-000000000001'
 const PAGE = 1000
+const DEFAULT_PLAN_PATH = resolve(ROOT, 'artifacts', 'final-v1-v2-sync-plan.json')
+const TERMINAL_INBOUND_STATUSES = new Set(['processed', 'ignored', 'unmatched', 'unmatched_ambiguous', 'failed'])
+const PHASE1_BASELINE = {
+  effective_emails: 11842,
+  skipped_email_drafts: 267,
+  safe_inbound_receipts: 192,
+  safe_activity_log: 3,
+  email_max_created_at: '2026-09-24T22:07:48.999Z',
+  activity_max_created_at: '2026-09-27T04:37:16.999Z',
+} as const
+const PHASE1_DEFERRED_LEAD_IDS = [
+  '301ae5f8-7950-4cf1-a5c6-b4c1da7bbfa8',
+  'd8a11683-6036-4166-a9f3-c4ecabce86b4',
+].sort()
+const PHASE1_OWNERSHIP_TARGET_OWNER_IDS = new Set([
+  '5c4a6b00-0000-4000-8000-00000000c003',
+  'b0e00000-0000-4000-8000-000000000101',
+])
+const PLAN_SCHEMA_VERSION = 2
+const ADVISORY_LOCK_NAME = 'reachagent:final-v1-v2-sync:v1'
 
 type Row = Record<string, unknown>
 type Classification =
@@ -30,6 +50,33 @@ interface TableSpec {
   timestamps?: string[]
   disposition?: 'SYNC' | 'DERIVED' | 'GENERATED' | 'AUDIT' | 'OBSOLETE'
   mismatchClassification?: Classification
+}
+
+type CliMode = 'audit' | 'plan' | 'execute-plan'
+
+interface Cli {
+  mode: CliMode
+  path: string
+  confirmSha256?: string
+}
+
+function cli(): Cli {
+  const args = process.argv.slice(2)
+  const executeIndex = args.indexOf('--execute-plan')
+  if (executeIndex >= 0) {
+    const path = args[executeIndex + 1]
+    const confirmIndex = args.indexOf('--confirm-plan-sha256')
+    if (!path || path.startsWith('--')) throw new Error('--execute-plan requires a plan artifact path')
+    if (confirmIndex < 0 || !args[confirmIndex + 1]) throw new Error('--execute-plan requires --confirm-plan-sha256 <sha256>')
+    return { mode: 'execute-plan', path: resolve(ROOT, path), confirmSha256: args[confirmIndex + 1] }
+  }
+  if (args.includes('--plan')) {
+    const outIndex = args.indexOf('--out')
+    const path = outIndex >= 0 ? args[outIndex + 1] : undefined
+    if (outIndex >= 0 && (!path || path.startsWith('--'))) throw new Error('--out requires a path')
+    return { mode: 'plan', path: path ? resolve(ROOT, path) : DEFAULT_PLAN_PATH }
+  }
+  return { mode: 'audit', path: DEFAULT_PLAN_PATH }
 }
 
 function parseEnv(path: string): Record<string, string> {
@@ -85,7 +132,9 @@ function refFromDbUrl(value: string): string | null {
 const readOnlyFetch: typeof fetch = async (input, init = {}) => {
   const method = (init.method ?? 'GET').toUpperCase()
   if (method !== 'GET' && method !== 'HEAD') throw new Error(`READ_ONLY_GUARD blocked HTTP ${method}`)
-  return fetch(input, init)
+  const timeout = AbortSignal.timeout(15_000)
+  const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout
+  return fetch(input, { ...init, signal })
 }
 
 function makeClient(url: string, key: string): SupabaseClient {
@@ -130,6 +179,204 @@ function stable(value: unknown): string {
   return JSON.stringify(value)
 }
 
+function sha256(value: unknown): string {
+  return createHash('sha256').update(typeof value === 'string' ? value : stable(value)).digest('hex')
+}
+
+function numericTotal(value: unknown): number {
+  if (typeof value === 'number') return value
+  if (Array.isArray(value)) return value.reduce<number>((sum, item) => sum + numericTotal(item), 0)
+  if (value && typeof value === 'object') return Object.values(value as Row).reduce<number>((sum, item) => sum + numericTotal(item), 0)
+  return 0
+}
+
+function isFalseValue(value: unknown): boolean {
+  return value === false || value === 'false' || value === 0 || value === '0'
+}
+
+function timestampMs(value: unknown): number | null {
+  if (typeof value !== 'string') return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function exactColumns(row: Row, columns: string[]): Row {
+  return Object.fromEntries(columns.map(column => [column, row[column] ?? null]))
+}
+
+interface SafetyGate {
+  passed: boolean
+  required: unknown
+  observed: unknown
+}
+
+function assertAll(checks: Record<string, SafetyGate>): void {
+  const failures = Object.entries(checks).filter(([, check]) => !check.passed)
+  if (!failures.length) return
+  const diagnostics = failures.map(([name, check]) => `${name}:\n  required: ${stable(check.required)}\n  observed: ${stable(check.observed)}`)
+  throw new Error(`PLAN_SAFETY_GATE_FAILED:\n${diagnostics.join('\n')}`)
+}
+
+function withoutPlanHash(plan: Row): Row {
+  const { plan_sha256: _ignored, ...unsigned } = plan
+  return unsigned
+}
+
+async function withReadOnlyCatalogTransaction<T>(v2DbUrl: string, inspect: (client: pg.Client) => Promise<T>): Promise<T> {
+  if (refFromDbUrl(v2DbUrl) !== V2_REF) throw new Error('V2 database URL identity is not the expected project')
+  const client = new pg.Client({ connectionString: v2DbUrl })
+  await client.connect()
+  try {
+    await client.query('BEGIN TRANSACTION READ ONLY')
+    try {
+      const mode = await client.query("SELECT current_setting('transaction_read_only') AS transaction_read_only")
+      if (mode.rows[0]?.transaction_read_only !== 'on') throw new Error('Catalog transaction is not explicitly read-only')
+      const result = await inspect(client)
+      await client.query('ROLLBACK')
+      return result
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined)
+      throw error
+    }
+  } finally {
+    await client.end()
+  }
+}
+
+async function v2CatalogSafety(v2DbUrl: string): Promise<{ transaction_read_only: string; database_name: string; owner_create: boolean }> {
+  return withReadOnlyCatalogTransaction(v2DbUrl, async client => {
+    const result = await client.query("SELECT current_setting('transaction_read_only') AS transaction_read_only, current_database() AS database_name, has_schema_privilege('reachagent_function_owner','public','CREATE') AS owner_create")
+    return result.rows[0] as { transaction_read_only: string; database_name: string; owner_create: boolean }
+  })
+}
+
+function readVerifiedPlan(path: string, expectedSha256: string): Row {
+  const plan = JSON.parse(readFileSync(path, 'utf8')) as Row
+  const recorded = String(plan.plan_sha256 ?? '')
+  const calculated = sha256(withoutPlanHash(plan))
+  if (!/^[a-f0-9]{64}$/.test(recorded) || recorded !== calculated) throw new Error('Plan artifact SHA-256 verification failed')
+  if (recorded !== expectedSha256) throw new Error('--confirm-plan-sha256 does not match the verified artifact')
+  if (plan.schema_version !== PLAN_SCHEMA_VERSION || plan.kind !== 'FINAL_V1_V2_INSERT_ONLY_PLAN') throw new Error('Unsupported plan artifact')
+  if (plan.source_project_ref !== V1_REF || plan.target_project_ref !== V2_REF || plan.seed_workspace_id !== WORKSPACE_ID) throw new Error('Plan identity does not match the pinned projects/workspace')
+  const snapshot = plan.snapshot as Row
+  if (String(plan.snapshot_sha256 ?? '') !== sha256(snapshot)) throw new Error('Plan snapshot SHA-256 verification failed')
+  return plan
+}
+
+async function insertRows(client: pg.Client, table: 'inbound_receipts' | 'activity_log', columns: string[], rows: Row[]): Promise<void> {
+  if (!rows.length) return
+  if (![table, ...columns].every(name => /^[a-z_]+$/.test(name))) throw new Error('Unsafe SQL identifier')
+  const values: unknown[] = []
+  const tuples = rows.map((row, rowIndex) => {
+    const parameters = columns.map((column, columnIndex) => {
+      values.push(row[column] ?? null)
+      return `$${rowIndex * columns.length + columnIndex + 1}`
+    })
+    return `(${parameters.join(',')})`
+  })
+  await client.query(`INSERT INTO public.${table} (${columns.join(',')}) VALUES ${tuples.join(',')}`, values)
+}
+
+async function executeApprovedPlan(plan: Row, source: Map<string, Row[]>, v2DbUrl: string): Promise<void> {
+  if (refFromDbUrl(v2DbUrl) !== V2_REF) throw new Error('V2 database URL identity is not the expected project')
+  const snapshot = plan.snapshot as Row
+  const allowlist = snapshot.executable_allowlist as Row
+  const inboundEntries = allowlist.inbound_receipts as Row[]
+  const activityEntries = allowlist.activity_log as Row[]
+  const approvedCounts = snapshot.approved_executable_counts as Row
+  if ((allowlist.all_other_tables as unknown[]).length !== 0) throw new Error('Plan contains a forbidden executable table')
+  if (inboundEntries.length !== Number(approvedCounts.inbound_receipts) || activityEntries.length !== Number(approvedCounts.activity_log)) throw new Error('Plan executable counts do not match the approved artifact')
+  if (new Set(inboundEntries.map(entry => String(entry.id))).size !== inboundEntries.length || new Set(activityEntries.map(entry => String(entry.id))).size !== activityEntries.length) throw new Error('Plan contains duplicate executable IDs')
+  const inboundSpec = specs.find(spec => spec.name === 'inbound_receipts')!
+  const activitySpec = specs.find(spec => spec.name === 'activity_log')!
+  const sourceInboundById = new Map((source.get('inbound_receipts') ?? []).map(row => [String(row.id), row]))
+  const sourceActivityById = new Map((source.get('activity_log') ?? []).map(row => [String(row.id), row]))
+  const materialize = (entries: Row[], byId: Map<string, Row>, spec: TableSpec): Row[] => entries.map(entry => {
+    const row = byId.get(String(entry.id))
+    if (!row) throw new Error(`${spec.name} source row ${String(entry.id)} is missing`)
+    const sourceRow = exactColumns(row, spec.columns)
+    const targetRow = { ...sourceRow, workspace_id: WORKSPACE_ID }
+    if (entry.canonical_source_sha256 !== sha256(sourceRow) || entry.canonical_target_sha256 !== sha256(targetRow)) throw new Error(`${spec.name} source row ${String(entry.id)} changed after plan generation`)
+    return targetRow
+  })
+  const inboundRows = materialize(inboundEntries, sourceInboundById, inboundSpec)
+  const activityRows = materialize(activityEntries, sourceActivityById, activitySpec)
+  if (inboundRows.some(row => !TERMINAL_INBOUND_STATUSES.has(String(row.status)))) throw new Error('Plan contains a nonterminal inbound receipt')
+
+  const targetPreCounts = snapshot.target_pre_counts as Row
+  const client = new pg.Client({ connectionString: v2DbUrl })
+  await client.connect()
+  try {
+    await client.query('BEGIN')
+    try {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [ADVISORY_LOCK_NAME])
+      const safety = await client.query("SELECT current_database() AS database_name, has_schema_privilege('reachagent_function_owner','public','CREATE') AS owner_create, (SELECT value FROM public.settings WHERE key='system_active') AS system_active")
+      if (safety.rows[0]?.owner_create !== false || !isFalseValue(safety.rows[0]?.system_active)) throw new Error('V2 execution safety gates are not false')
+
+      const preInbound = await client.query('SELECT count(*)::int AS count FROM public.inbound_receipts WHERE workspace_id=$1', [WORKSPACE_ID])
+      const preActivity = await client.query('SELECT count(*)::int AS count FROM public.activity_log WHERE workspace_id=$1', [WORKSPACE_ID])
+      if (preInbound.rows[0].count !== Number(targetPreCounts.inbound_receipts) || preActivity.rows[0].count !== Number(targetPreCounts.activity_log)) throw new Error('V2 target pre-counts changed after plan generation')
+
+      const inboundIds = inboundRows.map(row => row.id)
+      const receiptKeys = inboundRows.map(row => row.receipt_key)
+      const inboundConflicts = await client.query('SELECT id FROM public.inbound_receipts WHERE id=ANY($1::uuid[]) OR (workspace_id=$2 AND receipt_key=ANY($3::text[])) FOR UPDATE', [inboundIds, WORKSPACE_ID, receiptKeys])
+      if (inboundConflicts.rowCount !== 0) throw new Error('V2 inbound receipt ID/natural-key conflict detected')
+      const activityIds = activityRows.map(row => row.id)
+      const activityIdConflicts = await client.query('SELECT id FROM public.activity_log WHERE id=ANY($1::uuid[]) FOR UPDATE', [activityIds])
+      if (activityIdConflicts.rowCount !== 0) throw new Error('V2 activity ID conflict detected')
+      for (const row of activityRows) {
+        const receiptId = row.metadata && typeof row.metadata === 'object' ? (row.metadata as Row).inbound_receipt_id : null
+        if (receiptId == null) continue
+        const conflict = await client.query("SELECT id FROM public.activity_log WHERE workspace_id=$1 AND event_type=$2 AND metadata->>'inbound_receipt_id'=$3 FOR UPDATE", [WORKSPACE_ID, row.event_type, String(receiptId)])
+        if (conflict.rowCount !== 0) throw new Error('V2 activity natural-key conflict detected')
+      }
+
+      await insertRows(client, 'inbound_receipts', [...inboundSpec.columns, 'workspace_id'], inboundRows)
+      await insertRows(client, 'activity_log', [...activitySpec.columns, 'workspace_id'], activityRows)
+
+      const postInbound = await client.query('SELECT count(*)::int AS total, count(*) FILTER (WHERE id=ANY($2::uuid[]))::int AS planned FROM public.inbound_receipts WHERE workspace_id=$1', [WORKSPACE_ID, inboundIds])
+      const postActivity = await client.query('SELECT count(*)::int AS total, count(*) FILTER (WHERE id=ANY($2::uuid[]))::int AS planned FROM public.activity_log WHERE workspace_id=$1', [WORKSPACE_ID, activityIds])
+      if (postInbound.rows[0].total !== Number(targetPreCounts.inbound_receipts) + inboundRows.length || postInbound.rows[0].planned !== inboundRows.length) throw new Error('Inbound receipt postcondition failed')
+      if (postActivity.rows[0].total !== Number(targetPreCounts.activity_log) + activityRows.length || postActivity.rows[0].planned !== activityRows.length) throw new Error('Activity postcondition failed')
+      if (inboundIds.length) {
+        const inserted = await client.query(`SELECT to_jsonb(x) AS row FROM (SELECT ${inboundSpec.columns.join(',')},workspace_id FROM public.inbound_receipts WHERE workspace_id=$1 AND id=ANY($2::uuid[])) x`, [WORKSPACE_ID, inboundIds])
+        const hashes = new Map(inserted.rows.map(item => [String((item.row as Row).id), sha256(item.row)]))
+        for (const entry of inboundEntries) if (hashes.get(String(entry.id)) !== entry.canonical_target_sha256) throw new Error(`Inbound receipt ${String(entry.id)} canonical postcondition failed`)
+      }
+      if (activityIds.length) {
+        const inserted = await client.query(`SELECT to_jsonb(x) AS row FROM (SELECT ${activitySpec.columns.join(',')},workspace_id FROM public.activity_log WHERE workspace_id=$1 AND id=ANY($2::uuid[])) x`, [WORKSPACE_ID, activityIds])
+        const hashes = new Map(inserted.rows.map(item => [String((item.row as Row).id), sha256(item.row)]))
+        for (const entry of activityEntries) if (hashes.get(String(entry.id)) !== entry.canonical_target_sha256) throw new Error(`Activity ${String(entry.id)} canonical postcondition failed`)
+      }
+      const wrongWorkspace = await client.query('SELECT (SELECT count(*) FROM public.inbound_receipts WHERE id=ANY($1::uuid[]) AND workspace_id IS DISTINCT FROM $3) + (SELECT count(*) FROM public.activity_log WHERE id=ANY($2::uuid[]) AND workspace_id IS DISTINCT FROM $3) AS count', [inboundIds, activityIds, WORKSPACE_ID])
+      if (Number(wrongWorkspace.rows[0].count) !== 0) throw new Error('Planned row workspace postcondition failed')
+      const duplicateInbound = await client.query('SELECT count(*)::int AS count FROM (SELECT receipt_key FROM public.inbound_receipts WHERE workspace_id=$1 GROUP BY receipt_key HAVING count(*)>1) d', [WORKSPACE_ID])
+      const duplicateActivity = await client.query("SELECT count(*)::int AS count FROM (SELECT event_type,metadata->>'inbound_receipt_id' FROM public.activity_log WHERE workspace_id=$1 AND metadata->>'inbound_receipt_id' IS NOT NULL GROUP BY event_type,metadata->>'inbound_receipt_id' HAVING count(*)>1) d", [WORKSPACE_ID])
+      if (duplicateInbound.rows[0].count !== 0 || duplicateActivity.rows[0].count !== 0) throw new Error('Natural-key uniqueness postcondition failed')
+      const missingReceipt = await client.query("SELECT count(*)::int AS count FROM public.activity_log a WHERE a.workspace_id=$1 AND a.id=ANY($2::uuid[]) AND a.metadata->>'inbound_receipt_id' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.inbound_receipts r WHERE r.workspace_id=$1 AND r.id::text=a.metadata->>'inbound_receipt_id')", [WORKSPACE_ID, activityIds])
+      if (missingReceipt.rows[0].count !== 0) throw new Error('Activity receipt FK-like postcondition failed')
+      const emailDuplicates = await client.query("SELECT (SELECT count(*) FROM (SELECT resend_id FROM public.emails WHERE workspace_id=$1 AND resend_id IS NOT NULL GROUP BY resend_id HAVING count(*)>1) a) + (SELECT count(*) FROM (SELECT lead_id,type FROM public.emails WHERE workspace_id=$1 AND status IN ('pending_send','sending','sent','delivery_uncertain','email_sync_failed') GROUP BY lead_id,type HAVING count(*)>1) b) AS count", [WORKSPACE_ID])
+      if (Number(emailDuplicates.rows[0].count) !== 0) throw new Error('Email uniqueness postcondition failed')
+      for (const spec of [...specs, ...excludedSpecs]) {
+        const scope = await client.query(`SELECT count(*)::int AS count FROM public.${spec.name} WHERE workspace_id IS NULL OR workspace_id<>$1`, [WORKSPACE_ID])
+        if (scope.rows[0].count !== 0) throw new Error(`${spec.name} workspace scope postcondition failed`)
+        for (const fk of spec.foreignKeys ?? []) {
+          const orphan = await client.query(`SELECT count(*)::int AS count FROM public.${spec.name} c WHERE c.workspace_id=$1 AND c.${fk.column} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.${fk.parent} p WHERE p.workspace_id=$1 AND p.id=c.${fk.column})`, [WORKSPACE_ID])
+          if (orphan.rows[0].count !== 0) throw new Error(`${spec.name}.${fk.column} FK postcondition failed`)
+        }
+      }
+      const finalGate = await client.query("SELECT value FROM public.settings WHERE key='system_active'")
+      if (!isFalseValue(finalGate.rows[0]?.value)) throw new Error('V2 system_active changed before commit')
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    }
+  } finally {
+    await client.end()
+  }
+}
+
 function semantic(row: Row, columns: string[]): string {
   return stable(Object.fromEntries(columns.map(column => [column, row[column] ?? null])))
 }
@@ -144,11 +391,12 @@ function changedFields(a: Row, b: Row, columns: string[]): string[] {
   return columns.filter(column => stable(a[column] ?? null) !== stable(b[column] ?? null))
 }
 
-async function readAll(client: SupabaseClient, table: string, columns: string, workspaceScoped: boolean): Promise<Row[]> {
+async function readAll(client: SupabaseClient, table: string, columns: string, workspaceScoped: boolean, orderColumn?: string): Promise<Row[]> {
   const rows: Row[] = []
   for (let from = 0;; from += PAGE) {
     let query = client.from(table).select(columns).range(from, from + PAGE - 1)
     if (workspaceScoped) query = query.eq('workspace_id', WORKSPACE_ID)
+    if (orderColumn) query = query.order(orderColumn, { ascending: true })
     const { data, error } = await query
     if (error) throw new Error(`SELECT ${table}: ${error.message}`)
     rows.push(...((data ?? []) as unknown as Row[]))
@@ -194,24 +442,37 @@ function duplicateKeys(rows: Row[], fn: (row: Row) => string | null): { keys: nu
   return { keys: duplicates.length, rows: duplicates.reduce((sum, count) => sum + count, 0) }
 }
 
-function dedupeEmails(rows: Row[]): { effective: Row[]; skipped: Row[] } {
+function dedupeEmails(rows: Row[]): { effective: Row[]; skipped: Row[]; ambiguities: Row[] } {
   const eligible = new Set(['pending_send','sent','email_sync_failed']) // exact rehearsal rule
   const groups = new Map<string, Row[]>()
-  for (const row of rows) {
+  const ambiguities: Row[] = []
+  const ordered = [...rows].sort((a, b) => String(a.id).localeCompare(String(b.id)))
+  const idCounts = new Map<string, number>()
+  for (const row of ordered) {
+    const id = String(row.id ?? '')
+    idCounts.set(id, (idCounts.get(id) ?? 0) + 1)
     if (!eligible.has(String(row.status))) continue
+    if (!row.id || !row.lead_id || !row.type) ambiguities.push({ reason: 'missing_dedup_key_component', id: row.id ?? null, lead_id: row.lead_id ?? null, type: row.type ?? null })
     const key = `${row.lead_id}|${row.type}`
     groups.set(key, [...(groups.get(key) ?? []), row])
   }
+  for (const [id, count] of idCounts) if (!id || count > 1) ambiguities.push({ reason: 'duplicate_or_missing_email_id', id: id || null, count })
   const skip = new Set<string>()
-  for (const group of groups.values()) {
+  for (const [key, group] of groups) {
     if (group.length < 2) continue
-    const keep = group.find(row => row.status === 'sent') ?? group[0]
+    const sent = group.filter(row => row.status === 'sent')
+    if (sent.length > 1) ambiguities.push({ reason: 'multiple_sent_rows_in_dedup_group', natural_key: key, ids: sent.map(row => row.id) })
+    const keep = sent[0] ?? group[0]
     for (const row of group) if (row.id !== keep.id) skip.add(String(row.id))
   }
-  return { effective: rows.filter(row => !skip.has(String(row.id))), skipped: rows.filter(row => skip.has(String(row.id))) }
+  return { effective: ordered.filter(row => !skip.has(String(row.id))), skipped: ordered.filter(row => skip.has(String(row.id))), ambiguities }
 }
 
 async function main(): Promise<void> {
+  const command = cli()
+  const approvedInputPlan = command.mode === 'execute-plan'
+    ? readVerifiedPlan(command.path, command.confirmSha256!)
+    : null
   const v1env = parseEnv(resolve(ROOT, '.env.local'))
   const v2env = parseEnv(resolve(ROOT, '.env.v2.local'))
   const v1Url = v1env.NEXT_PUBLIC_SUPABASE_URL || v1env.SUPABASE_URL || ''
@@ -225,10 +486,8 @@ async function main(): Promise<void> {
   const v1 = makeClient(v1Url, v1Key)
   const v2 = makeClient(v2Url, v2Key)
   if (process.argv.includes('--catalog')) {
-    const client = new pg.Client({ connectionString: v2env.V2_SUPABASE_DB_URL, options: '-c default_transaction_read_only=on' })
-    await client.connect()
-    try {
-      const readOnly = await client.query("SELECT current_setting('default_transaction_read_only') AS default_read_only, current_database() AS database_name, has_schema_privilege('reachagent_function_owner','public','CREATE') AS owner_create")
+    const result = await withReadOnlyCatalogTransaction(v2env.V2_SUPABASE_DB_URL ?? '', async client => {
+      const readOnly = await client.query("SELECT current_setting('transaction_read_only') AS transaction_read_only, current_database() AS database_name, has_schema_privilege('reachagent_function_owner','public','CREATE') AS owner_create")
       const catalog = await client.query(`
         SELECT c.relname AS table_name,
                ARRAY(SELECT a.attname FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum) AS columns,
@@ -238,20 +497,19 @@ async function main(): Promise<void> {
           JOIN pg_namespace n ON n.oid = c.relnamespace
          WHERE n.nspname = 'public' AND c.relname = ANY($1::text[])
          ORDER BY c.relname`, [[...specs, ...excludedSpecs].map(spec => spec.name)])
-      console.log(JSON.stringify({ mode: 'SELECT_ONLY_CATALOG', identity: V2_REF, session: readOnly.rows[0], tables: catalog.rows }, null, 2))
-    } finally {
-      await client.end()
-    }
+      return { mode: 'SELECT_ONLY_CATALOG', identity: V2_REF, session: readOnly.rows[0], tables: catalog.rows }
+    })
+    console.log(JSON.stringify(result, null, 2))
     return
   }
   if (process.argv.includes('--focus')) {
     const [v1Settings, v2Settings, v1Activity, v2Activity, v1Inbound, v2Inbound] = await Promise.all([
-      readAll(v1, 'settings', 'key,value,updated_at', false),
-      readAll(v2, 'settings', 'key,value,updated_at', false),
-      readAll(v1, 'activity_log', 'id,created_at', false),
-      readAll(v2, 'activity_log', 'id,created_at', true),
-      readAll(v1, 'inbound_receipts', 'id,updated_at', false),
-      readAll(v2, 'inbound_receipts', 'id,updated_at', true),
+      readAll(v1, 'settings', 'key,value,updated_at', false, 'key'),
+      readAll(v2, 'settings', 'key,value,updated_at', false, 'key'),
+      readAll(v1, 'activity_log', 'id,created_at', false, 'id'),
+      readAll(v2, 'activity_log', 'id,created_at', true, 'id'),
+      readAll(v1, 'inbound_receipts', 'id,updated_at', false, 'id'),
+      readAll(v2, 'inbound_receipts', 'id,updated_at', true, 'id'),
     ])
     const gate = (rows: Row[]) => rows.find(row => row.key === 'system_active') ?? null
     console.log(JSON.stringify({ mode: 'SELECT_ONLY_FOCUS', identity: { v1: V1_REF, v2: V2_REF }, system_active: { v1: gate(v1Settings), v2: gate(v2Settings) }, settings_updated_at: { v1: extrema(v1Settings, 'updated_at'), v2: extrema(v2Settings, 'updated_at') }, activity: { v1_count: v1Activity.length, v1_max: extrema(v1Activity, 'created_at').max, v2_count: v2Activity.length, v2_max: extrema(v2Activity, 'created_at').max }, inbound_receipts: { v1_count: v1Inbound.length, v1_max_updated_at: extrema(v1Inbound, 'updated_at').max, v2_count: v2Inbound.length, v2_max_updated_at: extrema(v2Inbound, 'updated_at').max } }, null, 2))
@@ -260,9 +518,11 @@ async function main(): Promise<void> {
   const source = new Map<string, Row[]>()
   const target = new Map<string, Row[]>()
   for (const spec of [...specs, ...excludedSpecs]) {
-    source.set(spec.name, await readAll(v1, spec.name, spec.columns.join(','), false))
-    target.set(spec.name, await readAll(v2, spec.name, `${spec.columns.join(',')},workspace_id`, true))
+    const orderColumn = spec.name === 'recipient_outreach_ownership' ? 'normalized_email' : spec.name === 'exhausted_queries' ? 'query' : 'id'
+    source.set(spec.name, await readAll(v1, spec.name, spec.columns.join(','), false, orderColumn))
+    target.set(spec.name, await readAll(v2, spec.name, `${spec.columns.join(',')},workspace_id`, true, orderColumn))
   }
+  const v2WorkspaceIds = new Set((await readAll(v2, 'workspaces', 'id', false, 'id')).map(row => String(row.id)))
 
   const output: Row = {
     generated_at: new Date().toISOString(),
@@ -361,8 +621,8 @@ async function main(): Promise<void> {
     ;(output.excluded as Record<string, Row>)[spec.name] = { disposition: spec.disposition, reason: spec.name === 'lead_data_quality_flags' ? 'derived deterministically from leads; original migration explicitly excluded it' : 'runtime/generated/historical state not included by original migration', v1_count: v1rows.length, v2_seed_count: v2rows.length, classifications: { ...emptyClasses(), DO_NOT_MIGRATE: v1rows.length }, timestamps: Object.fromEntries((spec.timestamps ?? []).map(column => [column, { v1: extrema(v1rows, column), v2: extrema(v2rows, column) }])) }
   }
 
-  const v1Settings = await readAll(v1, 'settings', 'id,key,value,description,updated_at', false)
-  const v2Settings = await readAll(v2, 'settings', 'id,key,value,description,updated_at', false)
+  const v1Settings = await readAll(v1, 'settings', 'id,key,value,description,updated_at', false, 'key')
+  const v2Settings = await readAll(v2, 'settings', 'id,key,value,description,updated_at', false, 'key')
   const v1Allowed = v1Settings.filter(row => settingsAllowlist.has(String(row.key)))
   const v2ByKey = new Map(v2Settings.map(row => [String(row.key), row]))
   const settingClasses = emptyClasses()
@@ -442,7 +702,371 @@ async function main(): Promise<void> {
   }
   output.critical_details = { lead_value_mismatches: mismatchedLeads, ownership_conflicts: ownershipConflicts, source_only_activity: newActivity }
 
-  console.log(JSON.stringify(output, null, 2))
+  const catalogSafety = await v2CatalogSafety(v2env.V2_SUPABASE_DB_URL ?? '')
+  const inboundSpec = specs.find(spec => spec.name === 'inbound_receipts')!
+  const activitySpec = specs.find(spec => spec.name === 'activity_log')!
+  const emailSpec = specs.find(spec => spec.name === 'emails')!
+  const leadSpec = specs.find(spec => spec.name === 'leads')!
+  const ownershipSpec = specs.find(spec => spec.name === 'recipient_outreach_ownership')!
+  const v1Inbound = source.get('inbound_receipts') ?? []
+  const v2Inbound = target.get('inbound_receipts') ?? []
+  const v1Activity = source.get('activity_log') ?? []
+  const v2Activity = target.get('activity_log') ?? []
+  const v2InboundIds = new Set(v2Inbound.map(row => String(row.id)))
+  const v2InboundKeys = new Set(v2Inbound.map(row => String(row.receipt_key)))
+  const v2ActivityIds = new Set(v2Activity.map(row => String(row.id)))
+  const v2InboundById = new Map(v2Inbound.map(row => [String(row.id), row]))
+  const v2ActivityById = new Map(v2Activity.map(row => [String(row.id), row]))
+  const v1InboundIdCounts = new Map<string, number>()
+  const v1ActivityIdCounts = new Map<string, number>()
+  const activityNaturalKey = (row: Row): string | null => activitySpec.naturalKeys?.[0](row) ?? null
+  const v2ActivityNaturalKeys = new Set(v2Activity.map(activityNaturalKey).filter((value): value is string => value !== null))
+  const inboundKeyCounts = new Map<string, number>()
+  const activityNaturalCounts = new Map<string, number>()
+  for (const row of v1Inbound) {
+    const id = String(row.id ?? '')
+    const key = String(row.receipt_key ?? '')
+    v1InboundIdCounts.set(id, (v1InboundIdCounts.get(id) ?? 0) + 1)
+    inboundKeyCounts.set(key, (inboundKeyCounts.get(key) ?? 0) + 1)
+  }
+  for (const row of v1Activity) {
+    const id = String(row.id ?? '')
+    v1ActivityIdCounts.set(id, (v1ActivityIdCounts.get(id) ?? 0) + 1)
+    const key = activityNaturalKey(row)
+    if (key !== null) activityNaturalCounts.set(key, (activityNaturalCounts.get(key) ?? 0) + 1)
+  }
+  const sourceOnlyInbound = v1Inbound.filter(row => !v2InboundIds.has(String(row.id)))
+  const inboundAssessment = sourceOnlyInbound.map(row => {
+    const id = String(row.id ?? '')
+    const key = String(row.receipt_key ?? '')
+    const reasons: string[] = []
+    if (!id || !key) reasons.push('SOURCE_ROW_CANNOT_BE_MAPPED')
+    if ((v1InboundIdCounts.get(id) ?? 0) !== 1) reasons.push('DUPLICATE_SOURCE_ID')
+    if ((inboundKeyCounts.get(key) ?? 0) !== 1) reasons.push('DUPLICATE_SOURCE_RECEIPT_KEY')
+    if (v2InboundKeys.has(key)) reasons.push('CONFLICTING_TARGET_RECEIPT_KEY')
+    if (!TERMINAL_INBOUND_STATUSES.has(String(row.status))) reasons.push('NONTERMINAL_STATUS')
+    return { row, id, receipt_key: key, status: row.status, reasons }
+  })
+  const rejectedInbound = inboundAssessment.filter(item => item.reasons.length).map(({ row: _row, ...item }) => item)
+  const safeInbound = inboundAssessment.filter(item => !item.reasons.length).map(item => item.row).sort((a, b) => String(a.id).localeCompare(String(b.id)))
+  const inboundTargetIdConflicts = v1Inbound.flatMap(row => {
+    const other = v2InboundById.get(String(row.id))
+    return other && semantic(row, inboundSpec.columns) !== semantic(other, inboundSpec.columns)
+      ? [{ id: row.id, changed_fields: changedFields(row, other, inboundSpec.columns) }]
+      : []
+  })
+  const sourceOnlyActivity = v1Activity.filter(row => !v2ActivityIds.has(String(row.id)))
+  const targetLeadIds = new Set((target.get('leads') ?? []).map(row => String(row.id)))
+  const availableReceiptIds = new Set([...v2InboundIds, ...safeInbound.map(row => String(row.id))])
+  const activityAssessment = sourceOnlyActivity.map(row => {
+    const id = String(row.id ?? '')
+    const key = activityNaturalKey(row)
+    const receiptId = row.metadata && typeof row.metadata === 'object' ? (row.metadata as Row).inbound_receipt_id : null
+    const hard_reasons: string[] = []
+    const manual_review_reasons: string[] = []
+    if (!id || !row.event_type) hard_reasons.push('SOURCE_ROW_CANNOT_BE_MAPPED')
+    if ((v1ActivityIdCounts.get(id) ?? 0) !== 1) hard_reasons.push('DUPLICATE_SOURCE_ID')
+    if (key !== null && (activityNaturalCounts.get(key) ?? 0) !== 1) hard_reasons.push('DUPLICATE_SOURCE_NATURAL_KEY')
+    if (key !== null && v2ActivityNaturalKeys.has(key)) hard_reasons.push('CONFLICTING_TARGET_NATURAL_KEY')
+    if (row.lead_id != null && !targetLeadIds.has(String(row.lead_id))) hard_reasons.push('MISSING_TARGET_LEAD_PARENT')
+    if (receiptId != null && !availableReceiptIds.has(String(receiptId))) hard_reasons.push('MISSING_RECEIPT_PARENT')
+    const eventType = String(row.event_type ?? '').toLowerCase()
+    if (/(^|_)(test|canary|runtime)(_|$)/.test(eventType)) manual_review_reasons.push('RUNTIME_OR_TEST_ACTIVITY')
+    const createdAtMs = timestampMs(row.created_at)
+    if (receiptId == null && (createdAtMs === null || createdAtMs > Date.parse(PHASE1_BASELINE.activity_max_created_at))) manual_review_reasons.push('NEW_OR_UNDATED_UNRELATED_ACTIVITY_AFTER_PHASE1')
+    return { row, id, natural_key: key, receipt_id: receiptId, hard_reasons, manual_review_reasons }
+  })
+  const rejectedActivity = activityAssessment.filter(item => item.hard_reasons.length).map(({ row: _row, ...item }) => item)
+  const manualReviewActivity = activityAssessment.filter(item => !item.hard_reasons.length && item.manual_review_reasons.length).map(({ row: _row, ...item }) => item)
+  const safeActivity = activityAssessment.filter(item => !item.hard_reasons.length && !item.manual_review_reasons.length).map(item => item.row).sort((a, b) => String(a.id).localeCompare(String(b.id)))
+  const activityTargetIdConflicts = v1Activity.flatMap(row => {
+    const other = v2ActivityById.get(String(row.id))
+    return other && semantic(row, activitySpec.columns) !== semantic(other, activitySpec.columns)
+      ? [{ id: row.id, changed_fields: changedFields(row, other, activitySpec.columns) }]
+      : []
+  })
+
+  const insertEntry = (row: Row, spec: TableSpec, naturalKeys: Row[]): Row => {
+    const sourceRow = exactColumns(row, spec.columns)
+    const targetRow = { ...sourceRow, workspace_id: WORKSPACE_ID }
+    return {
+      id: row.id,
+      natural_keys: naturalKeys,
+      canonical_source_sha256: sha256(sourceRow),
+      canonical_target_sha256: sha256(targetRow),
+    }
+  }
+  const inboundEntries = safeInbound.map(row => insertEntry(row, inboundSpec, [{ name: 'receipt_key', value: row.receipt_key }]))
+  const activityEntries = safeActivity.map(row => {
+    const key = activityNaturalKey(row)
+    return insertEntry(row, activitySpec, key === null ? [] : [{ name: 'event_type+inbound_receipt_id', value: key }])
+  })
+  const skippedEmailEntries = emailDedupe.skipped
+    .map(row => ({ id: row.id, canonical_source_sha256: sha256(exactColumns(row, emailSpec.columns)) }))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+  const leadExclusions = mismatchedLeads.map(item => {
+    const id = String(item.id)
+    return {
+      id,
+      disposition: 'DEFER_MANUAL_REVIEW',
+      canonical_v1_sha256: sha256(exactColumns(v1Leads.get(id)!, leadSpec.columns)),
+      canonical_v2_sha256: sha256(exactColumns(v2Leads.get(id)!, leadSpec.columns)),
+      changed_fields: item.changed_fields,
+    }
+  }).sort((a, b) => a.id.localeCompare(b.id))
+  const ownershipExclusions = [...v1Ownership].flatMap(([key, v1row]) => {
+    const v2row = v2Ownership.get(key)
+    if (!v2row || semantic(v1row, ownershipSpec.columns) === semantic(v2row, ownershipSpec.columns)) return []
+    return [{
+      normalized_email_sha256: sha256(key),
+      disposition: 'DEFER_CONFLICT',
+      canonical_v1_sha256: sha256(exactColumns(v1row, ownershipSpec.columns)),
+      canonical_v2_sha256: sha256(exactColumns(v2row, ownershipSpec.columns)),
+      v1_owner_lead_id: v1row.owner_lead_id,
+      v2_owner_lead_id: v2row.owner_lead_id,
+    }]
+  }).sort((a, b) => a.normalized_email_sha256.localeCompare(b.normalized_email_sha256))
+
+  const effectiveV1Emails = emailDedupe.effective
+  const effectiveV1EmailById = new Map(effectiveV1Emails.map(row => [String(row.id), row]))
+  const v2EmailById = new Map((target.get('emails') ?? []).map(row => [String(row.id), row]))
+  const sourceOnlyEmails = effectiveV1Emails.filter(row => !v2EmailById.has(String(row.id)))
+  const targetOnlyEmails = [...v2EmailById].filter(([id]) => !effectiveV1EmailById.has(id)).map(([, row]) => row)
+  const mismatchedEmails = effectiveV1Emails.flatMap(row => {
+    const other = v2EmailById.get(String(row.id))
+    if (!other || semantic(row, emailSpec.columns) === semantic(other, emailSpec.columns)) return []
+    return [{ id: row.id, changed_fields: changedFields(row, other, emailSpec.columns), canonical_v1_sha256: sha256(exactColumns(row, emailSpec.columns)), canonical_v2_sha256: sha256(exactColumns(other, emailSpec.columns)) }]
+  })
+  const matchingEmailCount = effectiveV1Emails.length - sourceOnlyEmails.length - mismatchedEmails.length
+  const phase1EmailMaxMs = Date.parse(PHASE1_BASELINE.email_max_created_at)
+  const phase1ReconstructedSkippedIds = emailDedupe.skipped.filter(row => {
+    const value = timestampMs(row.created_at)
+    return value !== null && value <= phase1EmailMaxMs
+  }).map(row => String(row.id)).sort()
+  const addedSkippedIds = emailDedupe.skipped.filter(row => {
+    const value = timestampMs(row.created_at)
+    return value !== null && value > phase1EmailMaxMs
+  }).map(row => String(row.id)).sort()
+  const unclassifiedSkippedIds = emailDedupe.skipped.filter(row => timestampMs(row.created_at) === null).map(row => String(row.id)).sort()
+  const removedSkippedCount = Math.max(0, PHASE1_BASELINE.skipped_email_drafts - phase1ReconstructedSkippedIds.length)
+  const dedupComparison = {
+    previous: PHASE1_BASELINE.skipped_email_drafts,
+    current: skippedEmailEntries.length,
+    drift: skippedEmailEntries.length - PHASE1_BASELINE.skipped_email_drafts,
+    comparison_basis: 'Phase 1 report count plus its documented maximum email created_at; Phase 1 did not persist the 267 IDs',
+    added_skipped_ids: addedSkippedIds,
+    unclassified_skipped_ids: unclassifiedSkippedIds,
+    removed_skipped_ids: [] as string[],
+    removed_skipped_ids_unavailable_count: removedSkippedCount,
+    current_ids: skippedEmailEntries.map(entry => entry.id),
+    current_set_sha256: sha256(skippedEmailEntries),
+    algorithm_ambiguities: emailDedupe.ambiguities,
+  }
+  const previousLeadIdSet = new Set(PHASE1_DEFERRED_LEAD_IDS)
+  const currentLeadIdSet = new Set(leadExclusions.map(item => item.id))
+  const leadConflictDrift = {
+    previous: PHASE1_DEFERRED_LEAD_IDS,
+    still_existing: PHASE1_DEFERRED_LEAD_IDS.filter(id => currentLeadIdSet.has(id)),
+    resolved: PHASE1_DEFERRED_LEAD_IDS.filter(id => !currentLeadIdSet.has(id)),
+    new: leadExclusions.filter(item => !previousLeadIdSet.has(item.id)).map(item => item.id),
+  }
+  const stillOwnership = ownershipExclusions.filter(item => PHASE1_OWNERSHIP_TARGET_OWNER_IDS.has(String(item.v2_owner_lead_id)))
+  const stillOwnershipOwnerIds = new Set(stillOwnership.map(item => String(item.v2_owner_lead_id)))
+  const ownershipConflictDrift = {
+    previous_count: 2,
+    previous_reference: 'Phase 1 target owner IDs (recipient addresses were intentionally not persisted)',
+    still_existing: stillOwnership,
+    resolved_previous_target_owner_ids: [...PHASE1_OWNERSHIP_TARGET_OWNER_IDS].filter(id => !stillOwnershipOwnerIds.has(id)),
+    new: ownershipExclusions.filter(item => !PHASE1_OWNERSHIP_TARGET_OWNER_IDS.has(String(item.v2_owner_lead_id))),
+  }
+
+  const workspaceScope = (output.integrity as Row).workspace_scope as Record<string, Row>
+  const crossWorkspaceRows = Object.values(workspaceScope).reduce((sum, counts) => sum + Number(counts.other_workspace ?? 0) + Number(counts.null_workspace ?? 0), 0)
+  const sourceOrphans = numericTotal((output.integrity as Row).source_orphans)
+  const targetOrphans = numericTotal((output.integrity as Row).target_orphans)
+  const suppressionCounts = output.suppression as Row
+  const suppressionWeakening = [
+    'v1_lead_suppression_missing_in_v2',
+    'v1_delivery_suppression_missing_in_v2',
+    'lead_suppression_disagreements_manual_review',
+    'v1_terminal_email_suppression_missing_in_v2',
+  ].reduce((sum, key) => sum + Number(suppressionCounts[key] ?? 0), 0)
+  const naturalKeyConflicts = Object.values(tableOutput).reduce((sum, table) => sum + numericTotal(table.natural_key_conflicts), 0)
+  const v2SystemActive = v2ByKey.get('system_active')?.value
+  const invariantCounts = {
+    effective_v1_emails: emailDedupe.effective.length,
+    effective_v2_matching_emails: matchingEmailCount,
+    source_only_effective_emails: sourceOnlyEmails.length,
+    target_only_emails: targetOnlyEmails.length,
+    mismatched_effective_emails: mismatchedEmails.length,
+    current_email_dedup_ids: skippedEmailEntries.length,
+    suppression_weakening: suppressionWeakening,
+    source_fk_orphans: sourceOrphans,
+    target_fk_orphans: targetOrphans,
+    cross_or_null_workspace_rows: crossWorkspaceRows,
+    natural_key_conflicts: naturalKeyConflicts,
+    source_only_inbound_receipts: sourceOnlyInbound.length,
+    safe_terminal_inbound_receipts: safeInbound.length,
+    rejected_source_only_inbound_receipts: rejectedInbound.length,
+    inbound_target_id_conflicts: inboundTargetIdConflicts.length,
+    source_only_activity_rows: sourceOnlyActivity.length,
+    safe_activity_rows: safeActivity.length,
+    rejected_source_only_activity_rows: rejectedActivity.length,
+    manual_review_activity_rows: manualReviewActivity.length,
+    activity_target_id_conflicts: activityTargetIdConflicts.length,
+    deferred_leads: leadExclusions.length,
+    deferred_ownership_conflicts: ownershipExclusions.length,
+  }
+  const exactReconciliation = Object.fromEntries(specs.map(spec => {
+    const sourceRows = sourceEffective.get(spec.name) ?? []
+    const targetRows = target.get(spec.name) ?? []
+    const sourceById = new Map(sourceRows.map(row => [spec.key(row), row]))
+    const targetById = new Map(targetRows.map(row => [spec.key(row), row]))
+    const renderKey = (key: string) => safeKey(spec, key)
+    return [spec.name, {
+      source_only_ids: [...sourceById.keys()].filter(key => !targetById.has(key)).map(renderKey).sort(),
+      target_only_ids: [...targetById.keys()].filter(key => !sourceById.has(key)).map(renderKey).sort(),
+      value_mismatches: [...sourceById].flatMap(([key, row]) => {
+        const other = targetById.get(key)
+        return other && semantic(row, spec.columns) !== semantic(other, spec.columns)
+          ? [{ key: renderKey(key), changed_fields: changedFields(row, other, spec.columns) }]
+          : []
+      }),
+    }]
+  }))
+  const emailDelta = {
+    phase1_effective_count: PHASE1_BASELINE.effective_emails,
+    current_effective_v1_count: effectiveV1Emails.length,
+    effective_count_drift: effectiveV1Emails.length - PHASE1_BASELINE.effective_emails,
+    effective_v2_matching_count: matchingEmailCount,
+    source_only: sourceOnlyEmails.map(row => ({ id: row.id, created_at: row.created_at, status: row.status, canonical_source_sha256: sha256(exactColumns(row, emailSpec.columns)), disposition: 'NEW_DELTA_REQUIRING_REVIEW' })),
+    target_only: targetOnlyEmails.map(row => ({ id: row.id, created_at: row.created_at, status: row.status, canonical_target_sha256: sha256(exactColumns(row, emailSpec.columns)) })),
+    mismatched: mismatchedEmails,
+    fully_reconciled_for_insert_only_phase2a: sourceOnlyEmails.length === 0 && mismatchedEmails.length === 0,
+  }
+  const driftReport = {
+    emails: emailDelta,
+    email_dedup: dedupComparison,
+    inbound_receipts: { previous_safe: PHASE1_BASELINE.safe_inbound_receipts, current_safe: safeInbound.length, drift: safeInbound.length - PHASE1_BASELINE.safe_inbound_receipts, source_only: sourceOnlyInbound.length, rejected: rejectedInbound },
+    activity_log: { previous_safe: PHASE1_BASELINE.safe_activity_log, current_safe: safeActivity.length, drift: safeActivity.length - PHASE1_BASELINE.safe_activity_log, source_only: sourceOnlyActivity.length, rejected: rejectedActivity, manual_review: manualReviewActivity },
+    leads: leadConflictDrift,
+    ownership: ownershipConflictDrift,
+  }
+  const safetyGates: Record<string, SafetyGate> = {
+    seed_workspace_present: { passed: v2WorkspaceIds.has(WORKSPACE_ID), required: WORKSPACE_ID, observed: v2WorkspaceIds.has(WORKSPACE_ID) ? WORKSPACE_ID : null },
+    effective_email_history_reconciled: { passed: sourceOnlyEmails.length === 0 && mismatchedEmails.length === 0, required: { source_only: 0, mismatched: 0 }, observed: { source_only: sourceOnlyEmails.length, mismatched: mismatchedEmails.length, exact_differences: emailDelta } },
+    email_dedup_algorithm_unambiguous: { passed: emailDedupe.ambiguities.length === 0, required: 0, observed: emailDedupe.ambiguities },
+    suppression_weakening_zero: { passed: suppressionWeakening === 0, required: 0, observed: suppressionWeakening },
+    fk_orphans_zero: { passed: sourceOrphans + targetOrphans === 0, required: 0, observed: { source: sourceOrphans, target: targetOrphans } },
+    cross_or_null_workspace_rows_zero: { passed: crossWorkspaceRows === 0, required: 0, observed: { total: crossWorkspaceRows, by_table: workspaceScope } },
+    v2_system_active_false: { passed: isFalseValue(v2SystemActive), required: false, observed: v2SystemActive ?? null },
+    owner_create_false: { passed: catalogSafety.owner_create === false, required: false, observed: catalogSafety.owner_create },
+    catalog_transaction_read_only: { passed: catalogSafety.transaction_read_only === 'on', required: 'on', observed: catalogSafety.transaction_read_only },
+    inbound_source_only_rows_safe: { passed: rejectedInbound.length === 0 && inboundTargetIdConflicts.length === 0, required: { rejected: 0, target_id_conflicts: 0 }, observed: { rejected: rejectedInbound, target_id_conflicts: inboundTargetIdConflicts } },
+    activity_proposed_rows_safe: { passed: rejectedActivity.length === 0 && activityTargetIdConflicts.length === 0, required: { rejected: 0, target_id_conflicts: 0 }, observed: { rejected: rejectedActivity, target_id_conflicts: activityTargetIdConflicts, manual_review_excluded: manualReviewActivity } },
+    executable_tables_allowlisted: { passed: true, required: ['inbound_receipts', 'activity_log'], observed: ['inbound_receipts', 'activity_log'] },
+  }
+  output.phase2a = {
+    mode: command.mode,
+    catalog_session: catalogSafety,
+    baseline_comparisons: driftReport,
+    current_counts: invariantCounts,
+    safety_gates: Object.fromEntries(Object.entries(safetyGates).map(([name, gate]) => [name, { ...gate, status: gate.passed ? 'PASS' : 'FAIL' }])),
+    exact_reconciliation: exactReconciliation,
+  }
+
+  const snapshot: Row = {
+    phase1_baselines: PHASE1_BASELINE,
+    current_counts_and_drift: driftReport,
+    approved_executable_counts: {
+      inbound_receipts: inboundEntries.length,
+      activity_log: activityEntries.length,
+    },
+    executable_allowlist: {
+      inbound_receipts: inboundEntries,
+      activity_log: activityEntries,
+      all_other_tables: [],
+    },
+    target_pre_counts: {
+      inbound_receipts: v2Inbound.length,
+      activity_log: v2Activity.length,
+    },
+    expected_skipped_emails: {
+      count: skippedEmailEntries.length,
+      ids_and_hashes: skippedEmailEntries,
+      canonical_set_sha256: sha256(skippedEmailEntries),
+      phase1_comparison: dedupComparison,
+    },
+    explicitly_excluded: {
+      leads: leadExclusions,
+      recipient_outreach_ownership: ownershipExclusions,
+      activity_log_manual_review: manualReviewActivity,
+      email_new_delta_requiring_review: emailDelta,
+      settings: [{ key: 'system_active', expected_v2_value: false, disposition: 'PRESERVE_V2' }],
+    },
+    all_discovered_mismatches: {
+      mapped_tables: exactReconciliation,
+      allowlisted_settings: settingDiffs,
+      suppression: output.suppression,
+      intentionally_excluded_tables: output.excluded,
+    },
+    system_active_expected_value: false,
+    owner_create_expected_value: false,
+    catalog_transaction_read_only: catalogSafety.transaction_read_only,
+    safety_invariant_counts: invariantCounts,
+  }
+  const unsignedPlan: Row = {
+    schema_version: PLAN_SCHEMA_VERSION,
+    kind: 'FINAL_V1_V2_INSERT_ONLY_PLAN',
+    generated_at: new Date().toISOString(),
+    source_project_ref: V1_REF,
+    target_project_ref: V2_REF,
+    seed_workspace_id: WORKSPACE_ID,
+    source_access: 'SELECT_ONLY',
+    target_access_during_generation: 'SELECT_ONLY',
+    snapshot,
+    snapshot_sha256: sha256(snapshot),
+    future_execution_contract: {
+      order: ['verify_plan_hash', 'reverify_projects_and_invariants', 'verify_system_active_false', 'begin_v2_transaction', 'take_advisory_transaction_lock', 'reselect_all_target_ids_and_natural_keys', 'insert_inbound_receipts', 'insert_activity_log', 'run_postconditions', 'commit'],
+      advisory_lock_name: ADVISORY_LOCK_NAME,
+      insert_semantics: 'plain INSERT with explicit IDs and workspace_id; any conflict aborts; DO UPDATE forbidden',
+      forbidden: ['V1 writes', 'deletes', 'updates', 'upserts', 'application routes', 'RPC', 'webhooks', 'providers', 'jobs', 'leads', 'emails', 'ownership', 'settings', 'categories'],
+    },
+    hash_algorithm: 'SHA-256 of canonical JSON (object keys sorted recursively), excluding plan_sha256',
+  }
+  const artifact: Row = { ...unsignedPlan, plan_sha256: sha256(unsignedPlan) }
+
+  if (command.mode === 'audit') {
+    console.log(JSON.stringify(output, null, 2))
+    return
+  }
+
+  console.log(JSON.stringify({
+    mode: 'PLAN_CURRENT_AUDIT_NO_DATABASE_WRITES',
+    current_counts: invariantCounts,
+    drift: {
+      effective_emails: { previous: PHASE1_BASELINE.effective_emails, current: effectiveV1Emails.length, drift: effectiveV1Emails.length - PHASE1_BASELINE.effective_emails },
+      email_dedup: { previous: PHASE1_BASELINE.skipped_email_drafts, current: skippedEmailEntries.length, drift: skippedEmailEntries.length - PHASE1_BASELINE.skipped_email_drafts },
+      inbound_receipts: { previous: PHASE1_BASELINE.safe_inbound_receipts, current: safeInbound.length, drift: safeInbound.length - PHASE1_BASELINE.safe_inbound_receipts },
+      activity_log: { previous: PHASE1_BASELINE.safe_activity_log, current: safeActivity.length, drift: safeActivity.length - PHASE1_BASELINE.safe_activity_log },
+      lead_conflicts: { previous: PHASE1_DEFERRED_LEAD_IDS.length, current: leadExclusions.length },
+      ownership_conflicts: { previous: PHASE1_OWNERSHIP_TARGET_OWNER_IDS.size, current: ownershipExclusions.length },
+    },
+    failed_gates: Object.entries(safetyGates).filter(([, gate]) => !gate.passed).map(([name]) => name),
+  }, null, 2))
+  assertAll(safetyGates)
+
+  if (command.mode === 'plan') {
+    mkdirSync(dirname(command.path), { recursive: true })
+    writeFileSync(command.path, `${JSON.stringify(artifact, null, 2)}\n`, { encoding: 'utf8', flag: 'w' })
+    console.log(JSON.stringify({ mode: 'PLAN_GENERATED_NO_DATABASE_WRITES', path: command.path, plan_sha256: artifact.plan_sha256, inbound_receipts: inboundEntries.length, activity_log: activityEntries.length }, null, 2))
+    return
+  }
+
+  const approvedPlan = approvedInputPlan!
+  if (approvedPlan.snapshot_sha256 !== artifact.snapshot_sha256) throw new Error('Live source/target snapshot no longer matches the approved plan')
+  await executeApprovedPlan(approvedPlan, source, v2env.V2_SUPABASE_DB_URL ?? '')
+  console.log(JSON.stringify({ mode: 'EXECUTE_PLAN_COMPLETE', plan_sha256: approvedPlan.plan_sha256 }, null, 2))
 }
 
 main().catch(error => {
