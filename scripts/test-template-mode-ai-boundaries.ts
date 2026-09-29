@@ -7,8 +7,10 @@ import {
 import { routeInitialEmail } from '@/lib/initial-email-router'
 import { writeOneLead } from '@/lib/write-lead'
 import { createLeadDedupeIndex } from '@/lib/deduplication'
+import { registerWorkspaceServiceClient } from '@/lib/supabase/workspace-scope'
 
 type Row = Record<string, any>
+const TEST_WORKSPACE_ID = '00000000-0000-0000-0000-000000000001'
 
 class MemoryDb {
   tables: Record<string, Row[]>
@@ -27,6 +29,7 @@ class MemoryDb {
       distributed_locks: [],
       emails: [],
     }
+    registerWorkspaceServiceClient(this, TEST_WORKSPACE_ID)
   }
 
   from(table: string) { return new Query(this, table) }

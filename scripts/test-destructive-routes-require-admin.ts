@@ -45,19 +45,19 @@ function assert(condition: boolean, label: string, detail?: string): void {
 function checkRouteRequiresAdmin(relPath: string, exportedFn: string) {
   const src = fs.readFileSync(path.resolve(process.cwd(), relPath), 'utf8')
 
-  const importsGuard = /import\s*{[^}]*requireApiAdmin[^}]*}\s*from\s*'@\/lib\/auth'/.test(src)
-  assert(importsGuard, `${relPath} imports requireApiAdmin from '@/lib/auth'`)
+  const importsGuard = /import\s*{[^}]*requireApiWorkspaceAdmin[^}]*}\s*from\s*'@\/lib\/api-workspace'/.test(src)
+  assert(importsGuard, `${relPath} imports requireApiWorkspaceAdmin from '@/lib/api-workspace'`)
 
-  const importsErrorCheck = /import\s*{[^}]*isAuthErrorResponse[^}]*}\s*from\s*'@\/lib\/auth'/.test(src)
-  assert(importsErrorCheck, `${relPath} imports isAuthErrorResponse from '@/lib/auth'`)
+  const importsErrorCheck = /import\s*{[^}]*isApiWorkspaceError[^}]*}\s*from\s*'@\/lib\/api-workspace'/.test(src)
+  assert(importsErrorCheck, `${relPath} imports isApiWorkspaceError from '@/lib/api-workspace'`)
 
   const fnIdx = src.indexOf(`export async function ${exportedFn}(`)
   assert(fnIdx !== -1, `${relPath} still exports ${exportedFn}()`)
 
-  const guardIdx = src.indexOf('await requireApiAdmin()', fnIdx)
-  const earlyReturnIdx = src.indexOf('if (isAuthErrorResponse(auth)) return auth', fnIdx)
+  const guardIdx = src.indexOf('await requireApiWorkspaceAdmin()', fnIdx)
+  const earlyReturnIdx = src.indexOf('if (isApiWorkspaceError(access)) return access', fnIdx)
 
-  assert(guardIdx !== -1 && guardIdx > fnIdx, `${exportedFn}() in ${relPath} calls requireApiAdmin()`)
+  assert(guardIdx !== -1 && guardIdx > fnIdx, `${exportedFn}() in ${relPath} calls requireApiWorkspaceAdmin()`)
   assert(earlyReturnIdx !== -1 && earlyReturnIdx > guardIdx, `${exportedFn}() in ${relPath} returns immediately when the caller is not an admin`)
 
   // The guard must run before any destructive DB call in this handler.

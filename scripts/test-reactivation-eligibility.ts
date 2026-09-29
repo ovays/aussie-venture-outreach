@@ -286,7 +286,7 @@ console.log(DIV)
 // ── Final summary ─────────────────────────────────────────────────────────────
 const reactivationSource = fs.readFileSync(path.join(process.cwd(), 'agents/reactivation.ts'), 'utf8')
 const finalStatusGuard = reactivationSource.indexOf("sendTimeLead.status !== 'contacted'")
-const providerSend = reactivationSource.indexOf('const result = await sendEmail({', finalStatusGuard)
+const providerSend = reactivationSource.indexOf('sendThroughWorkspaceMailbox(supabase, {', finalStatusGuard)
 const guardPassed = finalStatusGuard >= 0 && providerSend > finalStatusGuard ? 1 : 0
 console.log(`\n  ${guardPassed ? 'PASS' : 'FAIL'}  Reactivation re-checks contacted status immediately before provider send`)
 
