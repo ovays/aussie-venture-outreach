@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin } from '@/lib/api-workspace'
 import { claimRecipientOutreach, removeLeadFromInitialOutreachQueue } from '@/lib/data-quality'
 
 export async function POST(
@@ -7,7 +7,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspaceAdmin()
   if (isApiWorkspaceError(access)) return access
   const { supabase, workspace } = access
 

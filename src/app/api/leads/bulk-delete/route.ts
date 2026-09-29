@@ -1,15 +1,14 @@
 import { NextRequest } from 'next/server'
-import { isAuthErrorResponse, requireApiUser } from '@/lib/auth'
 import { handleBulkDeleteRequest } from '@/lib/bulk-delete-request'
-import { createClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin } from '@/lib/api-workspace'
 
 export async function DELETE(request: NextRequest): Promise<Response> {
+  const access = await requireApiWorkspaceAdmin()
+  if (isApiWorkspaceError(access)) return access
+
   return handleBulkDeleteRequest(request, {
-    authenticate: async () => {
-      const auth = await requireApiUser()
-      return isAuthErrorResponse(auth) ? auth : null
-    },
-    createClient,
+    authenticate: async () => null,
+    createClient: async () => access.supabase,
     logError: (message, context) => console.error(message, context),
   })
 }

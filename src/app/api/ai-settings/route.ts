@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { aiConfigurationService } from '@/ai/AIRuntime'
 import { loadAISettings } from '@/ai/settings'
-import { isAuthErrorResponse, requireApiAdmin, requireApiUser } from '@/lib/auth'
+import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 
 const updateSchema = z.discriminatedUnion('resource', [
@@ -25,7 +25,7 @@ const updateSchema = z.discriminatedUnion('resource', [
 ])
 
 export async function GET() {
-  const auth = await requireApiUser()
+  const auth = await requireApiAdmin()
   if (isAuthErrorResponse(auth)) return auth
 
   try {

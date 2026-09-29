@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAuthErrorResponse, requireApiUser } from '@/lib/auth'
 import { deleteLeads, LeadIdsValidationError, normalizeLeadIds } from '@/lib/delete-leads'
-import { createClient } from '@/lib/supabase/server'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { ALL_STATUSES } from '@/lib/lead-status'
 import { z } from 'zod'
 
@@ -13,8 +12,10 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
   const { id } = await params
-  const supabase = await createClient()
+  const { supabase } = access
 
   const [
     { data: lead, error },
@@ -65,8 +66,10 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
   const { id } = await params
-  const supabase = await createClient()
+  const { supabase } = access
   const parsed = patchLeadSchema.safeParse(await request.json())
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid request body', issues: parsed.error.issues }, { status: 400 })
@@ -94,11 +97,11 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireApiUser()
-  if (isAuthErrorResponse(auth)) return auth
+  const access = await requireApiWorkspaceAdmin()
+  if (isApiWorkspaceError(access)) return access
 
   const { id } = await params
-  const supabase = await createClient()
+  const { supabase } = access
 
   try {
     const [leadId] = normalizeLeadIds([id])

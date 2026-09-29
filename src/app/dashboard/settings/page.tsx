@@ -7,8 +7,7 @@ import { LeadFiltering } from '@/components/settings/LeadFiltering'
 import { Card } from '@/components/ui/Card'
 import { SETTINGS_DEFAULTS, withDefaultSettings } from '@/lib/settingsDefaults'
 import { getTemplateModeBlockers, hydrateCategoryTemplates } from '@/lib/category-email-templates'
-import { requireUser } from '@/lib/auth'
-import { requireWorkspaceContext } from '@/lib/workspace-context'
+import { requireWorkspacePage } from '@/lib/page-access'
 import { getPlatformSettings, getWorkspaceSettings } from '@/lib/workspace-settings'
 import { Tabs } from '@/components/ui/Tabs'
 import { getOnboardingState } from '@/lib/onboarding-server'
@@ -17,6 +16,7 @@ import { WorkspaceProfileSettings } from '@/components/settings/WorkspaceProfile
 import { MailboxSettings } from '@/components/settings/MailboxSettings'
 import { UsageLimits } from '@/components/settings/UsageLimits'
 import { BillingSettings } from '@/components/settings/BillingSettings'
+import Link from 'next/link'
 
 export const revalidate = 0
 
@@ -52,13 +52,60 @@ interface SettingsPerformanceSummary {
 }
 
 export default async function SettingsPage() {
-  const auth = await requireUser()
-  const workspace = await requireWorkspaceContext(auth)
+  const { workspace } = await requireWorkspacePage()
+  const onboardingState = await getOnboardingState(workspace.workspaceId)
+  const canManageWorkspace = workspace.isPlatformAdmin || workspace.role === 'owner' || workspace.role === 'admin'
+
+  if (!workspace.isPlatformAdmin) {
+    return (
+      <div>
+        <TopBar title="Settings" />
+        <div className="page-content page-stack max-w-4xl">
+          <Tabs label="Settings sections" items={[
+            { label: 'Business', href: '/dashboard/settings' },
+            { label: 'Mailbox', href: '#mailbox' },
+            { label: 'Personalisation', href: '#personalisation' },
+            { label: 'Team', href: '#team' },
+            { label: 'Usage', href: '#usage' },
+            { label: 'Outreach', href: '#outreach' },
+          ]} />
+          <Card>
+            <WorkspaceProfileSettings
+              initialState={onboardingState}
+              timezones={timezoneOptions()}
+              canEdit={canManageWorkspace}
+            />
+          </Card>
+          <Card><div id="mailbox" className="scroll-mt-28"><MailboxSettings /></div></Card>
+          <Card>
+            <section id="personalisation" className="scroll-mt-28">
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Personalisation</h2>
+              <p className="mt-2 text-sm text-[var(--text-secondary)]">Customer-friendly message and personalisation controls are coming in the next phase.</p>
+            </section>
+          </Card>
+          <Card>
+            <section id="team" className="scroll-mt-28">
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Team</h2>
+              <p className="mt-2 text-sm text-[var(--text-secondary)]">Workspace member management is coming in a later phase.</p>
+            </section>
+          </Card>
+          <Card><div id="usage" className="scroll-mt-28"><UsageLimits /></div></Card>
+          <Card>
+            <section id="outreach" className="scroll-mt-28">
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Outreach</h2>
+              <p className="mt-2 text-sm text-[var(--text-secondary)]">Targeting and schedule controls will be managed from the Outreach page.</p>
+              <Link href="/dashboard/outreach" className="mt-3 inline-flex text-sm font-medium text-[var(--primary)] hover:underline">Open Outreach</Link>
+            </section>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
   const supabase = createServiceClient()
   const settingsKeys = Object.keys(SETTINGS_DEFAULTS) as Array<keyof typeof SETTINGS_DEFAULTS>
   const asOf = new Date()
   const [
-    onboardingState,
     { data: categories },
     { data: categoryTemplates },
     { data: suburbRows },
@@ -66,7 +113,6 @@ export default async function SettingsPage() {
     platform,
     tenant,
   ] = await Promise.all([
-    getOnboardingState(workspace.workspaceId),
     supabase.from('categories').select(`
       id, name, status, cities, city_content_types, content_type, custom_cities,
       custom_policy_instructions, dm_template, exclude_alcohol_focused,

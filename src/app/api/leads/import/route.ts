@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin } from '@/lib/api-workspace'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { createLead, type CreateLeadResult } from '@/lib/create-lead'
 import { STAGE_VALUES } from '@/lib/stage-import'
@@ -29,7 +29,7 @@ const importSchema = z.object({
 type FailedRow = { row_num: number; business_name: string; email: string; reason: string }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspaceAdmin()
   if (isApiWorkspaceError(access)) return access
   const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
   const { allowed } = checkRateLimit(`leads-import:${ip}`, 5)

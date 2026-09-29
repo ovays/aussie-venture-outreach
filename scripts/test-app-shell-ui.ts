@@ -15,21 +15,24 @@ const sidebarContext = source('src/components/layout/SidebarContext.tsx')
 const topBar = source('src/components/layout/TopBar.tsx')
 const globals = source('src/app/globals.css')
 
-assert.equal(navigationSections[0]?.label, 'Home')
-assert.deepEqual(navigationSections.map((section) => section.label), ['Home', 'Leads', 'Outreach', 'Campaigns', 'Settings'])
-assert.deepEqual(navigationSections[1]?.items?.map((item) => item.label), ['All Leads', 'Lifecycle', 'Deals', 'Data Quality'])
-assert.equal(navigationSections[2]?.label, 'Outreach')
-assert.deepEqual(
-  navigationSections[2]?.items?.map((item) => item.label),
-  ['Outreach Pipeline', 'DM Queue', 'Email Log', 'Email Report', 'Delivery Failures'],
-)
+assert.equal(navigationSections[0]?.label, 'Dashboard')
+assert.deepEqual(navigationSections.map((section) => section.label), ['Dashboard', 'Leads', 'Outreach', 'Inbox', 'Analytics', 'Settings'])
+assert.deepEqual(navigationSections.map((section) => section.href), ['/dashboard', '/dashboard/leads', '/dashboard/outreach', '/dashboard/inbox', '/dashboard/analytics', '/dashboard/settings'])
 assert.deepEqual(adminNavigation.map((item) => item.label), [
-  'Workspaces',
-  'Team & Members',
-  'Usage & Billing',
-  'Audit Log',
-  'Data Quality',
+  'Lifecycle',
+  'Pipeline',
+  'DM Queue',
+  'Email Log',
+  'Email Report',
+  'Delivery Failures',
+  'Deals',
+  'AI Settings',
   'AI Analytics',
+  'Data Quality',
+  'Workspaces',
+  'Users',
+  'Usage / Admin',
+  'Audit',
 ])
 assert.deepEqual(utilityNavigation, [])
 
@@ -39,6 +42,7 @@ assert.equal(isRouteActive('/dashboard/admin/data-quality', '/dashboard/admin/da
 assert.equal(isRouteActive('/dashboard/settings/ai/analytics', '/dashboard/settings/ai'), false)
 assert.equal(isAdminRoute('/dashboard/admin/data-quality'), true, 'active Admin child highlights its parent')
 assert.equal(isAdminRoute('/dashboard/settings/ai/analytics'), true, 'AI Analytics activates Admin')
+assert.equal(isAdminRoute('/dashboard/lifecycle'), true, 'internal operational routes activate Admin')
 assert.equal(isAdminRoute('/dashboard/leads'), false)
 
 assert.match(sidebar, /md:w-64/, 'expanded desktop sidebar width is present')
@@ -61,6 +65,9 @@ assert.match(sidebarContext, /SIDEBAR_COLLAPSED_KEY/, 'collapse preference has a
 const majorRoutes = [
   'src/app/dashboard/page.tsx',
   'src/app/dashboard/leads/page.tsx',
+  'src/app/dashboard/outreach/page.tsx',
+  'src/app/dashboard/inbox/page.tsx',
+  'src/app/dashboard/analytics/page.tsx',
   'src/app/dashboard/dm-queue/page.tsx',
   'src/app/dashboard/pipeline/page.tsx',
   'src/app/dashboard/email-log/page.tsx',

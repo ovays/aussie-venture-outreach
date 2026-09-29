@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { sendThroughWorkspaceMailbox } from '@/lib/mailbox/sender'
 import { fetchPipelineDedupeIndex } from '@/lib/deduplication'
 import { researchOneLead, researchPurposeForInitialEmailMode } from '@/lib/research-lead'
@@ -43,7 +43,7 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspaceAdmin()
   if (isApiWorkspaceError(access)) return access
   const { supabase, workspace } = access
   const raw = await request.json()

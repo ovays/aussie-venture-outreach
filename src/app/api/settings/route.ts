@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { SETTINGS_DEFAULTS, isInitialEmailMode, isSettingKey } from '@/lib/settingsDefaults'
-import { isAuthErrorResponse, requireApiAdmin, requireApiUser } from '@/lib/auth'
+import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 import { requireWorkspaceContext } from '@/lib/workspace-context'
 import { isPlatformSettingKey, getPlatformSettings, getWorkspaceSettings, upsertPlatformSetting, upsertWorkspaceSetting } from '@/lib/workspace-settings'
 import { getTemplateModeBlockers } from '@/lib/category-email-templates'
@@ -23,7 +23,7 @@ const patchSettingSchema = z.object({
 })
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const auth = await requireApiUser()
+  const auth = await requireApiAdmin()
   if (isAuthErrorResponse(auth)) return auth
   const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'global'
   const { allowed } = checkRateLimit(`settings:${ip}`, 30)

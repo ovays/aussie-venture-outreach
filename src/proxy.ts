@@ -7,8 +7,24 @@ const protectedPrefixes = ['/dashboard', '/onboarding', '/api']
 const publicApiPrefixes = ['/api/webhooks']
 const adminPrefixes = [
   '/dashboard/admin',
+  '/dashboard/lifecycle',
+  '/dashboard/pipeline',
+  '/dashboard/dm-queue',
+  '/dashboard/email-log',
+  '/dashboard/email-report',
+  '/dashboard/delivery-failures',
+  '/dashboard/deals',
+  '/dashboard/settings/ai',
   '/api/admin',
+  '/api/ai-settings',
+  '/api/audit',
   '/api/data-quality',
+  '/api/deals',
+  '/api/dm-queue',
+  '/api/health',
+  '/api/lifecycle',
+  '/api/pipeline',
+  '/api/settings',
 ]
 
 function isProtectedPath(pathname: string) {

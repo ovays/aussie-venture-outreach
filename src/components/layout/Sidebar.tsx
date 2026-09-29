@@ -47,7 +47,7 @@ export default function Sidebar({ role, userName, userEmail, workspaceName }: Si
   const closeButtonRef = useRef<HTMLButtonElement>(null)
 
   const activeSection = useMemo(
-    () => navigationSections.find((section) => section.label !== 'Campaigns' && isSectionActive(pathname, section))?.label,
+    () => navigationSections.find((section) => isSectionActive(pathname, section))?.label,
     [pathname],
   )
 
@@ -117,7 +117,7 @@ export default function Sidebar({ role, userName, userEmail, workspaceName }: Si
           <div className="space-y-1">
             {navigationSections.map((section) => {
               const Icon = section.icon
-              const active = section.label !== 'Campaigns' && isSectionActive(pathname, section)
+              const active = isSectionActive(pathname, section)
               if (section.href) return <NavLink key={section.label} item={{ href: section.href, label: section.label, icon: section.icon, exact: true }} active={active} collapsed={isCompact} onNavigate={handleNavigate} />
               const visibleItems = section.items?.filter((item) => !item.adminOnly || role === 'admin') ?? []
               const expanded = openSections.has(section.label)
@@ -138,8 +138,8 @@ export default function Sidebar({ role, userName, userEmail, workspaceName }: Si
           </div>
 
           {role === 'admin' && <section className="mt-5 border-t border-white/10 pt-4">
-            {!isCompact && <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">Platform</p>}
-            <button type="button" onClick={() => setAdminOpen((value) => !value)} aria-expanded={adminOpen} aria-controls="admin-navigation" title={isCompact ? 'Platform admin' : undefined} className={`flex min-h-10 w-full items-center rounded-lg text-sm font-medium ${isCompact ? 'justify-center px-2' : 'gap-3 px-3'} ${isAdminRoute(pathname) ? 'text-white' : 'text-slate-400 hover:bg-white/[0.065] hover:text-white'}`}><Shield size={17} />{!isCompact && <><span className="flex-1 text-left">Platform Admin</span><ChevronDown size={14} className={adminOpen ? 'rotate-180' : ''} /></>}</button>
+            {!isCompact && <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">Internal</p>}
+            <button type="button" onClick={() => setAdminOpen((value) => !value)} aria-expanded={adminOpen} aria-controls="admin-navigation" title={isCompact ? 'Internal / Admin' : undefined} className={`flex min-h-10 w-full items-center rounded-lg text-sm font-medium ${isCompact ? 'justify-center px-2' : 'gap-3 px-3'} ${isAdminRoute(pathname) ? 'text-white' : 'text-slate-400 hover:bg-white/[0.065] hover:text-white'}`}><Shield size={17} />{!isCompact && <><span className="flex-1 text-left">Internal / Admin</span><ChevronDown size={14} className={adminOpen ? 'rotate-180' : ''} /></>}</button>
             {!isCompact && <div id="admin-navigation" className={`grid transition-[grid-template-rows,opacity] ${adminOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}><div className="overflow-hidden"><div className="ml-[1.15rem] space-y-0.5 border-l border-white/10 py-1 pl-3">{adminNavigation.map((item) => <NavLink key={item.href} item={item} active={isRouteActive(pathname, item.href, item.exact)} collapsed={false} onNavigate={handleNavigate} />)}</div></div></div>}
           </section>}
         </nav>

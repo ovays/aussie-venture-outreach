@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
+import { isAuthErrorResponse, requireApiAdmin } from '@/lib/auth'
 
 interface HealthIssue {
   type: string
@@ -27,6 +28,9 @@ function relativeTime(isoString: string, asOf: Date): string {
 }
 
 export async function GET() {
+  const admin = await requireApiAdmin()
+  if (isAuthErrorResponse(admin)) return admin
+
   const asOf = new Date()
   const supabase = createServiceClient()
   const { data, error } = await supabase.rpc('get_health_summary', { p_as_of: asOf.toISOString() })

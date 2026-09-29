@@ -2,12 +2,14 @@ import TopBar from '@/components/layout/TopBar'
 import { Card } from '@/components/ui/Card'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { LifecycleTable } from '@/components/lifecycle/LifecycleTable'
+import { requireInternalPage } from '@/lib/page-access'
 
 interface Props {
   searchParams: Promise<{ filter?: string }>
 }
 
 export default async function LifecyclePage({ searchParams }: Props) {
+  await requireInternalPage()
   const { filter } = await searchParams
 
   return (

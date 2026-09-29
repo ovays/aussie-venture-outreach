@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin, requireApiWorkspaceUser } from '@/lib/api-workspace'
 import { readInitialEmailMode, routeInitialEmail } from '@/lib/initial-email-router'
 import { INITIAL_EMAIL_MODES } from '@/lib/settingsDefaults'
 import {
@@ -22,7 +22,7 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspaceAdmin()
   if (isApiWorkspaceError(access)) return access
   const parsed = schema.safeParse(await request.json())
   if (!parsed.success) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })

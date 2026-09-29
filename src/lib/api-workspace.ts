@@ -1,9 +1,10 @@
 import 'server-only'
 
 import { NextResponse } from 'next/server'
-import { isAuthErrorResponse, requireApiUser, type AuthContext } from '@/lib/auth'
+import { isAuthErrorResponse, requireApiAdmin, requireApiUser, type AuthContext } from '@/lib/auth'
 import { requireWorkspaceContext, type WorkspaceContext } from '@/lib/workspace-context'
 import { createWorkspaceServiceClient } from '@/lib/supabase/workspace-service'
+import { hasWorkspaceAdminAccess } from '@/lib/access-policy'
 
 export interface ApiWorkspaceContext {
   auth: AuthContext
@@ -28,10 +29,14 @@ export async function requireApiWorkspaceUser(): Promise<ApiWorkspaceContext | N
 export async function requireApiWorkspaceAdmin(): Promise<ApiWorkspaceContext | NextResponse> {
   const context = await finish(await requireApiUser())
   if (context instanceof NextResponse) return context
-  if (!context.workspace.isPlatformAdmin && context.workspace.role !== 'owner' && context.workspace.role !== 'admin') {
+  if (!hasWorkspaceAdminAccess(context.workspace.role, context.workspace.isPlatformAdmin)) {
     return NextResponse.json({ error: 'Workspace admin access is required' }, { status: 403 })
   }
   return context
+}
+
+export async function requireApiWorkspacePlatformAdmin(): Promise<ApiWorkspaceContext | NextResponse> {
+  return finish(await requireApiAdmin())
 }
 
 export function isApiWorkspaceError(value: ApiWorkspaceContext | NextResponse): value is NextResponse {

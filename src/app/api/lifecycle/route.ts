@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { resolvePagination } from '@/lib/pagination'
 import { normalizeSearchTerm } from '@/lib/search'
 import { compareDecisionWithLifecycleProjection, loadDecisionContexts } from '@/domain/decision-engine'
-import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspacePlatformAdmin } from '@/lib/api-workspace'
 
 const FILTERS = new Set([
   'all', 'fu1_due', 'fu2_due', 'fu3_due', 'fu1', 'fu2', 'fu3',
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ? new Date(asOfParam).toISOString()
     : new Date().toISOString()
 
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspacePlatformAdmin()
   if (isApiWorkspaceError(access)) return access
   const { supabase, workspace } = access
   const { data, error } = await supabase.rpc('get_lifecycle_page', {

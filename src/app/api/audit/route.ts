@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isApiWorkspaceError, requireApiWorkspaceAdmin } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspacePlatformAdmin } from '@/lib/api-workspace'
 import { AUDIT_ACTION_PATTERN } from '@/lib/audit/types'
 import { listAuditEvents } from '@/lib/audit/read'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const context = await requireApiWorkspaceAdmin()
+  const context = await requireApiWorkspacePlatformAdmin()
   if (isApiWorkspaceError(context)) return context
 
   const search = request.nextUrl.searchParams

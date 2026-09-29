@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
 import { composeOutreachEmailBody } from '@/lib/outreach-signature'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin, requireApiWorkspaceUser } from '@/lib/api-workspace'
 
 const patchSchema = z.object({
   subject: z.string().min(1),
@@ -12,8 +12,10 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const access = await requireApiWorkspaceUser()
+  if (isApiWorkspaceError(access)) return access
   const { id } = await params
-  const supabase = await createClient()
+  const { supabase } = access
   const { data, error } = await supabase
     .from('emails')
     .select('id, type, subject, body_html, body_text, status, sent_at, replied_at, created_at, leads(business_name, category_name, city)')
@@ -28,8 +30,10 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const access = await requireApiWorkspaceAdmin()
+  if (isApiWorkspaceError(access)) return access
   const { id } = await params
-  const supabase = await createClient()
+  const { supabase } = access
 
   const raw = await request.json()
   const parsed = patchSchema.safeParse(raw)

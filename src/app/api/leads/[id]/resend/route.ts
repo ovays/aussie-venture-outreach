@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin } from '@/lib/api-workspace'
 import { MailboxProviderError } from '@/lib/mailbox/errors'
 import { sendThroughWorkspaceMailbox } from '@/lib/mailbox/sender'
 import { emailBodyToHtml } from '@/lib/utils'
@@ -21,7 +21,7 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspaceAdmin()
   if (isApiWorkspaceError(access)) return access
   const { id } = await params
   const { supabase, workspace } = access

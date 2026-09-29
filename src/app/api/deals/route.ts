@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { resolvePagination } from '@/lib/pagination'
 import { normalizeSearchTerm } from '@/lib/search'
-import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspacePlatformAdmin } from '@/lib/api-workspace'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspacePlatformAdmin()
   if (isApiWorkspaceError(access)) return access
   const { supabase, workspace } = access
   const pagination = resolvePagination({
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspacePlatformAdmin()
   if (isApiWorkspaceError(access)) return access
   const { supabase, workspace } = access
   const body = await request.json() as {
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspacePlatformAdmin()
   if (isApiWorkspaceError(access)) return access
   const { supabase, workspace } = access
   const body = await request.json() as {

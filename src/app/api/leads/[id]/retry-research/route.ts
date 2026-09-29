@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin } from '@/lib/api-workspace'
 import { researchOneLead, researchPurposeForInitialEmailMode } from '@/lib/research-lead'
 import { writeOneLead } from '@/lib/write-lead'
 import { readInitialEmailMode } from '@/lib/initial-email-router'
@@ -9,7 +9,7 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspaceAdmin()
   if (isApiWorkspaceError(access)) return access
   const { id } = await params
   const { supabase } = access

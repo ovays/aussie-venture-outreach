@@ -2,8 +2,10 @@ import TopBar from '@/components/layout/TopBar'
 import { DMQueueTable } from '@/components/dm-queue/DMQueueTable'
 import { Card } from '@/components/ui/Card'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
+import { requireInternalPage } from '@/lib/page-access'
 
-export default function DMQueuePage() {
+export default async function DMQueuePage() {
+  await requireInternalPage()
   return (
     <div>
       <TopBar title="DM Queue" />
