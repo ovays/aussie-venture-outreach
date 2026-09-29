@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import type { Profile, UserRole } from '@/lib/auth-types'
+import { platformAdminApiDecision } from '@/lib/access-policy'
 
 export interface AuthContext {
   user: {
@@ -109,12 +110,9 @@ export async function requireApiUser(): Promise<AuthContext | NextResponse> {
 
 export async function requireApiAdmin(): Promise<AuthContext | NextResponse> {
   const context = await getAuthContext()
-  if (!context) {
-    return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
-  }
-  if (context.profile.role !== 'admin') {
-    return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
-  }
+  const decision = platformAdminApiDecision(context?.profile.role ?? null)
+  if (!decision.allowed) return NextResponse.json({ error: decision.error }, { status: decision.status })
+  if (!context) throw new Error('Platform admin authorization invariant failed')
   return context
 }
 

@@ -8,14 +8,14 @@ import {
 } from '@/lib/email-report'
 import { isHostingerMailboxConfigured } from '@/lib/hostinger-mail'
 import { logger } from '@/lib/logger'
-import { isApiWorkspaceError, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspacePlatformAdmin } from '@/lib/api-workspace'
 import { ensureFreshAccessToken, getUsableMailboxConnection, listMailboxConnections } from '@/lib/mailbox/connections'
 import { getMailboxProvider } from '@/lib/mailbox/registry'
 
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const context = await requireApiWorkspaceUser()
+  const context = await requireApiWorkspacePlatformAdmin()
   if (isApiWorkspaceError(context)) return context
   let range
   try {

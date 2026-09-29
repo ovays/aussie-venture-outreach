@@ -33,7 +33,7 @@ All large user-facing list filters execute server-side. All sort keys are fixed 
 
 ### Workspace-scoped bounded RPCs
 
-Leads, Lifecycle, Pipeline, Deals, Email Log, Delivery Failures, delivery-failure selection, and DM Queue now receive `p_workspace_id` derived by `requireApiWorkspaceUser()`. Browser input cannot select a workspace. Table RLS remains active, so the explicit predicate improves index selection without replacing tenant authorization.
+Leads, Lifecycle, Pipeline, Deals, Email Log, Delivery Failures, delivery-failure selection, and DM Queue receive `p_workspace_id` from a server-side workspace guard. Email Log uses the platform-admin workspace guard; customer-safe routes use their appropriate workspace-user/admin guard. Browser input cannot select a workspace. Table RLS remains active, so the explicit predicate improves index selection without replacing tenant authorization.
 
 The old unscoped RPC overloads remain available to `service_role` for controlled comparison/diagnostics, but `authenticated` execution is revoked. New overloads require workspace id as their first non-default argument.
 

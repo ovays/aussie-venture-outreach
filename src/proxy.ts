@@ -21,6 +21,8 @@ const adminPrefixes = [
   '/api/data-quality',
   '/api/deals',
   '/api/dm-queue',
+  '/api/email-log',
+  '/api/email-report',
   '/api/health',
   '/api/lifecycle',
   '/api/pipeline',

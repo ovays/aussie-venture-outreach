@@ -13,9 +13,9 @@ function source(path: string): string {
   return readFileSync(`${ROOT}/${path}`, 'utf8')
 }
 
-function assertWorkspaceScopedRoute(path: string, rpc: string) {
+function assertWorkspaceScopedRoute(path: string, rpc: string, authorization = 'requireApiWorkspaceUser()') {
   const text = source(path)
-  assert(text.includes('requireApiWorkspaceUser()'), `${path} must resolve workspace server-side`)
+  assert(text.includes(authorization), `${path} must resolve workspace server-side through ${authorization}`)
   assert(text.includes(`rpc('${rpc}'`), `${path} must use ${rpc}`)
   assert(text.includes('p_workspace_id: workspace.workspaceId'), `${path} must pass only server-resolved workspace scope`)
   assert(!text.includes("select('*')"), `${path} must not add a heavy select('*') list read`)
@@ -28,11 +28,11 @@ async function main() {
   assert.deepEqual(toSupabaseRange({ page: 2, pageSize: 50 }), { from: 50, to: 99 })
 
   assertWorkspaceScopedRoute('src/app/api/leads/route.ts', 'get_leads_search_page')
-  assertWorkspaceScopedRoute('src/app/api/lifecycle/route.ts', 'get_lifecycle_page')
-  assertWorkspaceScopedRoute('src/app/api/pipeline/route.ts', 'get_pipeline_search_page')
-  assertWorkspaceScopedRoute('src/app/api/deals/route.ts', 'get_deals_search_page')
-  assertWorkspaceScopedRoute('src/app/api/dm-queue/route.ts', 'get_dm_queue_search_page')
-  assertWorkspaceScopedRoute('src/app/api/email-log/route.ts', 'get_email_log_search_page')
+  assertWorkspaceScopedRoute('src/app/api/lifecycle/route.ts', 'get_lifecycle_page', 'requireApiWorkspacePlatformAdmin()')
+  assertWorkspaceScopedRoute('src/app/api/pipeline/route.ts', 'get_pipeline_search_page', 'requireApiWorkspacePlatformAdmin()')
+  assertWorkspaceScopedRoute('src/app/api/deals/route.ts', 'get_deals_search_page', 'requireApiWorkspacePlatformAdmin()')
+  assertWorkspaceScopedRoute('src/app/api/dm-queue/route.ts', 'get_dm_queue_search_page', 'requireApiWorkspacePlatformAdmin()')
+  assertWorkspaceScopedRoute('src/app/api/email-log/route.ts', 'get_email_log_search_page', 'requireApiWorkspacePlatformAdmin()')
   assertWorkspaceScopedRoute('src/app/api/delivery-failures/route.ts', 'get_delivery_failure_report')
 
   const leadsRoute = source('src/app/api/leads/route.ts')

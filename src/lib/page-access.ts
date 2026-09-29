@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { notFound, redirect } from 'next/navigation'
-import { requireUser, type AuthContext } from '@/lib/auth'
+import { requireAdmin, requireUser, type AuthContext } from '@/lib/auth'
 import { requireWorkspaceContext, type WorkspaceContext } from '@/lib/workspace-context'
 import { hasPlatformAdminAccess, hasWorkspaceAdminAccess } from '@/lib/access-policy'
 
@@ -39,10 +39,8 @@ export async function requireWorkspaceAdminPage(): Promise<WorkspacePageContext>
 }
 
 /** Internal operational pages available only to a server-verified platform admin. */
-export async function requireInternalPage(): Promise<WorkspacePageContext> {
-  const context = await resolveWorkspacePage()
-  if (!hasPlatformAdminAccess(context.workspace.isPlatformAdmin) || context.auth.profile.role !== 'admin') {
-    notFound()
-  }
-  return context
+export async function requireInternalPage(): Promise<AuthContext> {
+  const auth = await requireAdmin()
+  if (!hasPlatformAdminAccess(auth.profile.role === 'admin')) notFound()
+  return auth
 }

@@ -10,24 +10,22 @@ import { Card } from '@/components/ui/Card'
 import { logAnalyticsMetrics } from '@/lib/analytics'
 import { getDashboardSummary } from '@/lib/dashboard-summary'
 import { buildStageCounts } from '@/lib/lead-status'
-import { requireUser } from '@/lib/auth'
-import { requireWorkspaceContext } from '@/lib/workspace-context'
+import { requireWorkspacePage } from '@/lib/page-access'
 
 export const revalidate = 60
 
 export default async function DashboardPage() {
-  const auth = await requireUser()
-  const workspace = await requireWorkspaceContext(auth)
+  const { workspace } = await requireWorkspacePage()
   const supabase = await createClient()
   const { analytics, statusMap, recentActivity, pendingDMCount, dealsRolling30DayCount, hotLeads } = await getDashboardSummary(supabase, workspace.workspaceId)
   logAnalyticsMetrics('[DASHBOARD_METRICS]', { range: analytics.todayEmailStats.range, totalEmails: analytics.todayEmailStats.totalSent, followups: analytics.followupStats.sentToday, replies: analytics.replyStats.repliesToday })
   const stageCounts = buildStageCounts(statusMap)
   const totalLeads = Object.values(statusMap).reduce((sum, count) => sum + count, 0)
   const actionItems = [
-    { label: 'Follow-ups due', value: analytics.followupStats.fuDue, detail: `${analytics.followupStats.overdueTotal} overdue`, href: '/dashboard/lifecycle?filter=fu_due', icon: Send, tone: 'var(--primary)' },
+    { label: 'Follow-ups due', value: analytics.followupStats.fuDue, detail: `${analytics.followupStats.overdueTotal} overdue`, href: '/dashboard/inbox?view=follow-ups', icon: Send, tone: 'var(--primary)' },
     { label: 'Replies to review', value: statusMap.replied ?? 0, detail: `${analytics.replyStats.repliesToday} received today`, href: '/dashboard/leads?status=replied', icon: MessageSquare, tone: 'var(--accent)' },
-    { label: 'Reactivation queue', value: analytics.followupStats.reactivationTotal, detail: 'Ready for re-engagement', href: '/dashboard/lifecycle?filter=reactivation', icon: RefreshCcw, tone: 'var(--warning)' },
-    { label: 'Delivery attention', value: analytics.followupStats.overdueTotal, detail: 'Past due date', href: '/dashboard/lifecycle?filter=overdue', icon: AlertTriangle, tone: 'var(--error)' },
+    { label: 'Reactivation queue', value: analytics.followupStats.reactivationTotal, detail: 'Ready for re-engagement', href: '/dashboard/leads?status=reactivation_due', icon: RefreshCcw, tone: 'var(--warning)' },
+    { label: 'Delivery attention', value: analytics.followupStats.overdueTotal, detail: 'Past due date', href: '/dashboard/inbox?view=failed', icon: AlertTriangle, tone: 'var(--error)' },
   ]
 
   return <div>
@@ -45,7 +43,7 @@ export default async function DashboardPage() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,.65fr)]">
         <Card noPadding>
-          <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4"><div><h2 className="text-sm font-semibold text-[var(--text-primary)]">Needs attention</h2><p className="mt-0.5 text-xs text-[var(--text-muted)]">Prioritised outreach work</p></div><Link href="/dashboard/lifecycle" className="text-xs font-medium text-[var(--primary)] hover:underline">View lifecycle</Link></div>
+          <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4"><div><h2 className="text-sm font-semibold text-[var(--text-primary)]">Needs attention</h2><p className="mt-0.5 text-xs text-[var(--text-muted)]">Prioritised outreach work</p></div><Link href="/dashboard/leads" className="text-xs font-medium text-[var(--primary)] hover:underline">View leads</Link></div>
           <div className="divide-y divide-[var(--border-subtle)]">
             {actionItems.map(({ label, value, detail, href, icon: Icon, tone }) => <Link key={label} href={href} className="group flex items-center gap-3 px-5 py-3.5 hover:bg-[var(--surface-hover)]"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ color: tone, background: `color-mix(in srgb, ${tone} 10%, transparent)` }}><Icon size={17} /></span><span className="min-w-0 flex-1"><span className="block text-sm font-medium text-[var(--text-primary)]">{label}</span><span className="block truncate text-xs text-[var(--text-muted)]">{detail}</span></span><span className="text-lg font-semibold tabular-nums text-[var(--text-primary)]">{value.toLocaleString()}</span><ArrowRight size={15} className="text-[var(--text-muted)] group-hover:translate-x-0.5 group-hover:text-[var(--primary)]" /></Link>)}
           </div>
@@ -69,7 +67,7 @@ export default async function DashboardPage() {
       </div>
 
       <Card title="Last 7 days"><DailyActivity rows={analytics.dailyRows} /></Card>
-      {pendingDMCount > 0 && <div className="flex flex-col gap-3 rounded-xl border border-[var(--info-border)] bg-[var(--info-muted)] p-4 sm:flex-row sm:items-center"><MessageSquare size={19} className="shrink-0 text-[var(--info)]" /><div className="flex-1"><p className="text-sm font-medium text-[var(--text-primary)]">{pendingDMCount.toLocaleString()} direct messages are queued</p><p className="text-xs text-[var(--text-muted)]">Review the queue before taking action.</p></div><Link href="/dashboard/dm-queue" className="text-sm font-semibold text-[var(--info)]">Open DM Queue</Link></div>}
+      {pendingDMCount > 0 && <div className="flex flex-col gap-3 rounded-xl border border-[var(--info-border)] bg-[var(--info-muted)] p-4 sm:flex-row sm:items-center"><MessageSquare size={19} className="shrink-0 text-[var(--info)]" /><div className="flex-1"><p className="text-sm font-medium text-[var(--text-primary)]">{pendingDMCount.toLocaleString()} direct messages are ready for review</p><p className="text-xs text-[var(--text-muted)]">Review your outreach before taking action.</p></div><Link href="/dashboard/outreach" className="text-sm font-semibold text-[var(--info)]">Open Outreach</Link></div>}
     </div>
   </div>
 }
