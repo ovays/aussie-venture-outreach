@@ -1,16 +1,18 @@
 import { requireUser } from '@/lib/auth'
+import { redirect } from 'next/navigation'
+import { getWorkspaceContext } from '@/lib/workspace-context'
+import { ProvisionWorkspace } from '@/components/onboarding/ProvisionWorkspace'
 
 export default async function NoWorkspacePage() {
-  await requireUser()
+  const auth = await requireUser()
+  if (auth.profile.role === 'admin') redirect('/dashboard')
+  try { await getWorkspaceContext(auth); redirect('/onboarding') } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'No workspace membership') throw error
+  }
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-xl items-center px-6 py-16">
-      <div className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Workspace access required</h1>
-        <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
-          Your account is not currently connected to an active workspace. Ask a workspace owner to invite you, or contact support to continue setup.
-        </p>
-      </div>
+      <ProvisionWorkspace />
     </main>
   )
 }
