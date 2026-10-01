@@ -4,7 +4,7 @@ import { checkRateLimit } from '@/lib/rateLimit'
 import { ALL_STATUSES, STAGE_STATUSES, type LeadStage } from '@/lib/lead-status'
 import { STAGE_VALUES } from '@/lib/stage-import'
 import { createLead } from '@/lib/create-lead'
-import { isApiWorkspaceError, requireApiWorkspaceAdmin, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspacePlatformAdmin } from '@/lib/api-workspace'
 import { readInitialEmailMode } from '@/lib/initial-email-router'
 import { resolvePagination } from '@/lib/pagination'
 import { normalizeSearchTerm } from '@/lib/search'
@@ -17,7 +17,11 @@ import {
 const patchLeadSchema = z.object({
   id: z.string().uuid(),
   status: z.enum(ALL_STATUSES).optional(),
-}).catchall(z.unknown())
+  email: z.string().email().nullable().optional(),
+  notes: z.string().max(5000).nullable().optional(),
+  content_created: z.boolean().optional(),
+  payment_received: z.boolean().optional(),
+}).strict()
 
 const createLeadSchema = z.object({
   business_name: z.string().min(1),
@@ -60,7 +64,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { allowed } = checkRateLimit(`leads:${ip}`, 60)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
-  const access = await requireApiWorkspaceAdmin()
+  const access = await requireApiWorkspacePlatformAdmin()
   if (isApiWorkspaceError(access)) return access
   const { supabase, workspace } = access
   const initialEmailMode = await readInitialEmailMode(supabase)
@@ -102,7 +106,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { allowed } = checkRateLimit(`leads:${ip}`, 60)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
-  const access = await requireApiWorkspaceUser()
+  // Raw operational lead edits are internal-only. Customer-safe notes/outcomes
+  // use /api/customer-leads/[id] with a narrower DTO.
+  const access = await requireApiWorkspacePlatformAdmin()
   if (isApiWorkspaceError(access)) return access
   const { supabase, workspace } = access
   const { searchParams } = new URL(request.url)
@@ -160,7 +166,9 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { allowed } = checkRateLimit(`leads:${ip}`, 60)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
 
-  const access = await requireApiWorkspaceUser()
+  // The raw lead list is an internal operational surface. Customers use the
+  // sanitized /api/customer-leads projection.
+  const access = await requireApiWorkspacePlatformAdmin()
   if (isApiWorkspaceError(access)) return access
   const { supabase, workspace } = access
   const raw = await request.json()

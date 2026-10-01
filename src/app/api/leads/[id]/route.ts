@@ -1,21 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { deleteLeads, LeadIdsValidationError, normalizeLeadIds } from '@/lib/delete-leads'
-import { isApiWorkspaceError, requireApiWorkspaceAdmin, requireApiWorkspaceUser } from '@/lib/api-workspace'
+import { isApiWorkspaceError, requireApiWorkspaceAdmin, requireApiWorkspacePlatformAdmin } from '@/lib/api-workspace'
 import { ALL_STATUSES } from '@/lib/lead-status'
 import { z } from 'zod'
 
 const patchLeadSchema = z.object({
   status: z.enum(ALL_STATUSES).optional(),
-}).catchall(z.unknown())
+}).strict()
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspacePlatformAdmin()
   if (isApiWorkspaceError(access)) return access
   const { id } = await params
-  const { supabase } = access
+  const { supabase, workspace } = access
 
   const [
     { data: lead, error },
@@ -66,10 +66,10 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const access = await requireApiWorkspaceUser()
+  const access = await requireApiWorkspacePlatformAdmin()
   if (isApiWorkspaceError(access)) return access
   const { id } = await params
-  const { supabase } = access
+  const { supabase, workspace } = access
   const parsed = patchLeadSchema.safeParse(await request.json())
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid request body', issues: parsed.error.issues }, { status: 400 })
@@ -79,6 +79,7 @@ export async function PATCH(
   const { data, error } = await supabase
     .from('leads')
     .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('workspace_id', workspace.workspaceId)
     .eq('id', id)
     .select()
     .single()
@@ -86,8 +87,8 @@ export async function PATCH(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   if (updates.status === 'closed_manual') {
-    await supabase.from('dm_queue').update({ status: 'skipped' }).eq('lead_id', id).eq('status', 'pending')
-    await supabase.from('follow_ups').update({ status: 'cancelled' }).eq('lead_id', id).eq('status', 'scheduled')
+    await supabase.from('dm_queue').update({ status: 'skipped' }).eq('workspace_id', workspace.workspaceId).eq('lead_id', id).eq('status', 'pending')
+    await supabase.from('follow_ups').update({ status: 'cancelled' }).eq('workspace_id', workspace.workspaceId).eq('lead_id', id).eq('status', 'scheduled')
   }
 
   return NextResponse.json({ data })

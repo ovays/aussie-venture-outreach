@@ -1291,6 +1291,7 @@ export type Database = {
           city: string
           content_created: boolean | null
           content_type: string | null
+          customer_outcome: string | null
           created_at: string | null
           deal_type: string | null
           deal_value: number | null
@@ -1331,6 +1332,7 @@ export type Database = {
           city: string
           content_created?: boolean | null
           content_type?: string | null
+          customer_outcome?: string | null
           created_at?: string | null
           deal_type?: string | null
           deal_value?: number | null
@@ -1371,6 +1373,7 @@ export type Database = {
           city?: string
           content_created?: boolean | null
           content_type?: string | null
+          customer_outcome?: string | null
           created_at?: string | null
           deal_type?: string | null
           deal_value?: number | null
