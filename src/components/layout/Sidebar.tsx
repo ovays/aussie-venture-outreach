@@ -6,6 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, LogOut, Shield, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { UserRole } from '@/lib/auth-types'
+import type { WorkspaceRole } from '@/lib/access-policy'
+import { workspaceRoleLabel } from '@/lib/workspace-display'
 import { Avatar } from '@/components/ui/Avatar'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { useSidebar } from './SidebarContext'
@@ -35,9 +37,10 @@ interface SidebarProps {
   userName?: string | null
   userEmail?: string | null
   workspaceName: string
+  workspaceRole: WorkspaceRole | null
 }
 
-export default function Sidebar({ role, userName, userEmail, workspaceName }: SidebarProps) {
+export default function Sidebar({ role, userName, userEmail, workspaceName, workspaceRole }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const { open, collapsed, close, toggleCollapsed } = useSidebar()
@@ -147,7 +150,7 @@ export default function Sidebar({ role, userName, userEmail, workspaceName }: Si
         <div className={`border-t border-white/10 py-3 ${isCompact ? 'px-2' : 'px-3'}`}>
           <div className={`flex items-center rounded-xl ${isCompact ? 'justify-center p-1' : 'gap-3 px-2 py-2'}`}>
             <Avatar name={userName} email={userEmail} size="sm" />
-            {!isCompact && <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-slate-100">{userName || userEmail || 'Account'}</p><p className="truncate text-[10px] capitalize text-slate-500">{role === 'admin' ? 'Platform admin' : 'Workspace member'}</p></div>}
+            {!isCompact && <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-slate-100">{userName || userEmail || 'Account'}</p><p className="truncate text-[10px] text-slate-500">{role === 'admin' ? 'Platform admin' : workspaceRole ? workspaceRoleLabel(workspaceRole) : 'Workspace Member'}</p></div>}
             <button type="button" onClick={handleSignOut} title="Sign out" aria-label="Sign out" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-red-500/10 hover:text-red-300"><LogOut size={15} /></button>
           </div>
         </div>

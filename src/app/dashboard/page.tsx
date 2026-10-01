@@ -11,13 +11,17 @@ import { logAnalyticsMetrics } from '@/lib/analytics'
 import { getDashboardSummary } from '@/lib/dashboard-summary'
 import { buildStageCounts } from '@/lib/lead-status'
 import { requireWorkspacePage } from '@/lib/page-access'
+import { getWorkspaceStatusDisplay } from '@/lib/workspace-display-server'
 
 export const revalidate = 60
 
 export default async function DashboardPage() {
   const { workspace } = await requireWorkspacePage()
   const supabase = await createClient()
-  const { analytics, statusMap, recentActivity, pendingDMCount, dealsRolling30DayCount, hotLeads } = await getDashboardSummary(supabase, workspace.workspaceId)
+  const [{ analytics, statusMap, recentActivity, pendingDMCount, dealsRolling30DayCount, hotLeads }, workspaceStatus] = await Promise.all([
+    getDashboardSummary(supabase, workspace.workspaceId),
+    getWorkspaceStatusDisplay(workspace.workspaceId),
+  ])
   logAnalyticsMetrics('[DASHBOARD_METRICS]', { range: analytics.todayEmailStats.range, totalEmails: analytics.todayEmailStats.totalSent, followups: analytics.followupStats.sentToday, replies: analytics.replyStats.repliesToday })
   const stageCounts = buildStageCounts(statusMap)
   const totalLeads = Object.values(statusMap).reduce((sum, count) => sum + count, 0)
@@ -32,7 +36,7 @@ export default async function DashboardPage() {
     <TopBar title="Dashboard" />
     <div className="page-content page-stack">
       <section aria-labelledby="overview-heading">
-        <div className="mb-3 flex items-end justify-between"><div><h2 id="overview-heading" className="text-base font-semibold text-[var(--text-primary)]">Workspace overview</h2><p className="mt-0.5 text-sm text-[var(--text-muted)]">Today&apos;s performance at a glance</p></div><span className="hidden items-center gap-2 text-xs text-[var(--text-muted)] sm:flex"><span className="h-2 w-2 rounded-full bg-[var(--success)]" />Live · Sydney</span></div>
+        <div className="mb-3 flex items-end justify-between"><div><h2 id="overview-heading" className="text-base font-semibold text-[var(--text-primary)]">Workspace overview</h2><p className="mt-0.5 text-sm text-[var(--text-muted)]">Today&apos;s performance at a glance</p></div><span className="hidden items-center gap-2 text-xs text-[var(--text-muted)] sm:flex"><span className={`h-2 w-2 rounded-full ${workspaceStatus.label === 'Live' ? 'bg-[var(--success)]' : 'bg-[var(--warning)]'}`} />{workspaceStatus.label}{workspaceStatus.city ? ` · ${workspaceStatus.city}` : ''}</span></div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <StatsCard label="Total leads" value={totalLeads} sub={`${stageCounts.contacted} contacted`} icon={<Users size={19} />} />
           <StatsCard label="Emails sent today" value={analytics.todayEmailStats.totalSent} sub={`${analytics.followupStats.sentToday} follow-ups`} icon={<Mail size={19} />} tone="accent" />

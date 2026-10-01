@@ -9,14 +9,17 @@ import { getOnboardingState } from '@/lib/onboarding-server'
 import { onboardingDestination } from '@/lib/onboarding'
 import { requireWorkspacePage } from '@/lib/page-access'
 import { requireUser } from '@/lib/auth'
+import type { WorkspaceRole } from '@/lib/access-policy'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const auth = await requireUser()
   const isPlatformAdmin = auth.profile.role === 'admin'
   let workspaceName = 'Internal administration'
+  let workspaceRole: WorkspaceRole | null = null
 
   if (!isPlatformAdmin) {
     const { workspace } = await requireWorkspacePage()
+    workspaceRole = workspace.role
     const onboarding = await getOnboardingState(workspace.workspaceId)
     const destination = onboardingDestination('dashboard', onboarding.status)
     if (destination) redirect(destination)
@@ -37,6 +40,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             userName={auth.profile.full_name}
             userEmail={auth.user.email}
             workspaceName={workspaceName}
+            workspaceRole={workspaceRole}
           />
           <main className="min-w-0 flex-1 overflow-y-auto" id="main-content">
             {isPlatformAdmin && <HealthBanner />}
