@@ -37,6 +37,8 @@ export function WorkspaceProfileSettings({ initialState, timezones, canEdit }: P
             website: state.website,
             industry: state.industry,
             country: state.country,
+            primaryCity: state.primaryCity,
+            contactEmail: state.contactEmail,
             timezone: state.timezone,
           },
           profile: {
@@ -64,6 +66,8 @@ export function WorkspaceProfileSettings({ initialState, timezones, canEdit }: P
       <div className="sm:col-span-2"><Input label="Website URL (optional)" type="url" maxLength={300} placeholder="https://example.com" value={state.website} onChange={(e) => setState({ ...state, website: e.target.value })} /></div>
       <Select label="Industry" required placeholder="Select an industry" options={[...INDUSTRY_OPTIONS]} value={state.industry} onChange={(e) => setState({ ...state, industry: e.target.value })} />
       <Select label="Country" required options={[...COUNTRY_OPTIONS]} value={state.country} onChange={(e) => setState({ ...state, country: e.target.value })} />
+      <Input label="Primary city" maxLength={120} value={state.primaryCity} onChange={(e) => setState({ ...state, primaryCity: e.target.value })} />
+      <Input label="Contact email" type="email" value={state.contactEmail} onChange={(e) => setState({ ...state, contactEmail: e.target.value })} />
       <div className="sm:col-span-2"><Select label="Timezone" required options={timezones} value={state.timezone} onChange={(e) => setState({ ...state, timezone: e.target.value })} /></div>
       <Input label="Sender / display name" required maxLength={120} value={state.senderName} onChange={(e) => setState({ ...state, senderName: e.target.value })} />
       <Input label="Brand name used in outreach" required maxLength={120} value={state.brandName} onChange={(e) => setState({ ...state, brandName: e.target.value })} />

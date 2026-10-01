@@ -46,6 +46,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     [ONBOARDING_SETTING_KEYS.website]: workspaceData.website,
     [ONBOARDING_SETTING_KEYS.industry]: workspaceData.industry,
     [ONBOARDING_SETTING_KEYS.country]: workspaceData.country,
+    [ONBOARDING_SETTING_KEYS.primaryCity]: workspaceData.primaryCity ?? '',
+    [ONBOARDING_SETTING_KEYS.contactEmail]: workspaceData.contactEmail ?? '',
     [ONBOARDING_SETTING_KEYS.timezone]: workspaceData.timezone,
     [ONBOARDING_SETTING_KEYS.senderName]: profile.senderName,
     [ONBOARDING_SETTING_KEYS.brandName]: profile.brandName,

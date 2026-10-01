@@ -17,6 +17,9 @@ import { MailboxSettings } from '@/components/settings/MailboxSettings'
 import { UsageLimits } from '@/components/settings/UsageLimits'
 import { BillingSettings } from '@/components/settings/BillingSettings'
 import Link from 'next/link'
+import { getCustomerOutreach } from '@/lib/customer-outreach'
+import { CustomerOutreachSettings } from '@/components/outreach/CustomerOutreachSettings'
+import { TeamSettings } from '@/components/settings/TeamSettings'
 
 export const revalidate = 0
 
@@ -57,6 +60,7 @@ export default async function SettingsPage() {
   const canManageWorkspace = workspace.isPlatformAdmin || workspace.role === 'owner' || workspace.role === 'admin'
 
   if (!workspace.isPlatformAdmin) {
+    const customerOutreach = await getCustomerOutreach(workspace.workspaceId, canManageWorkspace)
     return (
       <div>
         <TopBar title="Settings" />
@@ -77,26 +81,10 @@ export default async function SettingsPage() {
             />
           </Card>
           <Card><div id="mailbox" className="scroll-mt-28"><MailboxSettings /></div></Card>
-          <Card>
-            <section id="personalisation" className="scroll-mt-28">
-              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Personalisation</h2>
-              <p className="mt-2 text-sm text-[var(--text-secondary)]">Customer-friendly message and personalisation controls are coming in the next phase.</p>
-            </section>
-          </Card>
-          <Card>
-            <section id="team" className="scroll-mt-28">
-              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Team</h2>
-              <p className="mt-2 text-sm text-[var(--text-secondary)]">Workspace member management is coming in a later phase.</p>
-            </section>
-          </Card>
+          <CustomerOutreachSettings initialData={customerOutreach} compact />
+          <Card><TeamSettings initialTeam={onboardingState.team} canEdit={canManageWorkspace} /></Card>
           <Card><div id="usage" className="scroll-mt-28"><UsageLimits /></div></Card>
-          <Card>
-            <section id="outreach" className="scroll-mt-28">
-              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Outreach</h2>
-              <p className="mt-2 text-sm text-[var(--text-secondary)]">Targeting and schedule controls will be managed from the Outreach page.</p>
-              <Link href="/dashboard/outreach" className="mt-3 inline-flex text-sm font-medium text-[var(--primary)] hover:underline">Open Outreach</Link>
-            </section>
-          </Card>
+          <Card><p className="text-sm text-[var(--text-secondary)]">Category and location targeting is managed from Outreach.</p><Link href="/dashboard/outreach" className="mt-3 inline-flex text-sm font-medium text-[var(--primary)] hover:underline">Open Outreach</Link></Card>
         </div>
       </div>
     )

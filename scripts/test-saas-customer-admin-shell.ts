@@ -99,7 +99,17 @@ const settingsPage = source('src/app/dashboard/settings/page.tsx')
 assert.ok(settingsPage.indexOf('if (!workspace.isPlatformAdmin)') < settingsPage.indexOf('<BillingSettings'), 'billing UI remains behind the platform-admin branch')
 assert.doesNotMatch(navigation, /label: 'Billing'/, 'Billing is absent from customer navigation')
 
-const scopedDetails = ['src/app/api/leads/[id]/route.ts', 'src/app/api/emails/[id]/route.ts']
+const rawLeadDetail = source('src/app/api/leads/[id]/route.ts')
+assert.match(rawLeadDetail, /export async function GET[\s\S]*?requireApiWorkspacePlatformAdmin\(\)/, 'raw lead-detail GET remains platform-admin only')
+assert.match(rawLeadDetail, /export async function PATCH[\s\S]*?requireApiWorkspacePlatformAdmin\(\)/, 'raw lead-detail PATCH remains platform-admin only')
+assert.doesNotMatch(rawLeadDetail, /requireApiWorkspaceUser/, 'raw lead-detail does not admit ordinary workspace users')
+assert.doesNotMatch(rawLeadDetail, /createClient\(/, 'raw lead-detail cannot bypass explicit workspace scoping')
+
+const customerLeadDetail = source('src/app/api/customer-leads/[id]/route.ts')
+assert.match(customerLeadDetail, /requireApiWorkspaceUser/, 'customer-safe lead detail authenticates workspace users')
+assert.doesNotMatch(customerLeadDetail, /createClient\(/, 'customer-safe lead detail cannot bypass explicit workspace scoping')
+
+const scopedDetails = ['src/app/api/emails/[id]/route.ts']
 for (const route of scopedDetails) {
   const text = source(route)
   assert.match(text, /requireApiWorkspaceUser/, `${route} authenticates reads`)
