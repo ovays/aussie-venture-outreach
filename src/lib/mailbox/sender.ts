@@ -9,6 +9,8 @@ import { assertOutreachSendEnabled } from '@/lib/side-effect-safety'
 import { assertCanaryProviderBoundary, isV2CanaryEnabled } from '@/lib/v2-canary-safety'
 import { requireWorkspaceIdForServiceClient } from '@/lib/supabase/workspace-service'
 import { consumeOutboundEmailQuota } from '@/lib/quota/gate'
+import { addComplianceFooter, assertCompleteSenderIdentity, getWorkspaceSenderIdentity, messageIdForMailbox } from '@/lib/sender-identity'
+import { ensureUnsubscribeToken } from '@/lib/suppression'
 
 function validateSendEnvelope(request: MailboxSendRequest): void {
   const headers: Array<[string, string]> = [
@@ -32,11 +34,24 @@ export async function sendThroughWorkspaceMailbox(supabase: SupabaseClient<Datab
   assertCanaryProviderBoundary({ leadId: request.leadId, phase: request.phase })
   try {
     const workspaceId = requireWorkspaceIdForServiceClient(supabase)
+    const identity = await getWorkspaceSenderIdentity(supabase)
+    assertCompleteSenderIdentity(identity)
+    const connections = await listMailboxConnections(supabase)
+    const selected = connections.find((row) => row.is_default_sender && row.status === 'connected' && row.capabilities.canSend)
+    const isAussieVentureWorkspace = workspaceId === process.env.HOSTINGER_WORKSPACE_ID || workspaceId === process.env.RESEND_INBOUND_WORKSPACE_ID
+    if (!selected && !isAussieVentureWorkspace) {
+      throw new MailboxProviderError('DELIVERY_REJECTED', 'A connected workspace sending mailbox is required')
+    }
+    if (!isAussieVentureWorkspace && /\b(?:Aussie Venture|Owais|aussieventure\.com)\b/i.test(`${request.subject}\n${request.text}\n${request.html}`)) {
+      throw new MailboxProviderError('DELIVERY_REJECTED', 'Outbound content contains an unconfigured sender identity')
+    }
+    const mailboxAddress = selected?.email_address ?? 'hello@aussieventure.com'
+    const authoritativeMessageId = messageIdForMailbox(request.emailIntentId, mailboxAddress)
     const claimed = await supabase.rpc('claim_outbound_email_for_send' as never, {
       p_workspace_id: workspaceId,
       p_email_id: request.emailIntentId,
       p_lead_id: request.leadId,
-      p_message_id: request.messageId,
+      p_message_id: authoritativeMessageId,
     } as never)
     if (claimed.error) throw new MailboxProviderError('UNKNOWN_PROVIDER_ERROR', 'Unable to verify outbound send authority')
     const authority = claimed.data as unknown as { claimed?: boolean; recipient?: string; reason?: string } | null
@@ -48,7 +63,11 @@ export async function sendThroughWorkspaceMailbox(supabase: SupabaseClient<Datab
       throw new MailboxProviderError('SEND_INTENT_CONFLICT', `Outbound send blocked: ${reason}`)
     }
 
-    const authoritativeRequest = { ...request, to: authority.recipient }
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.MAILBOX_OAUTH_REDIRECT_BASE_URL || '').replace(/\/$/, '')
+    if (!appUrl) throw new MailboxProviderError('DELIVERY_REJECTED', 'Unsubscribe URL is not configured')
+    const unsubscribeToken = await ensureUnsubscribeToken(supabase, request.leadId, authority.recipient)
+    const content = addComplianceFooter(request, identity, `${appUrl}/unsubscribe/${unsubscribeToken}`)
+    const authoritativeRequest = { ...request, ...content, to: authority.recipient, messageId: authoritativeMessageId, senderName: identity.senderName }
     try {
       validateSendEnvelope(authoritativeRequest)
       await consumeOutboundEmailQuota(workspaceId, request.emailIntentId)
@@ -57,7 +76,7 @@ export async function sendThroughWorkspaceMailbox(supabase: SupabaseClient<Datab
       // corrected content or entitlement/quota remediation can be retried.
       await supabase.from('emails').update({ status: 'pending_send', claimed_at: null })
         .eq('id', request.emailIntentId).eq('lead_id', request.leadId)
-        .eq('status', 'sending').eq('message_id', request.messageId)
+        .eq('status', 'sending').eq('message_id', authoritativeMessageId)
       throw error
     }
     // P16/P17 canary approval hashes and the dedicated canary credential are
@@ -65,8 +84,6 @@ export async function sendThroughWorkspaceMailbox(supabase: SupabaseClient<Datab
     // mailbox while canary mode is active.
     if (isV2CanaryEnabled()) return await getMailboxProvider('resend').send!(null, authoritativeRequest)
 
-    const connections = await listMailboxConnections(supabase)
-    const selected = connections.find((row) => row.is_default_sender && row.status === 'connected' && row.capabilities.canSend)
     if (!selected) return await getMailboxProvider('resend').send!(null, authoritativeRequest)
     const connection = await ensureFreshAccessToken(supabase, selected)
     return await getMailboxProvider(connection.provider).send!(connection, authoritativeRequest)

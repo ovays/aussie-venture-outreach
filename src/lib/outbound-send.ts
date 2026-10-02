@@ -74,8 +74,9 @@ export function outboundIdempotencyKey(emailId: string): string {
   return `reachagent-email-${emailId}`
 }
 
+/** Placeholder only; the final mailbox authority replaces its domain from the connected mailbox. */
 export function outboundMessageId(emailId: string): string {
-  return `<${emailId}@aussieventure.com>`
+  return `<${emailId}@pending.workspace>`
 }
 
 /**

@@ -27,8 +27,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const report = listResult.data && typeof listResult.data === 'object'
     ? listResult.data as { data?: unknown; total?: unknown; summary?: unknown }
     : {}
+  const metadataRows = (Array.isArray(report.data) ? report.data : []).map((raw) => {
+    const row = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+    return { id: row.id, type: row.type, status: row.status, sent_at: row.sent_at, replied_at: row.replied_at, created_at: row.created_at }
+  })
   return NextResponse.json({
-    data: Array.isArray(report.data) ? report.data : [],
+    data: metadataRows,
     total: Number(report.total ?? 0) || 0,
     page: pagination.page,
     page_size: pagination.pageSize,

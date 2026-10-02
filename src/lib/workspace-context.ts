@@ -8,6 +8,7 @@ export interface WorkspaceContext {
   workspaceId: string
   role: 'owner' | 'admin' | 'member'
   isPlatformAdmin: boolean
+  hasMembership: boolean
 }
 
 function isWorkspaceRole(role: string): role is WorkspaceContext['role'] {
@@ -39,7 +40,7 @@ export const getWorkspaceContext = cache(
     if (requestedWorkspaceId) {
       const membership = memberships?.find((row) => row.workspace_id === requestedWorkspaceId)
       if (membership && isWorkspaceRole(membership.role)) {
-        return { workspaceId: membership.workspace_id, role: membership.role, isPlatformAdmin }
+        return { workspaceId: membership.workspace_id, role: membership.role, isPlatformAdmin, hasMembership: true }
       }
       if (!isPlatformAdmin) throw new Error('Forbidden workspace')
 
@@ -52,7 +53,7 @@ export const getWorkspaceContext = cache(
       if (workspaceError) throw new Error(workspaceError.message)
       if (!workspace) throw new Error('Workspace not found')
 
-      return { workspaceId: workspace.id, role: 'admin', isPlatformAdmin: true }
+      return { workspaceId: workspace.id, role: 'admin', isPlatformAdmin: true, hasMembership: false }
     }
 
     const membership = memberships?.[0]
@@ -61,7 +62,7 @@ export const getWorkspaceContext = cache(
       throw new Error('No workspace membership')
     }
 
-    return { workspaceId: membership.workspace_id, role: membership.role, isPlatformAdmin }
+    return { workspaceId: membership.workspace_id, role: membership.role, isPlatformAdmin, hasMembership: true }
   }
 )
 

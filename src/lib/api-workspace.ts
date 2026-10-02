@@ -26,6 +26,14 @@ export async function requireApiWorkspaceUser(): Promise<ApiWorkspaceContext | N
   return finish(await requireApiUser())
 }
 
+/** Mailbox content requires real active membership; platform role is not a bypass. */
+export async function requireApiWorkspaceContentReader(): Promise<ApiWorkspaceContext | NextResponse> {
+  const context = await finish(await requireApiUser())
+  if (context instanceof NextResponse) return context
+  if (!context.workspace.hasMembership) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  return context
+}
+
 export async function requireApiWorkspaceAdmin(): Promise<ApiWorkspaceContext | NextResponse> {
   const context = await finish(await requireApiUser())
   if (context instanceof NextResponse) return context

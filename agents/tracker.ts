@@ -108,6 +108,7 @@ export interface NormalizedInboundMessage {
   headers: Record<string, string>
   receivedAt?: string
   receiptId?: string
+  bodyText?: string
 }
 
 export type InboundReplyOutcome =
@@ -324,7 +325,21 @@ export async function processInboundReply(
     return { outcome: 'unmatched' }
   }
 
-  await handleEmailReply(leadId, supabase, matchedEmail?.id, message.receivedAt, message.receiptId)
+  const receivedAt = message.receivedAt ?? new Date().toISOString()
+  const stored = await (supabase as any).from('customer_inbound_messages').upsert(workspaceRow(supabase, {
+    lead_id: leadId,
+    mailbox_connection_id: message.mailboxConnectionId ?? null,
+    provider: message.provider,
+    provider_message_key: message.providerMessageId,
+    from_address: normalizeInboundEmailAddress(message.from),
+    to_addresses: message.to ?? [],
+    subject: message.subject?.slice(0, 998) ?? null,
+    body_text: message.bodyText?.slice(0, 100_000) ?? null,
+    received_at: receivedAt,
+  }), { onConflict: 'workspace_id,provider,provider_message_key' })
+  if (stored.error) throw new Error(`Customer-safe inbound message could not be stored: ${stored.error.message}`)
+
+  await handleEmailReply(leadId, supabase, matchedEmail?.id, receivedAt, message.receiptId)
   return { outcome: 'processed', leadId, emailId: matchedEmail?.id }
 }
 

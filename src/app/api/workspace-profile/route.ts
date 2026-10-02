@@ -6,6 +6,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { ONBOARDING_SETTING_KEYS, profileStepSchema, workspaceStepSchema } from '@/lib/onboarding'
 import { getOnboardingState, upsertOnboardingSettings } from '@/lib/onboarding-server'
 import { checkRateLimit } from '@/lib/rateLimit'
+import { writeAuditEvent } from '@/lib/audit/write'
 
 const workspaceProfileSchema = z.object({
   workspace: workspaceStepSchema,
@@ -18,7 +19,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { allowed } = checkRateLimit(`workspace-profile:${auth.user.id}`, 30)
   if (!allowed) return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
   const workspace = await requireWorkspaceContext(auth)
-  if (!(workspace.isPlatformAdmin || workspace.role === 'owner' || workspace.role === 'admin')) {
+  if (!workspace.hasMembership || (workspace.role !== 'owner' && workspace.role !== 'admin')) {
     return NextResponse.json({ error: 'Workspace admin access is required' }, { status: 403 })
   }
 
@@ -48,12 +49,14 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     [ONBOARDING_SETTING_KEYS.country]: workspaceData.country,
     [ONBOARDING_SETTING_KEYS.primaryCity]: workspaceData.primaryCity ?? '',
     [ONBOARDING_SETTING_KEYS.contactEmail]: workspaceData.contactEmail ?? '',
+    [ONBOARDING_SETTING_KEYS.businessAddress]: workspaceData.businessAddress ?? '',
     [ONBOARDING_SETTING_KEYS.timezone]: workspaceData.timezone,
     [ONBOARDING_SETTING_KEYS.senderName]: profile.senderName,
     [ONBOARDING_SETTING_KEYS.brandName]: profile.brandName,
     [ONBOARDING_SETTING_KEYS.companyDescription]: profile.companyDescription,
     [ONBOARDING_SETTING_KEYS.primaryGoal]: profile.primaryGoal,
   })
+  await writeAuditEvent({ workspaceId: workspace.workspaceId, actorUserId: auth.user.id, actorRole: workspace.role, action: 'compliance.sender_identity_changed', targetType: 'workspace', targetId: workspace.workspaceId, metadata: {} })
 
   return NextResponse.json({ data: await getOnboardingState(workspace.workspaceId) })
 }

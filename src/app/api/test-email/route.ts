@@ -43,6 +43,9 @@ export async function POST(req: NextRequest) {
   try {
     const access = await requireApiWorkspaceAdmin()
     if (isApiWorkspaceError(access)) return access
+    if (access.workspace.workspaceId !== process.env.HOSTINGER_WORKSPACE_ID && access.workspace.workspaceId !== process.env.RESEND_INBOUND_WORKSPACE_ID) {
+      return NextResponse.json({ error: 'Test email is unavailable for this workspace' }, { status: 403 })
+    }
     const body = await req.json()
     const { action } = body
 

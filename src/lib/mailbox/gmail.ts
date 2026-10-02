@@ -11,7 +11,8 @@ function mimeHeader(value: string, field: string): string {
 }
 
 function mime(request: Parameters<NonNullable<MailboxProviderAdapter['send']>>[1], from: string): string {
-  const headers = [`From: ${mimeHeader(from, 'From')}`, `To: ${mimeHeader(request.to, 'To')}`, `Subject: ${mimeHeader(request.subject, 'Subject')}`, `Message-ID: ${mimeHeader(request.messageId, 'Message-ID')}`, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=UTF-8']
+  const sender = request.senderName ? `${request.senderName.replace(/[\r\n<>]/g, '')} <${from}>` : from
+  const headers = [`From: ${mimeHeader(sender, 'From')}`, `To: ${mimeHeader(request.to, 'To')}`, `Subject: ${mimeHeader(request.subject, 'Subject')}`, `Message-ID: ${mimeHeader(request.messageId, 'Message-ID')}`, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=UTF-8']
   if (request.references?.length) headers.push(`In-Reply-To: ${mimeHeader(request.references.at(-1)!, 'In-Reply-To')}`, `References: ${mimeHeader(request.references.join(' '), 'References')}`)
   return Buffer.from(`${headers.join('\r\n')}\r\n\r\n${request.html}`).toString('base64url')
 }

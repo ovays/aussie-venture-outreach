@@ -17,5 +17,5 @@ export async function GET(): Promise<NextResponse> {
   const context = await requireApiWorkspaceUser()
   if (isApiWorkspaceError(context)) return context
   const rows = (await listMailboxConnections(context.supabase)).map(publicMailboxConnection)
-  return NextResponse.json({ data: [...rows, ...environmentConnections(context.workspace.workspaceId)], can_manage: context.workspace.isPlatformAdmin || context.workspace.role === 'owner' || context.workspace.role === 'admin' })
+  return NextResponse.json({ data: [...rows, ...environmentConnections(context.workspace.workspaceId)], can_manage: context.workspace.hasMembership && (context.workspace.role === 'owner' || context.workspace.role === 'admin') })
 }

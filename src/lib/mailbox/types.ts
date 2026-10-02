@@ -48,6 +48,7 @@ export interface MailboxSendRequest {
   messageId: string
   emailIntentId: string
   phase: string
+  senderName?: string
 }
 
 export interface MailboxSendResult { id: string; messageId: string }
@@ -100,4 +101,3 @@ export const GMAIL_CAPABILITIES: MailboxCapabilities = { canSend: true, canReadI
 export const MICROSOFT_CAPABILITIES: MailboxCapabilities = { canSend: true, canReadInbox: true, canReadSent: true, canRefreshAuth: true, canReceiveWebhooks: false }
 export const HOSTINGER_CAPABILITIES: MailboxCapabilities = { canSend: false, canReadInbox: true, canReadSent: true, canRefreshAuth: false, canReceiveWebhooks: true }
 export const RESEND_CAPABILITIES: MailboxCapabilities = { canSend: true, canReadInbox: false, canReadSent: false, canRefreshAuth: false, canReceiveWebhooks: true }
-

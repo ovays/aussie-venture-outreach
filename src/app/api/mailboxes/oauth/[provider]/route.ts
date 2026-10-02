@@ -14,7 +14,7 @@ function oauthProvider(value: string): OAuthMailboxProvider | null { return valu
 export async function GET(_request: Request, { params }: { params: Promise<{ provider: string }> }): Promise<NextResponse> {
   const context = await requireApiWorkspaceUser()
   if (isApiWorkspaceError(context)) return context
-  if (!(context.workspace.isPlatformAdmin || context.workspace.role === 'owner' || context.workspace.role === 'admin')) return NextResponse.json({ error: 'Workspace admin access required' }, { status: 403 })
+  if (!context.workspace.hasMembership || (context.workspace.role !== 'owner' && context.workspace.role !== 'admin')) return NextResponse.json({ error: 'Workspace admin access required' }, { status: 403 })
   const provider = oauthProvider((await params).provider)
   if (!provider) return NextResponse.json({ error: 'Unsupported mailbox provider' }, { status: 404 })
   const pkce = createPkce()

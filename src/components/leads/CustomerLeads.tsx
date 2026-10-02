@@ -33,8 +33,9 @@ interface DetailResponse {
     notes: string | null; customer_outcome: 'interested' | 'not_interested' | null
     status: CustomerLeadStatus; last_contact_at: string | null
     latest_reply: { subject: string | null; replied_at: string | null } | null
+    suppression: { label: string; suppressed_at: string } | null
     activity: Array<{ id: string; text: string; created_at: string }>
-    capabilities: { edit_notes: boolean; edit_outcome: boolean }
+    capabilities: { edit_notes: boolean; edit_outcome: boolean; do_not_contact: boolean }
   }
   error?: string
 }
@@ -68,7 +69,7 @@ function LeadDetail({ id, onClose, onChanged }: { id: string; onClose: () => voi
   }, [id])
   useEffect(() => { void load() }, [load])
 
-  async function update(payload: { outcome?: 'interested' | 'not_interested' | null; notes?: string | null }) {
+  async function update(payload: { outcome?: 'interested' | 'not_interested' | null; notes?: string | null; do_not_contact?: true }) {
     setSaving(true); setError('')
     const response = await fetch(`/api/customer-leads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     const body = await response.json() as { error?: string }
@@ -105,6 +106,7 @@ function LeadDetail({ id, onClose, onChanged }: { id: string; onClose: () => voi
             {detail.customer_outcome && <Button size="sm" variant="ghost" onClick={() => update({ outcome: null })} disabled={saving}>Clear outcome</Button>}
           </div> : <p className="text-sm text-[var(--text-muted)]">Workspace owners and admins manage outcomes.</p>}
         </section>
+        <section><h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Sending safety</h3>{detail.suppression?<p className="text-sm font-medium text-rose-300">{detail.suppression.label} · future outreach is blocked</p>:detail.capabilities.do_not_contact?<Button size="sm" variant="secondary" onClick={() => { if(confirm('Stop all future outreach to this email address?')) void update({do_not_contact:true}) }} disabled={saving}>Do not contact</Button>:<p className="text-sm text-[var(--text-muted)]">No sending restriction is recorded.</p>}</section>
         <section><h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Notes</h3>
           <textarea value={notes} onChange={(event) => setNotes(event.target.value)} disabled={!detail.capabilities.edit_notes} maxLength={5000} rows={5} placeholder="Add context for your team…" className="w-full resize-y rounded-lg border border-[var(--border-subtle)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary)]" />
           {detail.capabilities.edit_notes && <Button size="sm" className="mt-2" onClick={() => update({ notes })} disabled={saving}>{saving ? 'Saving…' : 'Save notes'}</Button>}

@@ -6,6 +6,7 @@ import { mailboxOAuthCookieName, matchesMailboxOAuthStateCookie, verifyMailboxOA
 import { getMailboxProvider } from '@/lib/mailbox/registry'
 import { upsertOAuthMailbox } from '@/lib/mailbox/connections'
 import { oauthRedirectUri, type OAuthMailboxProvider } from '@/lib/mailbox/oauth-config'
+import { writeAuditEvent } from '@/lib/audit/write'
 
 function redirect(request: NextRequest, provider: OAuthMailboxProvider, result: 'connected' | 'error'): NextResponse {
   const response = NextResponse.redirect(new URL(`/dashboard/settings?mailbox=${result}#mailboxes`, oauthRedirectUri(provider)))
@@ -33,11 +34,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const state = verifyMailboxOAuthState(rawState, provider)
     if (state.userId !== auth.user.id) return redirect(request, provider, 'error')
     const workspace = await requireWorkspaceContext(auth, state.workspaceId)
-    if (!(workspace.isPlatformAdmin || workspace.role === 'owner' || workspace.role === 'admin')) return redirect(request, provider, 'error')
+    if (!workspace.hasMembership || (workspace.role !== 'owner' && workspace.role !== 'admin')) return redirect(request, provider, 'error')
     const adapter = getMailboxProvider(provider)
     const tokens = await adapter.exchangeAuthorizationCode!({ code, codeVerifier: state.codeVerifier })
     const identity = await adapter.verifyIdentity!(tokens.accessToken)
     await upsertOAuthMailbox(createWorkspaceServiceClient(workspace.workspaceId), { workspaceId: workspace.workspaceId, userId: auth.user.id, provider, identity, tokens })
+    await writeAuditEvent({ workspaceId: workspace.workspaceId, actorUserId: auth.user.id, actorRole: workspace.role, action: 'mailbox.connected', targetType: 'mailbox_connection', metadata: { provider } })
     return redirect(request, provider, 'connected')
   } catch { return redirect(request, provider, 'error') }
 }
