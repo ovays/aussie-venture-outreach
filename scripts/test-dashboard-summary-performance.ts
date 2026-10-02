@@ -35,7 +35,7 @@ for (const index of [
   assert(migration.includes(index), `dashboard hot path requires ${index}`)
 }
 
-assert.match(page, /requireWorkspaceContext\(auth\)/)
+assert.match(page, /requireWorkspacePage\(\)/)
 assert.match(page, /getDashboardSummary\(supabase, workspace\.workspaceId\)/)
 
 const asOf = new Date('2026-09-26T04:00:00.000Z')

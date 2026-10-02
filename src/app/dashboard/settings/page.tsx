@@ -60,7 +60,7 @@ export default async function SettingsPage() {
   const canManageWorkspace = workspace.isPlatformAdmin || workspace.role === 'owner' || workspace.role === 'admin'
 
   if (!workspace.isPlatformAdmin) {
-    const customerOutreach = await getCustomerOutreach(workspace.workspaceId, canManageWorkspace)
+    const customerOutreach = await getCustomerOutreach(workspace.workspaceId, canManageWorkspace, onboardingState)
     return (
       <div>
         <TopBar title="Settings" />

@@ -1,7 +1,8 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
-import { toSupabaseRange, type Pagination } from '@/lib/pagination'
+import type { Pagination } from '@/lib/pagination'
+import { requireWorkspaceIdForServiceClient } from '@/lib/supabase/workspace-service'
 
 type Db = SupabaseClient<Database>
 type UnsafeDb = SupabaseClient<any>
@@ -10,36 +11,15 @@ export const CUSTOMER_INBOX_PAGE_SIZE = 25
 export const CUSTOMER_INBOX_MESSAGE_LIMIT = 50
 
 export async function listCustomerConversations(db: Db, pagination: Pagination) {
-  const { from, to } = toSupabaseRange(pagination)
-  const result = await db.from('leads').select(
-    'id,business_name,email,status,customer_outcome,outreach_suppression_reason,outreach_suppressed_at,emails!inner(id,subject,sent_at,replied_at,created_at)',
-    { count: 'exact' },
-  ).not('emails.sent_at', 'is', null)
-    .order('updated_at', { ascending: false }).range(from, to)
+  const result = await db.rpc('get_customer_inbox_page' as never, {
+    p_workspace_id: requireWorkspaceIdForServiceClient(db),
+    p_page: pagination.page,
+    p_page_size: Math.min(pagination.pageSize, CUSTOMER_INBOX_PAGE_SIZE),
+  } as never) as unknown as { data: unknown; error: { message: string } | null }
   if (result.error) throw new Error(result.error.message)
-
-  const leadIds = (result.data ?? []).map((row) => row.id)
-  const inbound = leadIds.length ? await (db as UnsafeDb).from('customer_inbound_messages')
-    .select('lead_id,received_at').in('lead_id', leadIds).order('received_at', { ascending: false }) : { data: [], error: null }
-  if (inbound.error) throw new Error(inbound.error.message)
-  const latestInbound = new Map<string, string>()
-  for (const row of inbound.data ?? []) if (!latestInbound.has(row.lead_id)) latestInbound.set(row.lead_id, row.received_at)
-
-  return {
-    data: (result.data ?? []).map((lead) => {
-      const emails = Array.isArray(lead.emails) ? lead.emails : []
-      const latest = [...emails].sort((a, b) => String(b.sent_at ?? b.created_at).localeCompare(String(a.sent_at ?? a.created_at)))[0]
-      const replyAt = latestInbound.get(lead.id) ?? emails.map((email) => email.replied_at).filter(Boolean).sort().at(-1) ?? null
-      const lastAt = [latest?.sent_at, replyAt].filter(Boolean).sort().at(-1) ?? null
-      return {
-        id: lead.id, business_name: lead.business_name, email: lead.email,
-        subject: latest?.subject ?? null, last_message_at: lastAt,
-        state: replyAt ? 'replied' : 'sent', outcome: lead.customer_outcome,
-        suppression: lead.outreach_suppressed_at ? 'suppressed' : null,
-      }
-    }),
-    total: result.count ?? 0, page: pagination.page, page_size: pagination.pageSize,
-  }
+  return result.data && typeof result.data === 'object' && !Array.isArray(result.data)
+    ? result.data
+    : { data: [], total: 0, page: pagination.page, page_size: pagination.pageSize }
 }
 
 export async function getCustomerConversation(db: Db, leadId: string) {

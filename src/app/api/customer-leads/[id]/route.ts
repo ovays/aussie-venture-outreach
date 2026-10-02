@@ -49,7 +49,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     .sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at)))[0]?.sent_at
   const followupsSent = ['follow_up_1', 'follow_up_2', 'follow_up_3'].every((type) =>
     (emails ?? []).some((email) => email.type === type && email.sent_at))
-  const reactivationDelay = Number.parseInt(settingMap.get('reactivation_delay_days') ?? '60', 10)
+  const reactivationDelay = Number.parseInt(settingMap.get('reactivation_delay_days') ?? '90', 10)
   const reactivationDue = lead.status === 'contacted' && settingMap.get('reactivation_enabled') === 'true'
     && followupsSent && Boolean(initialSentAt)
     && Date.parse(initialSentAt ?? '') + reactivationDelay * 86_400_000 <= Date.now()
